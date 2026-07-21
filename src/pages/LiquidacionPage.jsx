@@ -10,6 +10,16 @@ export default function LiquidacionPage() {
   const [periodoSeleccionado, setPeriodoSeleccionado] = useState('')
   const [personalPorId, setPersonalPorId] = useState(new Map())
 
+  // Un usuario Superadmin no tiene una empresa fija asignada (`empresa` es
+  // null): esta página necesita saber sobre qué empresa operar para poder
+  // crear/listar períodos, así que le ofrecemos elegir una acá mismo. Es
+  // un selector local a esta página, no reemplaza al pendiente arreglo de
+  // fondo de RLS/superadmin en las tablas nom_* (decisión ya tomada de
+  // dejarlo para más adelante).
+  const [empresasDisponibles, setEmpresasDisponibles] = useState([])
+  const [empresaElegidaId, setEmpresaElegidaId] = useState('')
+  const empresaId = empresa?.id || empresaElegidaId || ''
+
   const [mostrarFormNuevo, setMostrarFormNuevo] = useState(false)
   const [nuevoTipo, setNuevoTipo] = useState('mensual')
   const [nuevoDesde, setNuevoDesde] = useState('')
@@ -17,18 +27,25 @@ export default function LiquidacionPage() {
   const [creandoPeriodo, setCreandoPeriodo] = useState(false)
   const [errorCrearPeriodo, setErrorCrearPeriodo] = useState('')
 
+  useEffect(() => {
+    if (empresa?.id) return // ya tiene una empresa fija, no hace falta elegir
+    supabase.from('empresas').select('id, nombre').order('nombre')
+      .then(({ data }) => setEmpresasDisponibles(data || []))
+  }, [empresa?.id])
+
   const cargarPeriodos = () => {
-    if (!empresa?.id) return
-    supabase.from('nom_periodos').select('*').eq('empresa_id', empresa.id).order('fecha_desde', { ascending: false })
+    if (!empresaId) return
+    supabase.from('nom_periodos').select('*').eq('empresa_id', empresaId).order('fecha_desde', { ascending: false })
       .then(({ data }) => setPeriodos(data || []))
   }
 
   useEffect(() => {
     cargarPeriodos()
-    if (!empresa?.id) return
+    setPeriodoSeleccionado('')
+    if (!empresaId) return
     supabase.from('nom_v_personal').select('id, nombre')
       .then(({ data }) => setPersonalPorId(new Map((data || []).map((p) => [p.id, p.nombre]))))
-  }, [empresa?.id])
+  }, [empresaId])
 
   const handleCalcular = async () => {
     if (!periodoSeleccionado) return
@@ -38,6 +55,10 @@ export default function LiquidacionPage() {
 
   const handleCrearPeriodo = async () => {
     setErrorCrearPeriodo('')
+    if (!empresaId) {
+      setErrorCrearPeriodo('Elegí primero una empresa.')
+      return
+    }
     if (!nuevoDesde || !nuevoHasta) {
       setErrorCrearPeriodo('Completá fecha desde y hasta.')
       return
@@ -48,7 +69,7 @@ export default function LiquidacionPage() {
     }
     setCreandoPeriodo(true)
     const { data, error } = await supabase.from('nom_periodos').insert({
-      empresa_id: empresa.id,
+      empresa_id: empresaId,
       tipo: nuevoTipo,
       fecha_desde: nuevoDesde,
       fecha_hasta: nuevoHasta,
@@ -70,8 +91,20 @@ export default function LiquidacionPage() {
         <p className="page-subtitle">Calcular y revisar liquidaciones por período</p>
       </div>
 
+      {!empresa?.id && (
+        <div className="card" style={{ marginBottom: '1rem', display: 'flex', gap: 12, alignItems: 'center' }}>
+          <label style={{ fontSize: '0.85rem' }}>Empresa:</label>
+          <select className="input" value={empresaElegidaId} onChange={(e) => setEmpresaElegidaId(e.target.value)} style={{ maxWidth: 320 }}>
+            <option value="">Elegir empresa…</option>
+            {empresasDisponibles.map((e) => (
+              <option key={e.id} value={e.id}>{e.nombre}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
       <div className="card" style={{ marginBottom: '1rem', display: 'flex', gap: 12, alignItems: 'center' }}>
-        <select className="input" value={periodoSeleccionado} onChange={(e) => setPeriodoSeleccionado(e.target.value)} style={{ maxWidth: 320 }}>
+        <select className="input" value={periodoSeleccionado} onChange={(e) => setPeriodoSeleccionado(e.target.value)} disabled={!empresaId} style={{ maxWidth: 320 }}>
           <option value="">Elegir período…</option>
           {periodos.map((p) => (
             <option key={p.id} value={p.id}>{p.tipo} — {p.fecha_desde} a {p.fecha_hasta} ({p.estado})</option>
@@ -80,7 +113,7 @@ export default function LiquidacionPage() {
         <button className="btn btn-primary btn-sm" onClick={handleCalcular} disabled={!periodoSeleccionado || calculando}>
           {calculando ? 'Calculando…' : 'Calcular'}
         </button>
-        <button className="btn btn-ghost btn-sm" onClick={() => setMostrarFormNuevo((v) => !v)}>
+        <button className="btn btn-ghost btn-sm" onClick={() => setMostrarFormNuevo((v) => !v)} disabled={!empresaId}>
           {mostrarFormNuevo ? 'Cancelar' : 'Nuevo período'}
         </button>
       </div>
