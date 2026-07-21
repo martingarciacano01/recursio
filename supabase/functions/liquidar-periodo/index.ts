@@ -1,6 +1,6 @@
 // supabase/functions/liquidar-periodo/index.ts
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { liquidarConceptos, type Concepto } from '../../../packages/motor/src/motor.ts'
+import { liquidarConceptos, filtrarPorCategoria, type Concepto } from '../../../packages/motor/src/motor.ts'
 import { calcularAsistencia, construirDiasPeriodo } from '../../../packages/motor/src/asistencia.ts'
 
 // Mismo patrón CORS que el resto de las Edge Functions de Presencio
@@ -47,8 +47,10 @@ Deno.serve(async (req) => {
     .select('*, nom_concepto_reglas(*)')
     .or(`empresa_id.is.null,empresa_id.eq.${periodo.empresa_id}`)
 
-  const conceptosMotor: Concepto[] = (conceptos || []).map((c: any) => ({
+  type ConceptoConConvenio = Concepto & { convenioId: string | null }
+  const conceptosMotor: ConceptoConConvenio[] = (conceptos || []).map((c: any) => ({
     codigo: c.codigo, nombre: c.nombre, tipo: c.tipo, orden: c.orden, formula: c.formula, imprimible: c.imprimible,
+    categorias: c.categorias ?? null, convenioId: c.convenio_id ?? null,
     reglas: (c.nom_concepto_reglas || []).map((r: any) => ({ orden: r.orden, condicion: r.condicion, formula: r.formula })),
   }))
 
@@ -95,6 +97,8 @@ Deno.serve(async (req) => {
   // vigencia_desde) — hay que buscar la fila vigente al cierre del período.
   const categoriaIds = [...new Set((legajos || []).map((l: any) => l.categoria_id).filter(Boolean))]
   const basicoPorCategoria = new Map<string, number>()
+  const nombrePorCategoria = new Map<string, string>()
+  const noRemPorCategoria = new Map<string, number>()
   if (categoriaIds.length > 0) {
     const { data: cats, error: errCats } = await supabase.from('nom_categorias')
       .select('id, convenio_id, nombre').in('id', categoriaIds)
@@ -109,6 +113,13 @@ Deno.serve(async (req) => {
         .lte('vigencia_desde', periodo.fecha_hasta)
         .order('vigencia_desde', { ascending: false }).limit(1)
       basicoPorCategoria.set(cat.id, Number(vig?.[0]?.basico ?? 0))
+
+      nombrePorCategoria.set(cat.id, cat.nombre)
+      const { data: nr } = await supabase.from('nom_no_remunerativos').select('monto')
+        .eq('convenio_id', cat.convenio_id).eq('categoria_nombre', cat.nombre)
+        .lte('vigencia_desde', periodo.fecha_hasta)
+        .order('vigencia_desde', { ascending: false }).limit(1)
+      noRemPorCategoria.set(cat.id, Number(nr?.[0]?.monto ?? 0))
     }
   }
 
@@ -146,9 +157,16 @@ Deno.serve(async (req) => {
       horas_extra_100: asistencia.horasExtra100,
       adelanto_monto: adelantoPorPersona.get(persona.id) ?? 0,
       tope_sipa: topeSipa,
+      no_rem_convenio: noRemPorCategoria.get(legajo.categoria_id) ?? 0,
     }
 
-    const resultado = liquidarConceptos(conceptosMotor, variablesBase)
+    // Solo conceptos del convenio del legajo (evita duplicar plantilla
+    // global + copia de empresa tras clonar_convenio) y de su categoría.
+    const conceptosLegajo = filtrarPorCategoria(
+      conceptosMotor.filter((c) => c.convenioId === legajo.convenio_id),
+      nombrePorCategoria.get(legajo.categoria_id) ?? ''
+    )
+    const resultado = liquidarConceptos(conceptosLegajo, variablesBase)
     resultados.push({ personalId: persona.id, resultado, asistencia })
   }
 
