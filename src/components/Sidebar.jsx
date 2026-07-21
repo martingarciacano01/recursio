@@ -43,8 +43,11 @@ export default function Sidebar() {
     navigate('/superadmin')
   }
 
+  // Mismo patrón que Presencio (fichaobra/src/components/layout/Sidebar.jsx,
+  // NAV_BASE): el item de Superadmin va al final con un separador antes,
+  // visible solo para ese rol.
   const navItems = rol === 'superadmin'
-    ? [...NAV_ITEMS, { to: '/superadmin', icon: ShieldAlert, label: 'Superadmin' }]
+    ? [...NAV_ITEMS, { to: '/superadmin', icon: ShieldAlert, label: 'Superadmin', dividerBefore: true }]
     : NAV_ITEMS
 
   return (
@@ -63,11 +66,14 @@ export default function Sidebar() {
       </div>
 
       <nav style={{ flex: 1, padding: '0.5rem', display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {navItems.map(({ to, icon: Icon, label }) => (
-          <NavLink key={to} to={to} end={to === '/'} style={({ isActive }) => navLinkStyle(isActive)}>
-            <Icon size={17} style={{ flexShrink: 0 }} />
-            {label}
-          </NavLink>
+        {navItems.map(({ to, icon: Icon, label, dividerBefore }) => (
+          <div key={to}>
+            {dividerBefore && <div style={{ height: 1, background: 'var(--border)', margin: '6px 4px' }} />}
+            <NavLink to={to} end={to === '/'} style={({ isActive }) => navLinkStyle(isActive)}>
+              <Icon size={17} style={{ flexShrink: 0 }} />
+              {label}
+            </NavLink>
+          </div>
         ))}
       </nav>
 
@@ -77,8 +83,23 @@ export default function Sidebar() {
             padding: '0.5rem 0.75rem', marginBottom: 8, borderRadius: 'var(--radius)',
             background: 'rgba(200,168,75,0.1)', border: '1px solid rgba(200,168,75,0.3)',
           }}>
-            <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Viendo como</div>
-            <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: 4 }}>{empresaVista.nombre}</div>
+            <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginBottom: 4 }}>Viendo como</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              {/* Avatar de iniciales, mismo patrón que TabEmpresas en
+                  Presencio (fichaobra/src/pages/SuperAdminPage.jsx) */}
+              <div style={{
+                width: 28, height: 28, borderRadius: 7, flexShrink: 0,
+                background: empresaVista.colorPrimario || 'var(--brand-primary)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <span style={{ color: empresaVista.colorSecundario || 'var(--brand-secondary)', fontWeight: 800, fontSize: '0.65rem' }}>
+                  {(empresaVista.nombre || '?').slice(0, 2).toUpperCase()}
+                </span>
+              </div>
+              <div style={{ fontSize: '0.8rem', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {empresaVista.nombre}
+              </div>
+            </div>
             <button onClick={handleSalirDeEmpresa} className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', gap: 6, fontSize: '0.72rem' }}>
               <LogIn size={13} /> Salir de la empresa
             </button>

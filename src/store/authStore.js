@@ -63,7 +63,19 @@ export const useAuthStore = create((set, get) => ({
   // porque quien la invoca (SuperAdminPage) ya filtró el acceso a la
   // página por rol.
   entrarEnEmpresa: (empresa) => {
-    set({ empresaVista: { id: empresa.id, nombre: empresa.nombre } })
+    set({
+      empresaVista: {
+        id: empresa.id,
+        nombre: empresa.nombre,
+        // Colores de marca de la empresa (mismos campos que devuelve
+        // get_empresas_superadmin(), ya usados por Presencio para el
+        // avatar de iniciales en su SuperAdminPage) — opcionales, con
+        // fallback a los colores de marca de Recursio si la empresa no
+        // definió los suyos.
+        colorPrimario: empresa.color_primario || empresa.colorPrimario || null,
+        colorSecundario: empresa.color_secundario || empresa.colorSecundario || null,
+      },
+    })
   },
 
   salirDeEmpresa: () => {

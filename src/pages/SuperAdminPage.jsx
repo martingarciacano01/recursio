@@ -1,21 +1,27 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LogIn, RefreshCw } from 'lucide-react'
+import { LogIn, RefreshCw, FlaskConical, Mail } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 
-// Panel mínimo de Superadmin: lista las empresas (vía la RPC
+const fmtFecha = (iso) => iso ? new Date(iso).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
+const PLAN_LABEL = { basico: 'Básico', profesional: 'Profesional', enterprise: 'Enterprise' }
+const PLAN_COLOR = { basico: 'var(--text-secondary)', profesional: 'var(--info, #3b82f6)', enterprise: 'var(--brand-secondary)' }
+
+// Panel de Superadmin: lista las empresas (vía la RPC
 // get_empresas_superadmin(), ya existente y compartida con Presencio —
 // mismo proyecto de Supabase, mismo esquema `empresas`) y permite
 // "Entrar" para fijar `empresaVista` y así poder operar el resto de
 // Recursio (Legajos, Liquidación, Configuración) como esa empresa.
+// Presentación (tarjetas con plan, personal activo con barra de
+// progreso, usuarios invitados) calcada del equivalente TabEmpresas de
+// Presencio (fichaobra/src/pages/SuperAdminPage.jsx).
 //
-// Alcance intencionalmente acotado respecto al panel equivalente de
-// Presencio (fichaobra/src/pages/SuperAdminPage.jsx): ahí también se
-// puede dar de alta empresas, editar plan/estado, invitar usuarios y
-// configurar roles/menús — nada de eso aplica todavía a Recursio o no
-// existe función RPC de escritura habilitada desde acá. Si hace falta
-// alguna de esas capacidades, se agrega en una iteración posterior.
+// Alcance intencionalmente acotado respecto a ese panel: acá no hay alta
+// de empresas, edición de plan/estado, ni invitación de usuarios — nada
+// de eso aplica todavía a Recursio o no hay RPC de escritura habilitada
+// desde acá. Si hace falta alguna de esas capacidades, se agrega en una
+// iteración posterior.
 export default function SuperAdminPage() {
   const rol = useAuthStore((s) => s.rol)
   const entrarEnEmpresa = useAuthStore((s) => s.entrarEnEmpresa)
@@ -63,7 +69,10 @@ export default function SuperAdminPage() {
         <p className="page-subtitle">Elegí una empresa para operar Recursio en su nombre</p>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.75rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+        <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+          {empresas.length} empresa{empresas.length !== 1 ? 's' : ''}
+        </span>
         <button className="btn btn-ghost btn-sm" onClick={cargarEmpresas} title="Actualizar">
           <RefreshCw size={14} className={cargando ? 'animate-spin' : ''} /> Actualizar
         </button>
@@ -71,41 +80,92 @@ export default function SuperAdminPage() {
 
       {error && <div className="card" style={{ color: 'var(--danger)', marginBottom: '1rem' }}>Error: {error}</div>}
 
-      <div className="card table-scroll">
+      <div className="card table-scroll" style={{ padding: 0, overflow: 'hidden' }}>
         <table className="table">
           <thead>
             <tr>
               <th>Empresa</th>
               <th>Plan</th>
-              <th>Personal activo</th>
+              <th style={{ color: 'var(--success, #22c55e)' }}>Personal activo</th>
               <th>Usuarios</th>
+              <th>Pendientes</th>
+              <th>Alta</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {cargando && (
-              <tr><td colSpan={5} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>Cargando…</td></tr>
+              <tr><td colSpan={7} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>Cargando…</td></tr>
             )}
             {!cargando && empresas.length === 0 && (
-              <tr><td colSpan={5} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>Sin empresas registradas.</td></tr>
+              <tr><td colSpan={7} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>Sin empresas registradas.</td></tr>
             )}
-            {empresas.map((e) => (
-              <tr key={e.id}>
-                <td>{e.nombre}{e.es_demo ? <span className="badge badge-warning" style={{ marginLeft: 6 }}>DEMO</span> : null}</td>
-                <td>{e.plan || 'básico'}</td>
-                <td>{e.total_personal ?? 0}</td>
-                <td>{e.total_usuarios ?? 0}</td>
-                <td>
-                  <button
-                    className="btn btn-primary btn-sm"
-                    onClick={() => handleEntrar(e)}
-                    disabled={entrandoId === e.id}
-                  >
-                    <LogIn size={13} /> Entrar
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {empresas.map((e) => {
+              const pct = e.max_personal ? Math.min(100, ((e.total_personal || 0) / e.max_personal) * 100) : 0
+              return (
+                <tr key={e.id} style={{ background: e.es_demo ? 'rgba(251,191,36,0.03)' : undefined }}>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{
+                        width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+                        background: e.color_primario || 'var(--brand-primary)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        <span style={{ color: e.color_secundario || 'var(--brand-secondary)', fontWeight: 800, fontSize: '0.72rem' }}>
+                          {(e.nombre || '?').slice(0, 2).toUpperCase()}
+                        </span>
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          {e.nombre}
+                          {e.es_demo && (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 6px', borderRadius: 99, background: 'rgba(251,191,36,0.15)', border: '1px solid rgba(251,191,36,0.4)', fontSize: '0.6rem', fontWeight: 800, color: '#fbbf24' }}>
+                              <FlaskConical size={9} /> DEMO
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{e.slug}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: PLAN_COLOR[e.plan] || 'var(--text-secondary)' }}>
+                      {PLAN_LABEL[e.plan] || e.plan || '—'}
+                    </span>
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontWeight: 700, color: 'var(--success, #22c55e)' }}>{e.total_personal || 0}</span>
+                      {e.max_personal && (
+                        <>
+                          <span style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>/ {e.max_personal}</span>
+                          <div style={{ width: 40, height: 4, background: 'var(--border)', borderRadius: 99, overflow: 'hidden' }}>
+                            <div style={{ height: '100%', borderRadius: 99, background: pct > 90 ? 'var(--danger)' : 'var(--success, #22c55e)', width: pct + '%' }} />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                  <td style={{ fontWeight: 600 }}>{e.total_usuarios || 0}</td>
+                  <td>
+                    {e.usuarios_invitados > 0
+                      ? <span className="badge badge-warning"><Mail size={10} style={{ marginRight: 3 }} />{e.usuarios_invitados}</span>
+                      : <span style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>—</span>}
+                  </td>
+                  <td style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{fmtFecha(e.created_at)}</td>
+                  <td>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={() => handleEntrar(e)}
+                      disabled={entrandoId === e.id}
+                      title="Entrar en esta empresa"
+                    >
+                      <LogIn size={13} /> Entrar
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>

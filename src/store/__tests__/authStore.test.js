@@ -78,9 +78,14 @@ describe('authStore', () => {
     expect(state.usuario).toBeNull()
   })
 
-  it('entrarEnEmpresa fija empresaVista con id y nombre', () => {
+  it('entrarEnEmpresa fija empresaVista con id, nombre y colores de marca', () => {
+    useAuthStore.getState().entrarEnEmpresa({ id: 'e1', nombre: 'Asset Construcciones', color_primario: '#111', color_secundario: '#222' })
+    expect(useAuthStore.getState().empresaVista).toEqual({ id: 'e1', nombre: 'Asset Construcciones', colorPrimario: '#111', colorSecundario: '#222' })
+  })
+
+  it('entrarEnEmpresa sin colores de marca deja colorPrimario/colorSecundario en null', () => {
     useAuthStore.getState().entrarEnEmpresa({ id: 'e1', nombre: 'Asset Construcciones' })
-    expect(useAuthStore.getState().empresaVista).toEqual({ id: 'e1', nombre: 'Asset Construcciones' })
+    expect(useAuthStore.getState().empresaVista).toEqual({ id: 'e1', nombre: 'Asset Construcciones', colorPrimario: null, colorSecundario: null })
   })
 
   it('salirDeEmpresa limpia empresaVista', () => {
