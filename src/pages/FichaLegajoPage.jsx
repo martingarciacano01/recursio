@@ -5,6 +5,7 @@ import { useLegajoStore } from '../store/legajoStore'
 import { useAuthStore } from '../store/authStore'
 import SeccionColapsable from '../components/legajo/SeccionColapsable'
 import SemaforoLegajo from '../components/legajo/SemaforoLegajo'
+import DocumentosLegajo from '../components/legajo/DocumentosLegajo'
 
 export default function FichaLegajoPage() {
   const { personalId } = useParams()
@@ -69,6 +70,10 @@ export default function FichaLegajoPage() {
         <p>Banco: {legajo?.banco || '—'}</p>
         <p>Obra social: {legajo?.obraSocial || '—'}</p>
         <p>Jornada: {legajo?.jornada || '—'}</p>
+      </SeccionColapsable>
+
+      <SeccionColapsable titulo="Documentación">
+        <DocumentosLegajo personalId={personalId} />
       </SeccionColapsable>
 
       <SeccionColapsable titulo="Familiares">
