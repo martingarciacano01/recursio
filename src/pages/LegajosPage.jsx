@@ -2,8 +2,15 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import SemaforoLegajo from '../components/legajo/SemaforoLegajo'
+import { useAuthStore } from '../store/authStore'
 
 export default function LegajosPage() {
+  const empresa = useAuthStore((s) => s.empresa)
+  const empresaVista = useAuthStore((s) => s.empresaVista)
+  // Un Superadmin tiene bypass de RLS (0008_superadmin_bypass.sql): sin
+  // este filtro explícito vería el personal de TODAS las empresas
+  // mezclado, no solo el de la empresa que eligió en /superadmin.
+  const empresaActiva = empresa || empresaVista
   const [filas, setFilas] = useState([])
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState('')
@@ -13,10 +20,13 @@ export default function LegajosPage() {
     async function cargar() {
       setCargando(true)
       setError('')
-      const [{ data: personal, error: e1 }, { data: legajos, error: e2 }] = await Promise.all([
-        supabase.from('nom_v_personal').select('id, nombre, dni, puesto, estado').eq('estado', 'activo').order('nombre'),
-        supabase.from('nom_legajo').select('personal_id, cuil, cbu, convenio_id, categoria_id'),
-      ])
+      let qPersonal = supabase.from('nom_v_personal').select('id, nombre, dni, puesto, estado').eq('estado', 'activo').order('nombre')
+      let qLegajos = supabase.from('nom_legajo').select('personal_id, cuil, cbu, convenio_id, categoria_id')
+      if (empresaActiva?.id) {
+        qPersonal = qPersonal.eq('empresa_id', empresaActiva.id)
+        qLegajos = qLegajos.eq('empresa_id', empresaActiva.id)
+      }
+      const [{ data: personal, error: e1 }, { data: legajos, error: e2 }] = await Promise.all([qPersonal, qLegajos])
       if (cancelado) return
       if (e1 || e2) { setError((e1 || e2).message); setCargando(false); return }
       const porPersonal = new Map((legajos || []).map((l) => [l.personal_id, {
@@ -27,7 +37,7 @@ export default function LegajosPage() {
     }
     cargar()
     return () => { cancelado = true }
-  }, [])
+  }, [empresaActiva?.id])
 
   return (
     <div className="page">
@@ -35,8 +45,13 @@ export default function LegajosPage() {
         <h1 className="page-title">Legajos</h1>
         <p className="page-subtitle">Personal activo y estado del legajo</p>
       </div>
+      {!empresaActiva && (
+        <div className="card" style={{ marginBottom: '1rem' }}>
+          Elegí una empresa en Superadmin → "Entrar" para ver sus legajos.
+        </div>
+      )}
       {error && <div className="card" style={{ color: 'var(--danger)' }}>Error: {error}</div>}
-      {!error && (
+      {!error && empresaActiva && (
         <div className="card table-scroll">
           <table className="table">
             <thead>

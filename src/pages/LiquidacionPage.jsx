@@ -34,7 +34,7 @@ export default function LiquidacionPage() {
     cargarPeriodos()
     setPeriodoSeleccionado('')
     if (!empresaId) return
-    supabase.from('nom_v_personal').select('id, nombre')
+    supabase.from('nom_v_personal').select('id, nombre').eq('empresa_id', empresaId)
       .then(({ data }) => setPersonalPorId(new Map((data || []).map((p) => [p.id, p.nombre]))))
   }, [empresaId])
 
