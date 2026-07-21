@@ -11,6 +11,11 @@ import { generarLegajoPdf } from '../utils/legajoPdf'
 export default function FichaLegajoPage() {
   const { personalId } = useParams()
   const empresa = useAuthStore((s) => s.empresa)
+  const empresaVista = useAuthStore((s) => s.empresaVista)
+  // Un Superadmin no tiene `empresa` fija: usa la que haya elegido en
+  // /superadmin ("entrar en empresa", ver authStore.js) para poder
+  // filtrar nom_legajo por empresa_id igual que un usuario normal.
+  const empresaActiva = empresa || empresaVista
   const { legajos, familiares, sanciones, error: errorLegajo, cargarLegajos, cargarFamiliares, cargarSanciones } = useLegajoStore()
   const [persona, setPersona] = useState(null)
   const [ausencias, setAusencias] = useState([])
@@ -35,11 +40,10 @@ export default function FichaLegajoPage() {
     // nom_legajo (esa tabla no tiene excepción de superadmin en su RLS
     // todavía). El resto de las consultas (persona, ausencias, familiares,
     // sanciones) NO dependen de `empresa` en el cliente: la RLS del lado
-    // del servidor ya resuelve el aislamiento a partir del JWT. Antes,
-    // todo el efecto estaba condicionado a `empresa?.id`, así que un
-    // usuario superadmin (que no tiene una empresa fija asignada) se
-    // quedaba con la página en "Cargando…" para siempre.
-    if (empresa?.id) cargarLegajos(empresa.id)
+    // del servidor ya resuelve el aislamiento a partir del JWT. Un
+    // Superadmin sin `empresa` fija usa `empresaVista` (elegida en
+    // /superadmin) para que cargarLegajos tenga un id explícito.
+    if (empresaActiva?.id) cargarLegajos(empresaActiva.id)
     cargarFamiliares(personalId)
     cargarSanciones(personalId)
     supabase.from('nom_v_personal').select('*').eq('id', personalId).single().then(({ data, error }) => {
@@ -54,7 +58,7 @@ export default function FichaLegajoPage() {
       setAusencias(data || [])
     })
     return () => { cancelado = true }
-  }, [personalId, empresa?.id])
+  }, [personalId, empresaActiva?.id])
 
   const legajo = legajos.find((l) => l.personalId === personalId) || null
 

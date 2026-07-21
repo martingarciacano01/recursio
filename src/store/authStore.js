@@ -12,6 +12,16 @@ export const useAuthStore = create((set, get) => ({
   rol: null,
   cargando: true,
 
+  // "Entrar en empresa": solo para usuarios Superadmin (que no tienen
+  // `empresa` fija, ver SuperAdminPage.jsx). Reemplaza el patrón anterior
+  // de que cada página resolviera el problema empresa-null por su cuenta
+  // (parche que existió brevemente en LiquidacionPage). Vive SOLO en
+  // memoria — sin persist, como el resto de este store — así que se
+  // pierde al recargar la página; es una decisión intencional, no un bug:
+  // preferimos que el superadmin tenga que re-elegir la empresa a que la
+  // elección quede en localStorage.
+  empresaVista: null,
+
   // Resuelve rol y empresa_id server-side vía la RPC whoami() (mismo patrón
   // de seguridad que appStore.js de Presencio: user_metadata del JWT es
   // editable por el propio cliente, por lo que rol/empresa_id NUNCA se toman
@@ -46,7 +56,18 @@ export const useAuthStore = create((set, get) => ({
 
   logout: async () => {
     await supabase.auth.signOut()
-    set({ session: null, usuario: null, empresa: null, rol: null })
+    set({ session: null, usuario: null, empresa: null, rol: null, empresaVista: null })
+  },
+
+  // Solo debería llamarse con rol === 'superadmin'; no hay chequeo acá
+  // porque quien la invoca (SuperAdminPage) ya filtró el acceso a la
+  // página por rol.
+  entrarEnEmpresa: (empresa) => {
+    set({ empresaVista: { id: empresa.id, nombre: empresa.nombre } })
+  },
+
+  salirDeEmpresa: () => {
+    set({ empresaVista: null })
   },
 
   // Se llama al montar la app: recupera la sesión existente (compartida con
@@ -56,10 +77,10 @@ export const useAuthStore = create((set, get) => ({
     set({ cargando: true })
     const { data } = await supabase.auth.getSession()
     if (!data.session) {
-      set({ session: null, usuario: null, empresa: null, rol: null, cargando: false })
+      set({ session: null, usuario: null, empresa: null, rol: null, empresaVista: null, cargando: false })
       return
     }
     const perfil = await get()._resolverPerfil(data.session.user)
-    set({ session: data.session, ...perfil, cargando: false })
+    set({ session: data.session, ...perfil, empresaVista: null, cargando: false })
   },
 }))

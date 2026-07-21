@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import {
   LayoutDashboard, FileText, Settings, Calculator,
-  CheckSquare, BarChart3, UserCog, LogOut, Landmark,
+  CheckSquare, BarChart3, UserCog, LogOut, Landmark, ShieldAlert, LogIn,
 } from 'lucide-react'
 
 // Estructura de navegación de Recursio (Recursio_Diseno.md, rutas del
@@ -30,13 +30,22 @@ const navLinkStyle = (isActive) => ({
 })
 
 export default function Sidebar() {
-  const { usuario, rol, empresa, logout } = useAuthStore()
+  const { usuario, rol, empresa, empresaVista, logout, salirDeEmpresa } = useAuthStore()
   const navigate = useNavigate()
 
   const handleLogout = async () => {
     await logout()
     navigate('/login')
   }
+
+  const handleSalirDeEmpresa = () => {
+    salirDeEmpresa()
+    navigate('/superadmin')
+  }
+
+  const navItems = rol === 'superadmin'
+    ? [...NAV_ITEMS, { to: '/superadmin', icon: ShieldAlert, label: 'Superadmin' }]
+    : NAV_ITEMS
 
   return (
     <aside style={{
@@ -54,7 +63,7 @@ export default function Sidebar() {
       </div>
 
       <nav style={{ flex: 1, padding: '0.5rem', display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
+        {navItems.map(({ to, icon: Icon, label }) => (
           <NavLink key={to} to={to} end={to === '/'} style={({ isActive }) => navLinkStyle(isActive)}>
             <Icon size={17} style={{ flexShrink: 0 }} />
             {label}
@@ -63,6 +72,18 @@ export default function Sidebar() {
       </nav>
 
       <div style={{ padding: '0.75rem', borderTop: '1px solid var(--border)' }}>
+        {empresaVista && (
+          <div style={{
+            padding: '0.5rem 0.75rem', marginBottom: 8, borderRadius: 'var(--radius)',
+            background: 'rgba(200,168,75,0.1)', border: '1px solid rgba(200,168,75,0.3)',
+          }}>
+            <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Viendo como</div>
+            <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: 4 }}>{empresaVista.nombre}</div>
+            <button onClick={handleSalirDeEmpresa} className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', gap: 6, fontSize: '0.72rem' }}>
+              <LogIn size={13} /> Salir de la empresa
+            </button>
+          </div>
+        )}
         {usuario && (
           <div style={{ padding: '0.4rem 0.75rem', marginBottom: 6 }}>
             <div style={{ fontSize: '0.78rem', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{usuario.email}</div>

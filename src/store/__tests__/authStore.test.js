@@ -77,4 +77,24 @@ describe('authStore', () => {
     expect(state.cargando).toBe(false)
     expect(state.usuario).toBeNull()
   })
+
+  it('entrarEnEmpresa fija empresaVista con id y nombre', () => {
+    useAuthStore.getState().entrarEnEmpresa({ id: 'e1', nombre: 'Asset Construcciones' })
+    expect(useAuthStore.getState().empresaVista).toEqual({ id: 'e1', nombre: 'Asset Construcciones' })
+  })
+
+  it('salirDeEmpresa limpia empresaVista', () => {
+    useAuthStore.setState({ empresaVista: { id: 'e1', nombre: 'Asset' } })
+    useAuthStore.getState().salirDeEmpresa()
+    expect(useAuthStore.getState().empresaVista).toBeNull()
+  })
+
+  it('logout limpia también empresaVista', async () => {
+    useAuthStore.setState({ empresaVista: { id: 'e1', nombre: 'Asset' } })
+    supabase.auth.signOut.mockResolvedValue({ error: null })
+
+    await useAuthStore.getState().logout()
+
+    expect(useAuthStore.getState().empresaVista).toBeNull()
+  })
 })
