@@ -6,6 +6,7 @@ describe('mappers de liquidacion', () => {
     const row = { id: 'l1', empresa_id: 'e1', periodo_id: 'p1', personal_id: 'per1', bruto: 1000, neto: 800, estado: 'preliminar' }
     expect(liquidacionFromDB(row)).toEqual({
       id: 'l1', empresaId: 'e1', periodoId: 'p1', personalId: 'per1', bruto: 1000, neto: 800, estado: 'preliminar',
+      totalAportes: 0, totalContribuciones: 0, detalleHoras: null,
     })
   })
 

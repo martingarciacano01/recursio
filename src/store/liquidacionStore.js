@@ -4,6 +4,9 @@ import { supabase } from '../lib/supabase'
 export const liquidacionFromDB = (r) => ({
   id: r.id, empresaId: r.empresa_id, periodoId: r.periodo_id, personalId: r.personal_id,
   bruto: r.bruto, neto: r.neto, estado: r.estado,
+  totalAportes: r.total_aportes ?? 0,
+  totalContribuciones: r.total_contribuciones ?? 0,
+  detalleHoras: r.detalle_horas || null,
 })
 
 export const itemFromDB = (r) => ({

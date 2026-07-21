@@ -1,7 +1,7 @@
 // supabase/functions/liquidar-periodo/index.ts
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { liquidarConceptos, type Concepto } from '../../../packages/motor/src/motor.ts'
-import { calcularAsistencia, type DiaAsistencia } from '../../../packages/motor/src/asistencia.ts'
+import { calcularAsistencia, construirDiasPeriodo } from '../../../packages/motor/src/asistencia.ts'
 
 // Mismo patrón CORS que el resto de las Edge Functions de Presencio
 // (fichaobra/supabase/functions/invite-user/index.ts): sin esto, el
@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
     })
   }
 
-  const { data: conceptos } = await supabase
+  const { data: conceptos, error: errConceptos } = await supabase
     .from('nom_conceptos')
     .select('*, nom_concepto_reglas(*)')
     .or(`empresa_id.is.null,empresa_id.eq.${periodo.empresa_id}`)
@@ -52,48 +52,100 @@ Deno.serve(async (req) => {
     reglas: (c.nom_concepto_reglas || []).map((r: any) => ({ orden: r.orden, condicion: r.condicion, formula: r.formula })),
   }))
 
-  const { data: personal } = await supabase.from('nom_v_personal').select('id').eq('empresa_id', periodo.empresa_id).eq('estado', 'activo')
-  const { data: legajos } = await supabase.from('nom_legajo').select('*').eq('empresa_id', periodo.empresa_id)
+  const { data: personal, error: errPersonal } = await supabase.from('nom_v_personal').select('id').eq('empresa_id', periodo.empresa_id).eq('estado', 'activo')
+  const { data: legajos, error: errLegajos } = await supabase.from('nom_legajo').select('*').eq('empresa_id', periodo.empresa_id)
+
+  // Estos errores se ignoraban (data quedaba null) y la función devolvía
+  // {"liquidadas": 0} sin pista alguna — así se ocultó el "permission
+  // denied for table personal" de las vistas security_invoker (ver
+  // migración 0010). Cualquier error de lectura debe cortar y reportarse.
+  const errLectura = errConceptos || errPersonal || errLegajos
+  if (errLectura) {
+    return new Response(JSON.stringify({ error: `error al leer datos: ${errLectura.message}`, code: errLectura.code }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
   const legajoPorPersonal = new Map((legajos || []).map((l: any) => [l.personal_id, l]))
+
+  // ─── Variables que antes eran TODO ────────────────────────────────
+  // tope_sipa vigente para el período (nom_parametros, versionado por vigencia)
+  const { data: topeRows, error: errTope } = await supabase.from('nom_parametros').select('valor')
+    .eq('empresa_id', periodo.empresa_id).eq('codigo', 'tope_sipa')
+    .lte('vigencia_desde', periodo.fecha_hasta)
+    .or(`vigencia_hasta.is.null,vigencia_hasta.gte.${periodo.fecha_desde}`)
+    .order('vigencia_desde', { ascending: false }).limit(1)
+  // adelantos del período por persona
+  const { data: adelantos, error: errAdel } = await supabase.from('nom_pagos_adelantos').select('personal_id, monto')
+    .eq('empresa_id', periodo.empresa_id)
+    .gte('fecha', periodo.fecha_desde).lte('fecha', periodo.fecha_hasta)
+  if (errTope || errAdel) {
+    const e = (errTope || errAdel)!
+    return new Response(JSON.stringify({ error: `error al leer parametros/adelantos: ${e.message}`, code: e.code }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+  const topeSipa = Number(topeRows?.[0]?.valor ?? 999999999) // sin parámetro cargado: sin tope efectivo
+  const adelantoPorPersona = new Map<string, number>()
+  for (const a of adelantos || []) {
+    adelantoPorPersona.set(a.personal_id, (adelantoPorPersona.get(a.personal_id) ?? 0) + Number(a.monto))
+  }
+
+  // basico vigente por categoría: legajo.categoria_id apunta a UNA fila de
+  // nom_categorias, pero la escala se versiona por (convenio, nombre,
+  // vigencia_desde) — hay que buscar la fila vigente al cierre del período.
+  const categoriaIds = [...new Set((legajos || []).map((l: any) => l.categoria_id).filter(Boolean))]
+  const basicoPorCategoria = new Map<string, number>()
+  if (categoriaIds.length > 0) {
+    const { data: cats, error: errCats } = await supabase.from('nom_categorias')
+      .select('id, convenio_id, nombre').in('id', categoriaIds)
+    if (errCats) {
+      return new Response(JSON.stringify({ error: `error al leer categorias: ${errCats.message}`, code: errCats.code }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+    for (const cat of cats || []) {
+      const { data: vig } = await supabase.from('nom_categorias').select('basico')
+        .eq('convenio_id', cat.convenio_id).eq('nombre', cat.nombre)
+        .lte('vigencia_desde', periodo.fecha_hasta)
+        .order('vigencia_desde', { ascending: false }).limit(1)
+      basicoPorCategoria.set(cat.id, Number(vig?.[0]?.basico ?? 0))
+    }
+  }
 
   const resultados = []
   for (const persona of personal || []) {
     const legajo = legajoPorPersonal.get(persona.id)
     if (!legajo?.cuil || !legajo?.cbu || !legajo?.convenio_id || !legajo?.categoria_id) continue // legajo incompleto, no liquida
 
-    const { data: fichajes } = await supabase.from('nom_v_horas_dia').select('*')
+    const { data: fichajes, error: errFichajes } = await supabase.from('nom_v_horas_dia').select('*')
       .eq('personal_id', persona.id).gte('timestamp', periodo.fecha_desde).lte('timestamp', periodo.fecha_hasta)
-    const { data: ausencias } = await supabase.from('nom_v_ausencias').select('*')
+    const { data: ausencias, error: errAusencias } = await supabase.from('nom_v_ausencias').select('*')
       .eq('personal_id', persona.id).eq('estado', 'aprobada')
-
-    // Construcción del snapshot diario de asistencia a partir de eventos
-    // crudos: agrupa por fecha, toma la primera 'entrada' del día. El
-    // turno esperado por ahora es fijo (08:00) hasta que se resuelva
-    // dónde vive esa configuración (pendiente: Presencio no expone turno
-    // por persona, ver nota en 0001_vistas_contrato.sql de Fase 0).
-    const porDia = new Map<string, DiaAsistencia>()
-    for (const f of fichajes || []) {
-      const fecha = f.timestamp.slice(0, 10)
-      if (f.tipo !== 'entrada') continue
-      const hora = f.timestamp.slice(11, 16)
-      const existente = porDia.get(fecha)
-      if (!existente || hora < existente.horaEntradaReal!) {
-        porDia.set(fecha, {
-          fecha, horaEntradaEsperada: '08:00', horaEntradaReal: hora,
-          ausenciaAprobada: (ausencias || []).some((a: any) => fecha >= a.fecha_desde && fecha <= a.fecha_hasta),
-        })
-      }
+    if (errFichajes || errAusencias) {
+      const e = errFichajes || errAusencias
+      return new Response(JSON.stringify({ error: `error al leer asistencia de ${persona.id}: ${e!.message}`, code: e!.code }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
     }
-    const asistencia = calcularAsistencia([...porDia.values()], 15)
+
+    const dias = construirDiasPeriodo(
+      (fichajes || []).map((f: any) => ({ tipo: f.tipo, timestamp: f.timestamp })),
+      (ausencias || []).map((a: any) => ({ fecha_desde: a.fecha_desde, fecha_hasta: a.fecha_hasta })),
+      periodo.fecha_desde,
+      periodo.fecha_hasta
+    )
+    const asistencia = calcularAsistencia(dias, 15, legajo.jornada === 'parcial' ? 4 : 8)
 
     const variablesBase = {
-      basico_convenio: 0, // TODO Fase 2 Task 18: viene de nom_categorias por categoria_id + vigencia
+      basico_convenio: basicoPorCategoria.get(legajo.categoria_id) ?? 0,
+      horas_trabajadas: asistencia.horasTrabajadas,
       tardanzas: asistencia.tardanzas,
       faltas_injustificadas: asistencia.faltasInjustificadas,
+      faltas_justificadas: asistencia.faltasJustificadas,
       horas_extra_50: asistencia.horasExtra50,
       horas_extra_100: asistencia.horasExtra100,
-      adelanto_monto: 0, // TODO: sumar nom_pagos_adelantos del período
-      tope_sipa: 999999999, // TODO: viene de nom_parametros vigente
+      adelanto_monto: adelantoPorPersona.get(persona.id) ?? 0,
+      tope_sipa: topeSipa,
     }
 
     const resultado = liquidarConceptos(conceptosMotor, variablesBase)
@@ -112,6 +164,9 @@ Deno.serve(async (req) => {
     const { data: liq } = await supabase.from('nom_liquidaciones').insert({
       empresa_id: periodo.empresa_id, periodo_id: periodoId, personal_id: r.personalId,
       bruto: r.resultado.bruto, neto: r.resultado.neto, total_aportes: r.resultado.totalDescuentos,
+      total_contribuciones: r.resultado.items
+        .filter((i) => i.tipo === 'aporte_patronal')
+        .reduce((s, i) => s + i.monto, 0),
       detalle_horas: r.asistencia, estado: 'preliminar',
     }).select().single()
     if (liq) {

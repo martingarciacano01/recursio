@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
+const FragmentoLiquidacion = Fragment
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import { useLiquidacionStore } from '../store/liquidacionStore'
@@ -24,6 +25,22 @@ export default function LiquidacionPage() {
   const [creandoPeriodo, setCreandoPeriodo] = useState(false)
   const [errorCrearPeriodo, setErrorCrearPeriodo] = useState('')
 
+  const [liqExpandida, setLiqExpandida] = useState(null)
+  const [itemsPorLiq, setItemsPorLiq] = useState({})
+
+  const periodoActivo = periodos.find((p) => p.id === periodoSeleccionado)
+  const fmt = (n) => (Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const fmtHs = (n) => `${(Number(n) || 0).toLocaleString('es-AR', { maximumFractionDigits: 2 })} h`
+
+  const toggleDetalle = async (liqId) => {
+    if (liqExpandida === liqId) { setLiqExpandida(null); return }
+    setLiqExpandida(liqId)
+    if (!itemsPorLiq[liqId]) {
+      const { data } = await supabase.from('nom_liquidacion_items').select('*').eq('liquidacion_id', liqId)
+      setItemsPorLiq((prev) => ({ ...prev, [liqId]: data || [] }))
+    }
+  }
+
   const cargarPeriodos = () => {
     if (!empresaId) return
     supabase.from('nom_periodos').select('*').eq('empresa_id', empresaId).order('fecha_desde', { ascending: false })
@@ -37,6 +54,12 @@ export default function LiquidacionPage() {
     supabase.from('nom_v_personal').select('id, nombre').eq('empresa_id', empresaId)
       .then(({ data }) => setPersonalPorId(new Map((data || []).map((p) => [p.id, p.nombre]))))
   }, [empresaId])
+
+  useEffect(() => {
+    setLiqExpandida(null)
+    setItemsPorLiq({})
+    if (periodoSeleccionado) cargarLiquidaciones(periodoSeleccionado)
+  }, [periodoSeleccionado])
 
   const handleCalcular = async () => {
     if (!periodoSeleccionado) return
@@ -131,19 +154,82 @@ export default function LiquidacionPage() {
 
       {error && <div className="card" style={{ color: 'var(--danger)' }}>Error: {error}</div>}
 
+      {liquidaciones.length > 0 && periodoActivo && (
+        <div className="card" style={{ marginBottom: '1rem', display: 'flex', gap: 16, alignItems: 'baseline', flexWrap: 'wrap' }}>
+          <strong>Período calculado:</strong>
+          <span>{periodoActivo.tipo} — {periodoActivo.fecha_desde} a {periodoActivo.fecha_hasta}</span>
+          <span className="badge badge-neutral">{periodoActivo.estado}</span>
+          <span style={{ opacity: 0.7, fontSize: '0.85rem' }}>{liquidaciones.length} liquidación(es)</span>
+        </div>
+      )}
+
       {liquidaciones.length > 0 && (
         <div className="card table-scroll">
           <table className="table">
-            <thead><tr><th>Persona</th><th>Bruto</th><th>Neto</th><th>Estado</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Persona</th><th>Horas</th><th>HE 50%</th><th>HE 100%</th>
+                <th>Tardanzas</th><th>Faltas inj.</th><th>Faltas just.</th>
+                <th>Bruto</th><th>Aportes</th><th>Contribuciones</th><th>Neto</th><th>Estado</th><th></th>
+              </tr>
+            </thead>
             <tbody>
-              {liquidaciones.map((l) => (
-                <tr key={l.id}>
-                  <td>{personalPorId.get(l.personalId) || l.personalId}</td>
-                  <td>${l.bruto.toLocaleString('es-AR')}</td>
-                  <td>${l.neto.toLocaleString('es-AR')}</td>
-                  <td><span className="badge badge-neutral">{l.estado}</span></td>
-                </tr>
-              ))}
+              {liquidaciones.map((l) => {
+                const dh = l.detalleHoras || {}
+                const items = itemsPorLiq[l.id] || []
+                const grupos = [
+                  ['remunerativo', 'Remunerativos'],
+                  ['no_remunerativo', 'No remunerativos'],
+                  ['descuento', 'Aportes del trabajador'],
+                  ['aporte_patronal', 'Contribuciones patronales'],
+                  ['informativo', 'Informativos'],
+                ]
+                return (
+                  <FragmentoLiquidacion key={l.id}>
+                    <tr onClick={() => toggleDetalle(l.id)} style={{ cursor: 'pointer' }}>
+                      <td>{personalPorId.get(l.personalId) || l.personalId}</td>
+                      <td>{fmtHs(dh.horasTrabajadas)}</td>
+                      <td>{fmtHs(dh.horasExtra50)}</td>
+                      <td>{fmtHs(dh.horasExtra100)}</td>
+                      <td>{dh.tardanzas ?? '—'}</td>
+                      <td>{dh.faltasInjustificadas ?? '—'}</td>
+                      <td>{dh.faltasJustificadas ?? '—'}</td>
+                      <td>${fmt(l.bruto)}</td>
+                      <td>${fmt(l.totalAportes)}</td>
+                      <td>${fmt(l.totalContribuciones)}</td>
+                      <td><strong>${fmt(l.neto)}</strong></td>
+                      <td><span className="badge badge-neutral">{l.estado}</span></td>
+                      <td>{liqExpandida === l.id ? '▾' : '▸'}</td>
+                    </tr>
+                    {liqExpandida === l.id && (
+                      <tr>
+                        <td colSpan={13} style={{ background: 'var(--bg-subtle, rgba(255,255,255,0.03))' }}>
+                          {items.length === 0 ? 'Cargando detalle…' : grupos.map(([tipo, titulo]) => {
+                            const delGrupo = items.filter((i) => i.tipo === tipo)
+                            if (delGrupo.length === 0) return null
+                            return (
+                              <div key={tipo} style={{ margin: '0.5rem 0' }}>
+                                <strong style={{ fontSize: '0.85rem' }}>{titulo}</strong>
+                                <table className="table" style={{ marginTop: 4 }}>
+                                  <tbody>
+                                    {delGrupo.map((i) => (
+                                      <tr key={i.id}>
+                                        <td style={{ width: '55%' }}>{i.concepto_nombre} <span style={{ opacity: 0.6 }}>({i.concepto_codigo})</span></td>
+                                        <td style={{ opacity: 0.6 }}>regla: {i.regla_aplicada}</td>
+                                        <td style={{ textAlign: 'right' }}>${fmt(i.monto)}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )
+                          })}
+                        </td>
+                      </tr>
+                    )}
+                  </FragmentoLiquidacion>
+                )
+              })}
             </tbody>
           </table>
         </div>
