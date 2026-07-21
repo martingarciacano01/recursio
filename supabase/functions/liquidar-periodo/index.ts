@@ -3,14 +3,34 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { liquidarConceptos, type Concepto } from '../../../packages/motor/src/motor.ts'
 import { calcularAsistencia, type DiaAsistencia } from '../../../packages/motor/src/asistencia.ts'
 
+// Mismo patrón CORS que el resto de las Edge Functions de Presencio
+// (fichaobra/supabase/functions/invite-user/index.ts): sin esto, el
+// navegador bloquea el preflight OPTIONS con "No 'Access-Control-Allow-
+// Origin' header" antes de que el POST llegue siquiera a correr.
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
 Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
   const { periodoId } = await req.json()
   const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
 
   const { data: periodo, error: errPeriodo } = await supabase.from('nom_periodos').select('*').eq('id', periodoId).single()
-  if (errPeriodo || !periodo) return new Response(JSON.stringify({ error: 'período no encontrado' }), { status: 404 })
+  if (errPeriodo || !periodo) {
+    return new Response(JSON.stringify({ error: 'período no encontrado' }), {
+      status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
   if (periodo.estado === 'cerrado') {
-    return new Response(JSON.stringify({ error: 'período cerrado: no se puede recalcular' }), { status: 409 })
+    return new Response(JSON.stringify({ error: 'período cerrado: no se puede recalcular' }), {
+      status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
   }
 
   const { data: conceptos } = await supabase
@@ -95,5 +115,17 @@ Deno.serve(async (req) => {
     }
   }
 
-  return new Response(JSON.stringify({ liquidadas: resultados.length }), { headers: { 'Content-Type': 'application/json' } })
+  return new Response(JSON.stringify({ liquidadas: resultados.length }), {
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  })
+  } catch (err) {
+    // Cualquier error no contemplado explícitamente (JSON inválido en el
+    // body, error de Postgres no manejado, etc.) también debe llevar los
+    // headers CORS — si no, el navegador lo reporta como el mismo
+    // "Failed to send a request to the Edge Function" genérico, aunque la
+    // función sí haya respondido con un error real.
+    return new Response(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
 })
