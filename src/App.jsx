@@ -8,6 +8,7 @@ import DashboardPage from './pages/DashboardPage'
 import LegajosPage from './pages/LegajosPage'
 import FichaLegajoPage from './pages/FichaLegajoPage'
 import ProximamentePage from './pages/ProximamentePage'
+import ConfiguracionPage from './pages/ConfiguracionPage'
 
 // Rutas del diseño (Recursio_Diseno.md): todas protegidas salvo /login.
 // Las que no están implementadas todavía muestran "Próximamente" con el
@@ -38,7 +39,7 @@ function App() {
           <Route path="aprobaciones" element={<ProximamentePage titulo="Aprobaciones" />} />
           <Route path="reportes" element={<ProximamentePage titulo="Reportes" />} />
           <Route path="usuarios" element={<ProximamentePage titulo="Usuarios" />} />
-          <Route path="configuracion" element={<ProximamentePage titulo="Configuración" />} />
+          <Route path="configuracion" element={<ConfiguracionPage />} />
         </Route>
       </Routes>
     </BrowserRouter>
