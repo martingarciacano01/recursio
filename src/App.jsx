@@ -9,6 +9,7 @@ import LegajosPage from './pages/LegajosPage'
 import FichaLegajoPage from './pages/FichaLegajoPage'
 import ProximamentePage from './pages/ProximamentePage'
 import ConfiguracionPage from './pages/ConfiguracionPage'
+import LiquidacionPage from './pages/LiquidacionPage'
 
 // Rutas del diseño (Recursio_Diseno.md): todas protegidas salvo /login.
 // Las que no están implementadas todavía muestran "Próximamente" con el
@@ -35,7 +36,7 @@ function App() {
           <Route index element={<DashboardPage />} />
           <Route path="legajos" element={<LegajosPage />} />
           <Route path="legajos/:personalId" element={<FichaLegajoPage />} />
-          <Route path="liquidacion" element={<ProximamentePage titulo="Liquidación" />} />
+          <Route path="liquidacion" element={<LiquidacionPage />} />
           <Route path="aprobaciones" element={<ProximamentePage titulo="Aprobaciones" />} />
           <Route path="reportes" element={<ProximamentePage titulo="Reportes" />} />
           <Route path="usuarios" element={<ProximamentePage titulo="Usuarios" />} />
