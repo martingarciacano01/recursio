@@ -53,3 +53,48 @@ describe('calcularAsistencia', () => {
     expect(r.horasExtra100).toBe(3)
   })
 })
+
+describe('horas trabajadas, faltas justificadas y extras derivadas', () => {
+  it('suma horas trabajadas y deriva extra 50 sobre la jornada', () => {
+    const r = calcularAsistencia(
+      [
+        { fecha: '2026-06-15', horaEntradaEsperada: '08:00', horaEntradaReal: '08:00', horasTrabajadas: 10, ausenciaAprobada: false },
+        { fecha: '2026-06-16', horaEntradaEsperada: '08:00', horaEntradaReal: '08:05', horasTrabajadas: 8, ausenciaAprobada: false },
+      ],
+      15
+    )
+    expect(r.horasTrabajadas).toBe(18)
+    expect(r.horasExtra50).toBe(2)
+    expect(r.horasExtra100).toBe(0)
+  })
+
+  it('las horas de domingo van todas al 100%', () => {
+    const r = calcularAsistencia(
+      [{ fecha: '2026-06-21', horaEntradaEsperada: null, horaEntradaReal: '09:00', horasTrabajadas: 5, esDomingo: true, ausenciaAprobada: false }],
+      15
+    )
+    expect(r.horasExtra100).toBe(5)
+    expect(r.horasExtra50).toBe(0)
+  })
+
+  it('falta con ausencia aprobada cuenta como justificada, sin ausencia como injustificada', () => {
+    const r = calcularAsistencia(
+      [
+        { fecha: '2026-06-15', horaEntradaEsperada: '08:00', horaEntradaReal: null, ausenciaAprobada: true },
+        { fecha: '2026-06-16', horaEntradaEsperada: '08:00', horaEntradaReal: null, ausenciaAprobada: false },
+      ],
+      15
+    )
+    expect(r.faltasJustificadas).toBe(1)
+    expect(r.faltasInjustificadas).toBe(1)
+  })
+
+  it('jornada parcial (4h) genera extra 50 sobre 4 horas', () => {
+    const r = calcularAsistencia(
+      [{ fecha: '2026-06-15', horaEntradaEsperada: '08:00', horaEntradaReal: '08:00', horasTrabajadas: 6, ausenciaAprobada: false }],
+      15,
+      4
+    )
+    expect(r.horasExtra50).toBe(2)
+  })
+})
