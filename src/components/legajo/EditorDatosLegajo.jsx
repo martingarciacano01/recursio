@@ -26,12 +26,16 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
   })
 
   useEffect(() => {
-    if (!editando) return
+    // Se carga siempre (no solo al editar): la vista de solo lectura
+    // también necesita el nombre del convenio para no mostrar el UUID
+    // crudo (bug reportado: "Categoría" resolvía bien porque `categorias`
+    // se recalculaba a partir de form.convenioId en el mount, pero
+    // `convenios` solo se pedía al entrar en modo edición).
     // Convenios visibles: plantillas globales (empresa_id NULL) + los
     // propios de la empresa (RLS ya filtra, ver 0002_nomina_core.sql).
     supabase.from('nom_convenios').select('id, nombre').order('nombre')
       .then(({ data }) => setConvenios(data || []))
-  }, [editando])
+  }, [])
 
   useEffect(() => {
     if (!form.convenioId) { setCategorias([]); return }
