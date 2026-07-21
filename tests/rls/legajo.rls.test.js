@@ -55,8 +55,13 @@ describe.skipIf(!tieneCredenciales)('RLS nom_familiares / nom_sanciones_personal
     expect(data).toHaveLength(0)
   })
 
-  it('usuario B no puede insertar con empresa_id ajeno', async () => {
+  it('usuario B no puede insertar un familiar con empresa_id ajeno', async () => {
     const { error } = await clienteB.from('nom_familiares').insert({ empresa_id: empresaX.id, personal_id: crypto.randomUUID(), vinculo: 'hijo', nombre: 'Ajeno' })
+    expect(error).not.toBeNull()
+  })
+
+  it('usuario B no puede insertar una sanción con empresa_id ajeno', async () => {
+    const { error } = await clienteB.from('nom_sanciones_personal').insert({ empresa_id: empresaX.id, personal_id: crypto.randomUUID(), tipo: 'apercibimiento', motivo: 'ajeno', fecha: '2026-01-01' })
     expect(error).not.toBeNull()
   })
 })

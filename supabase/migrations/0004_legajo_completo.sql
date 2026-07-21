@@ -1,5 +1,8 @@
 -- 0004_legajo_completo.sql — Fase 1, Task 7
 -- nom_familiares: cargas de familia (asignaciones familiares, ganancias).
+-- personal_id no tiene FK física: personal vive en Presencio y Recursio
+-- solo lo lee a través de nom_v_personal (mismo criterio que nom_legajo
+-- en 0002_nomina_core.sql). La integridad se valida en la app.
 CREATE TABLE IF NOT EXISTS nom_familiares (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   empresa_id        UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
@@ -24,6 +27,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON nom_familiares TO authenticated;
 -- nom_sanciones_personal: calco de la propuesta sanciones_personal de
 -- fichaobra/PROPUESTA_legajo_digital.md, con prefijo nom_ (Recursio no
 -- crea tablas sin prefijo propio, Recursio_Diseno.md 2.1).
+-- personal_id sin FK física, mismo criterio que nom_familiares (arriba).
 CREATE TABLE IF NOT EXISTS nom_sanciones_personal (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   empresa_id        UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
@@ -31,10 +35,10 @@ CREATE TABLE IF NOT EXISTS nom_sanciones_personal (
   tipo              TEXT NOT NULL CHECK (tipo IN ('apercibimiento','suspension','llamado_atencion','otra')),
   motivo            TEXT NOT NULL,
   fecha             DATE NOT NULL,
-  dias_suspension   INTEGER,
+  dias_suspension   INTEGER CHECK (dias_suspension IS NULL OR dias_suspension > 0),
   doc_path          TEXT,
   doc_nombre        TEXT,
-  aplicada_por      UUID,
+  aplicada_por      UUID, -- id de auth.users de quien registró la sanción; sin FK física (mismo criterio que personal_id)
   created_at        TIMESTAMPTZ DEFAULT now()
 );
 ALTER TABLE nom_sanciones_personal ENABLE ROW LEVEL SECURITY;
