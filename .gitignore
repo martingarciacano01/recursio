@@ -30,4 +30,4 @@ dist-ssr
 
 # Directorio .git roto dejado por un problema puntual de locks del sandbox
 # de ejecución (no forma parte del proyecto, ver commit de Task 2).
-.git_broken/
+.git_broken*/
