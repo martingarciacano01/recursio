@@ -68,3 +68,56 @@ export function calcularAsistencia(
 
   return resultado
 }
+
+export interface FichajeCrudo {
+  tipo: string // 'entrada' | 'salida'
+  timestamp: string // ISO
+}
+
+export interface AusenciaRango {
+  fecha_desde: string
+  fecha_hasta: string
+}
+
+// Snapshot diario del período: enumera TODOS los días del rango (los días
+// sin fichaje también existen — si no, las faltas nunca se cuentan),
+// aparea primera entrada / última salida y marca ausencias aprobadas.
+export function construirDiasPeriodo(
+  fichajes: FichajeCrudo[],
+  ausencias: AusenciaRango[],
+  fechaDesde: string,
+  fechaHasta: string
+): DiaAsistencia[] {
+  const porFecha = new Map<string, { entrada: string | null; salida: string | null }>()
+  for (const f of fichajes) {
+    const fecha = f.timestamp.slice(0, 10)
+    const hora = f.timestamp.slice(11, 16)
+    const dia = porFecha.get(fecha) ?? { entrada: null, salida: null }
+    if (f.tipo === 'entrada' && (dia.entrada === null || hora < dia.entrada)) dia.entrada = hora
+    if (f.tipo === 'salida' && (dia.salida === null || hora > dia.salida)) dia.salida = hora
+    porFecha.set(fecha, dia)
+  }
+
+  const dias: DiaAsistencia[] = []
+  const d = new Date(fechaDesde + 'T00:00:00Z')
+  const fin = new Date(fechaHasta + 'T00:00:00Z')
+  while (d <= fin) {
+    const fecha = d.toISOString().slice(0, 10)
+    const dow = d.getUTCDay() // 0 = domingo, 6 = sábado
+    const laborable = dow >= 1 && dow <= 5
+    const reg = porFecha.get(fecha)
+    const horas = reg?.entrada && reg?.salida
+      ? Math.max(0, (aMinutos(reg.salida) - aMinutos(reg.entrada)) / 60)
+      : 0
+    dias.push({
+      fecha,
+      horaEntradaEsperada: laborable ? '08:00' : null,
+      horaEntradaReal: reg?.entrada ?? null,
+      horasTrabajadas: Math.round(horas * 100) / 100,
+      esDomingo: dow === 0,
+      ausenciaAprobada: ausencias.some((a) => fecha >= a.fecha_desde && fecha <= a.fecha_hasta),
+    })
+    d.setUTCDate(d.getUTCDate() + 1)
+  }
+  return dias
+}

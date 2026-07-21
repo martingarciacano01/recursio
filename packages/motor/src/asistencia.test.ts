@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calcularAsistencia } from './asistencia'
+import { calcularAsistencia, construirDiasPeriodo } from './asistencia'
 
 describe('calcularAsistencia', () => {
   it('cuenta tardanza cuando la entrada real supera la tolerancia', () => {
@@ -96,5 +96,45 @@ describe('horas trabajadas, faltas justificadas y extras derivadas', () => {
       4
     )
     expect(r.horasExtra50).toBe(2)
+  })
+})
+
+describe('construirDiasPeriodo', () => {
+  const fichajes = [
+    { tipo: 'entrada', timestamp: '2026-06-15T08:33:00+00:00' },
+    { tipo: 'salida', timestamp: '2026-06-15T18:33:00+00:00' },
+    { tipo: 'entrada', timestamp: '2026-06-17T09:00:00+00:00' }, // sin salida
+  ]
+
+  it('enumera todos los días del rango y aparea entrada/salida', () => {
+    // 2026-06-15 es lunes; rango lunes a viernes
+    const dias = construirDiasPeriodo(fichajes, [], '2026-06-15', '2026-06-19')
+    expect(dias).toHaveLength(5)
+    expect(dias[0]).toMatchObject({ fecha: '2026-06-15', horaEntradaReal: '08:33', horasTrabajadas: 10, horaEntradaEsperada: '08:00' })
+    expect(dias[1]).toMatchObject({ fecha: '2026-06-16', horaEntradaReal: null, horaEntradaEsperada: '08:00' })
+    expect(dias[2]).toMatchObject({ fecha: '2026-06-17', horaEntradaReal: '09:00', horasTrabajadas: 0 })
+  })
+
+  it('marca fin de semana como no esperado y domingo con esDomingo', () => {
+    const dias = construirDiasPeriodo([], [], '2026-06-20', '2026-06-21') // sáb y dom
+    expect(dias[0].horaEntradaEsperada).toBeNull()
+    expect(dias[0].esDomingo).toBe(false)
+    expect(dias[1].horaEntradaEsperada).toBeNull()
+    expect(dias[1].esDomingo).toBe(true)
+  })
+
+  it('marca ausencia aprobada en el rango', () => {
+    const dias = construirDiasPeriodo([], [{ fecha_desde: '2026-06-16', fecha_hasta: '2026-06-16' }], '2026-06-15', '2026-06-17')
+    expect(dias.map((d) => d.ausenciaAprobada)).toEqual([false, true, false])
+  })
+
+  it('integración: faltas y extras del período con calcularAsistencia', () => {
+    const dias = construirDiasPeriodo(fichajes, [{ fecha_desde: '2026-06-16', fecha_hasta: '2026-06-16' }], '2026-06-15', '2026-06-19')
+    const r = calcularAsistencia(dias, 15)
+    expect(r.horasTrabajadas).toBe(10)
+    expect(r.horasExtra50).toBe(2)
+    expect(r.faltasJustificadas).toBe(1) // 16/06
+    expect(r.faltasInjustificadas).toBe(2) // 18 y 19/06 (el 17 tiene entrada)
+    expect(r.tardanzas).toBe(2) // 08:33 y 09:00
   })
 })
