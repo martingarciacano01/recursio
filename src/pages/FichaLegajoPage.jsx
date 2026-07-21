@@ -6,6 +6,7 @@ import { useAuthStore } from '../store/authStore'
 import SeccionColapsable from '../components/legajo/SeccionColapsable'
 import SemaforoLegajo from '../components/legajo/SemaforoLegajo'
 import DocumentosLegajo from '../components/legajo/DocumentosLegajo'
+import { generarLegajoPdf } from '../utils/legajoPdf'
 
 export default function FichaLegajoPage() {
   const { personalId } = useParams()
@@ -16,6 +17,7 @@ export default function FichaLegajoPage() {
   const [cargandoPersona, setCargandoPersona] = useState(true)
   const [errorPersona, setErrorPersona] = useState('')
   const [errorAusencias, setErrorAusencias] = useState('')
+  const [errorExport, setErrorExport] = useState('')
 
   useEffect(() => {
     if (!empresa?.id) return
@@ -49,6 +51,18 @@ export default function FichaLegajoPage() {
 
   const legajo = legajos.find((l) => l.personalId === personalId) || null
 
+  // No se pasan `documentos`: DocumentosLegajo carga su lista internamente y no la expone al padre (evitar refactor grande).
+  const handleExportar = () => {
+    setErrorExport('')
+    try {
+      const doc = generarLegajoPdf({ persona, legajo, familiares, sanciones, ausencias })
+      const idArchivo = String(persona.dni || persona.id).replace(/[^\w.-]/g, '_')
+      doc.save(`legajo-${idArchivo}.pdf`)
+    } catch (e) {
+      setErrorExport('No se pudo generar el PDF: ' + e.message)
+    }
+  }
+
   if (cargandoPersona) return <div className="page">Cargando…</div>
   if (errorPersona) return <div className="page"><div className="card" style={{ color: 'var(--danger)' }}>Error al cargar la persona: {errorPersona}</div></div>
   if (!persona) return <div className="page"><div className="card">No se encontró el legajo solicitado.</div></div>
@@ -59,10 +73,12 @@ export default function FichaLegajoPage() {
         <h1 className="page-title">{persona.nombre}</h1>
         <p className="page-subtitle">DNI {persona.dni || '—'} · {persona.puesto || '—'}</p>
         <div style={{ marginTop: 8 }}><SemaforoLegajo legajo={legajo} /></div>
+        <button onClick={handleExportar} className="btn btn-primary btn-sm" style={{ marginTop: 8 }}>Exportar legajo (PDF)</button>
       </div>
 
       {errorLegajo && <div className="card" style={{ color: 'var(--danger)', marginBottom: '1rem' }}>Error al cargar legajo/familiares/sanciones: {errorLegajo}</div>}
       {errorAusencias && <div className="card" style={{ color: 'var(--danger)', marginBottom: '1rem' }}>Error al cargar ausencias: {errorAusencias}</div>}
+      {errorExport && <div className="card" style={{ color: 'var(--danger)', marginBottom: '1rem' }}>{errorExport}</div>}
 
       <SeccionColapsable titulo="Datos y estado">
         <p>CUIL: {legajo?.cuil || '—'}</p>
