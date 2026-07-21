@@ -6,6 +6,7 @@ import Layout from './components/Layout'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
 import LegajosPage from './pages/LegajosPage'
+import FichaLegajoPage from './pages/FichaLegajoPage'
 import ProximamentePage from './pages/ProximamentePage'
 
 // Rutas del diseño (Recursio_Diseno.md): todas protegidas salvo /login.
@@ -32,7 +33,7 @@ function App() {
         >
           <Route index element={<DashboardPage />} />
           <Route path="legajos" element={<LegajosPage />} />
-          {/* TODO Task 10: ruta legajos/:personalId con FichaLegajoPage */}
+          <Route path="legajos/:personalId" element={<FichaLegajoPage />} />
           <Route path="liquidacion" element={<ProximamentePage titulo="Liquidación" />} />
           <Route path="aprobaciones" element={<ProximamentePage titulo="Aprobaciones" />} />
           <Route path="reportes" element={<ProximamentePage titulo="Reportes" />} />
