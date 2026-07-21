@@ -1,4 +1,4 @@
-import { evaluar } from './interprete'
+import { evaluar } from './interprete.ts'
 
 export interface Concepto {
   codigo: string
