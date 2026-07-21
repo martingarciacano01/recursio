@@ -20,7 +20,7 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
     cbu: legajo?.cbu || '',
     banco: legajo?.banco || '',
     obraSocial: legajo?.obraSocial || '',
-    jornada: legajo?.jornada || '',
+    jornada: legajo?.jornada || 'completa',
     convenioId: legajo?.convenioId || '',
     categoriaId: legajo?.categoriaId || '',
   })
@@ -86,7 +86,13 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
       </div>
       <div>
         <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Jornada</label>
-        <input className="input" value={form.jornada} onChange={(e) => setForm((f) => ({ ...f, jornada: e.target.value }))} placeholder="Ej: Completa, 8hs" />
+        {/* nom_legajo.jornada tiene un CHECK que solo acepta estos dos
+            valores exactos en minúscula (0002_nomina_core.sql) — un input
+            de texto libre como "Completa" rompía el guardado. */}
+        <select className="input" value={form.jornada} onChange={(e) => setForm((f) => ({ ...f, jornada: e.target.value }))}>
+          <option value="completa">Completa</option>
+          <option value="parcial">Parcial</option>
+        </select>
       </div>
       <div>
         <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Convenio</label>
