@@ -6,6 +6,7 @@ import { useAuthStore } from '../store/authStore'
 import SeccionColapsable from '../components/legajo/SeccionColapsable'
 import SemaforoLegajo from '../components/legajo/SemaforoLegajo'
 import DocumentosLegajo from '../components/legajo/DocumentosLegajo'
+import EditorDatosLegajo from '../components/legajo/EditorDatosLegajo'
 import { generarLegajoPdf } from '../utils/legajoPdf'
 
 export default function FichaLegajoPage() {
@@ -92,11 +93,7 @@ export default function FichaLegajoPage() {
       {errorExport && <div className="card" style={{ color: 'var(--danger)', marginBottom: '1rem' }}>{errorExport}</div>}
 
       <SeccionColapsable titulo="Datos y estado">
-        <p>CUIL: {legajo?.cuil || '—'}</p>
-        <p>CBU: {legajo?.cbu || '—'}</p>
-        <p>Banco: {legajo?.banco || '—'}</p>
-        <p>Obra social: {legajo?.obraSocial || '—'}</p>
-        <p>Jornada: {legajo?.jornada || '—'}</p>
+        <EditorDatosLegajo legajo={legajo} personalId={personalId} empresaId={empresaActiva?.id} />
       </SeccionColapsable>
 
       <SeccionColapsable titulo="Documentación">
