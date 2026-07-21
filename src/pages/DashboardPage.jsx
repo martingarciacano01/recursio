@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Users, AlertTriangle } from 'lucide-react'
+import { legajoIncompleto } from '../utils/legajoCompletitud'
 
 // Dashboard mínimo real (Task 5, Step 3): cantidad de personal activo
 // (desde nom_v_personal) y legajos incompletos (personal activo sin
@@ -28,11 +29,10 @@ export default function DashboardPage() {
         setCargando(false)
         return
       }
-      const legajoPorPersonal = new Map((legajos || []).map((l) => [l.personal_id, l]))
-      const faltantes = (personal || []).filter((p) => {
-        const l = legajoPorPersonal.get(p.id)
-        return !l || !l.cuil || !l.cbu || !l.convenio_id || !l.categoria_id
-      }).length
+      const legajoPorPersonal = new Map((legajos || []).map((l) => [l.personal_id, {
+        cuil: l.cuil, cbu: l.cbu, convenioId: l.convenio_id, categoriaId: l.categoria_id,
+      }]))
+      const faltantes = (personal || []).filter((p) => legajoIncompleto(legajoPorPersonal.get(p.id))).length
 
       setTotalActivo((personal || []).length)
       setIncompletos(faltantes)
