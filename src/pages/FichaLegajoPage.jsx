@@ -20,7 +20,6 @@ export default function FichaLegajoPage() {
   const [errorExport, setErrorExport] = useState('')
 
   useEffect(() => {
-    if (!empresa?.id) return
     // Reset explícito: sin esto, al navegar de una ficha a otra la página
     // muestra por un instante los datos de la persona anterior mientras
     // llegan las nuevas cargas (revisión de calidad, Task 10).
@@ -32,7 +31,15 @@ export default function FichaLegajoPage() {
     useLegajoStore.setState({ familiares: [], sanciones: [] })
 
     let cancelado = false
-    cargarLegajos(empresa.id)
+    // cargarLegajos necesita un empresa_id explícito para filtrar
+    // nom_legajo (esa tabla no tiene excepción de superadmin en su RLS
+    // todavía). El resto de las consultas (persona, ausencias, familiares,
+    // sanciones) NO dependen de `empresa` en el cliente: la RLS del lado
+    // del servidor ya resuelve el aislamiento a partir del JWT. Antes,
+    // todo el efecto estaba condicionado a `empresa?.id`, así que un
+    // usuario superadmin (que no tiene una empresa fija asignada) se
+    // quedaba con la página en "Cargando…" para siempre.
+    if (empresa?.id) cargarLegajos(empresa.id)
     cargarFamiliares(personalId)
     cargarSanciones(personalId)
     supabase.from('nom_v_personal').select('*').eq('id', personalId).single().then(({ data, error }) => {
