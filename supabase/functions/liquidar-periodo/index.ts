@@ -22,8 +22,17 @@ Deno.serve(async (req) => {
   const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
 
   const { data: periodo, error: errPeriodo } = await supabase.from('nom_periodos').select('*').eq('id', periodoId).single()
-  if (errPeriodo || !periodo) {
-    return new Response(JSON.stringify({ error: 'período no encontrado' }), {
+  if (errPeriodo) {
+    // Antes esto colapsaba CUALQUIER error de Postgres (columna
+    // inexistente, permiso denegado, etc.) en el mismo "período no
+    // encontrado", ocultando la causa real. Devolvemos el mensaje real
+    // del error para poder diagnosticar sin acceso a los logs de Supabase.
+    return new Response(JSON.stringify({ error: `error al buscar el período: ${errPeriodo.message}`, code: errPeriodo.code }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+  if (!periodo) {
+    return new Response(JSON.stringify({ error: 'período no encontrado', periodoIdRecibido: periodoId }), {
       status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }
