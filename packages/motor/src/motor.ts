@@ -8,6 +8,7 @@ export interface Concepto {
   formula: string
   reglas?: Array<{ orden: number; condicion: string; formula: string }>
   imprimible: boolean
+  categorias?: string[] | null
 }
 
 export interface ItemLiquidado {
@@ -34,6 +35,7 @@ export function liquidarConceptos(
 
   const items: ItemLiquidado[] = []
   let remunerativoAcumulado = 0
+  let noRemunerativoAcumulado = 0
   let bruto = 0
   let totalDescuentos = 0
 
@@ -41,6 +43,7 @@ export function liquidarConceptos(
     const vars: Record<string, number> = {
       ...variablesBase,
       remunerativo_acumulado: remunerativoAcumulado,
+      no_remunerativo_acumulado: noRemunerativoAcumulado,
     }
 
     let formula = concepto.formula
@@ -75,6 +78,7 @@ export function liquidarConceptos(
         bruto += monto
         break
       case 'no_remunerativo':
+        noRemunerativoAcumulado += monto
         bruto += monto
         break
       case 'descuento':
@@ -93,4 +97,15 @@ export function liquidarConceptos(
     totalDescuentos,
     neto: bruto - totalDescuentos,
   }
+}
+
+// Conceptos aplicables a una categoría: sin `categorias` (null/undefined/[])
+// el concepto aplica a todas; con valores, solo si incluye la categoría.
+export function filtrarPorCategoria<T extends { categorias?: string[] | null }>(
+  conceptos: T[],
+  categoriaNombre: string
+): T[] {
+  return conceptos.filter(
+    (c) => !c.categorias || c.categorias.length === 0 || c.categorias.includes(categoriaNombre)
+  )
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { liquidarConceptos } from './motor'
+import { liquidarConceptos, filtrarPorCategoria, type Concepto } from './motor'
 
 const presentismoEscalonado = {
   codigo: 'presentismo',
@@ -68,5 +68,38 @@ describe('liquidarConceptos — presentismo escalonado', () => {
     })
     expect(r.items[0].codigo).toBe('basico')
     expect(r.items[1].codigo).toBe('presentismo')
+  })
+})
+
+describe('no_remunerativo_acumulado', () => {
+  it('acumula los no remunerativos ya liquidados y los expone como variable', () => {
+    const conceptos: Concepto[] = [
+      { codigo: 'nr1', nombre: 'Suma no rem', tipo: 'no_remunerativo', orden: 1, formula: '10000', imprimible: true },
+      { codigo: 'os_nr', nombre: 'OS sobre no rem', tipo: 'descuento', orden: 2, formula: 'no_remunerativo_acumulado * 0.03', imprimible: true },
+    ]
+    const r = liquidarConceptos(conceptos, {})
+    expect(r.items[1].monto).toBe(300)
+  })
+
+  it('arranca en 0 si no hubo no remunerativos previos', () => {
+    const conceptos: Concepto[] = [
+      { codigo: 'x', nombre: 'X', tipo: 'informativo', orden: 1, formula: 'no_remunerativo_acumulado', imprimible: true },
+    ]
+    expect(liquidarConceptos(conceptos, {}).items[0].monto).toBe(0)
+  })
+})
+
+describe('filtrarPorCategoria', () => {
+  const conceptos = [
+    { codigo: 'a', categorias: null },
+    { codigo: 'b', categorias: ['Oficial', 'Medio Oficial'] },
+    { codigo: 'c', categorias: ['Ayudante'] },
+    { codigo: 'd' },
+  ]
+  it('deja pasar los que no tienen categorias (null/undefined) y los que incluyen la categoría', () => {
+    expect(filtrarPorCategoria(conceptos, 'Oficial').map((c) => c.codigo)).toEqual(['a', 'b', 'd'])
+  })
+  it('array vacío equivale a todas las categorías', () => {
+    expect(filtrarPorCategoria([{ codigo: 'e', categorias: [] }], 'Oficial').map((c) => c.codigo)).toEqual(['e'])
   })
 })
