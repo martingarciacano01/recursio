@@ -1,0 +1,6 @@
+{
+  "descripcion": "SINTÉTICO — con adelanto de sueldo descontado",
+  "esReal": false,
+  "variablesBase": { "basico_convenio": 500000, "tardanzas": 0, "faltas_injustificadas": 0, "horas_extra_50": 0, "horas_extra_100": 0, "adelanto_monto": 50000, "tope_sipa": 999999999 },
+  "resultadoEsperado": { "items": [{ "codigo": "adelanto", "montoEsperado": 50000 }], "neto": null }
+}

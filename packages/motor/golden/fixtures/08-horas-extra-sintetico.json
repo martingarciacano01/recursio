@@ -1,0 +1,12 @@
+{
+  "descripcion": "SINTÉTICO — con horas extra al 50% y al 100%",
+  "esReal": false,
+  "variablesBase": { "basico_convenio": 400000, "tardanzas": 0, "faltas_injustificadas": 0, "horas_extra_50": 10, "horas_extra_100": 5, "adelanto_monto": 0, "tope_sipa": 999999999 },
+  "resultadoEsperado": {
+    "items": [
+      { "codigo": "hora_extra_50", "montoEsperado": 30000 },
+      { "codigo": "hora_extra_100", "montoEsperado": 20000 }
+    ],
+    "neto": null
+  }
+}

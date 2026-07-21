@@ -1,0 +1,6 @@
+{
+  "descripcion": "SINTÉTICO — presentismo al 50% (2 tardanzas)",
+  "esReal": false,
+  "variablesBase": { "basico_convenio": 500000, "tardanzas": 2, "faltas_injustificadas": 0, "horas_extra_50": 0, "horas_extra_100": 0, "adelanto_monto": 0, "tope_sipa": 999999999 },
+  "resultadoEsperado": { "items": [{ "codigo": "presentismo", "montoEsperado": 20825 }], "neto": null }
+}

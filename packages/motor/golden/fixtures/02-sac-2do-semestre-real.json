@@ -1,0 +1,21 @@
+{
+  "descripcion": "SAC 2do semestre 2025 — recibo real Asset, legajo 47",
+  "esReal": true,
+  "variablesBase": {
+    "basico_convenio": 1929836.70,
+    "tardanzas": 0,
+    "faltas_injustificadas": 0,
+    "horas_extra_50": 0,
+    "horas_extra_100": 0,
+    "adelanto_monto": 0,
+    "tope_sipa": 999999999
+  },
+  "resultadoEsperado": {
+    "items": [
+      { "codigo": "jubilacion", "montoEsperado": 212282.04 },
+      { "codigo": "ley_19032", "montoEsperado": 57895.10 },
+      { "codigo": "obra_social", "montoEsperado": 57895.10 }
+    ],
+    "neto": 1601765.00
+  }
+}

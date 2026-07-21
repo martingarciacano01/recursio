@@ -1,0 +1,21 @@
+{
+  "descripcion": "Vacaciones 11 días, diciembre 2025 — recibo real Asset, legajo 47",
+  "esReal": true,
+  "variablesBase": {
+    "basico_convenio": 1582226.36,
+    "tardanzas": 0,
+    "faltas_injustificadas": 0,
+    "horas_extra_50": 0,
+    "horas_extra_100": 0,
+    "adelanto_monto": 0,
+    "tope_sipa": 999999999
+  },
+  "resultadoEsperado": {
+    "items": [
+      { "codigo": "jubilacion", "montoEsperado": 174044.90 },
+      { "codigo": "ley_19032", "montoEsperado": 47466.79 },
+      { "codigo": "obra_social", "montoEsperado": 47466.79 }
+    ],
+    "neto": 1313248.00
+  }
+}

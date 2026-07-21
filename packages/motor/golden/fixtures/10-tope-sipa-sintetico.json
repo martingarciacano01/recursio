@@ -1,0 +1,6 @@
+{
+  "descripcion": "SINTÉTICO — jubilación topeada por tope_sipa",
+  "esReal": false,
+  "variablesBase": { "basico_convenio": 2000000, "tardanzas": 0, "faltas_injustificadas": 0, "horas_extra_50": 0, "horas_extra_100": 0, "adelanto_monto": 0, "tope_sipa": 1000000 },
+  "resultadoEsperado": { "items": [{ "codigo": "jubilacion", "montoEsperado": 110000 }], "neto": null }
+}

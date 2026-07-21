@@ -1,0 +1,6 @@
+{
+  "descripcion": "SINTÉTICO — presentismo perdido por más de 3 tardanzas",
+  "esReal": false,
+  "variablesBase": { "basico_convenio": 500000, "tardanzas": 4, "faltas_injustificadas": 0, "horas_extra_50": 0, "horas_extra_100": 0, "adelanto_monto": 0, "tope_sipa": 999999999 },
+  "resultadoEsperado": { "items": [{ "codigo": "presentismo", "montoEsperado": 0 }], "neto": null }
+}

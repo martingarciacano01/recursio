@@ -1,0 +1,6 @@
+{
+  "descripcion": "SINTÉTICO — presentismo perdido por 1 falta injustificada",
+  "esReal": false,
+  "variablesBase": { "basico_convenio": 500000, "tardanzas": 0, "faltas_injustificadas": 1, "horas_extra_50": 0, "horas_extra_100": 0, "adelanto_monto": 0, "tope_sipa": 999999999 },
+  "resultadoEsperado": { "items": [{ "codigo": "presentismo", "montoEsperado": 0 }], "neto": null }
+}
