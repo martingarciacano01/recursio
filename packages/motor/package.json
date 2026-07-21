@@ -1,0 +1,11 @@
+{
+  "name": "@recursio/motor",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": { "test": "vitest run" },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.10"
+  }
+}
