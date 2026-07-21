@@ -1,12 +1,15 @@
 import { useEffect } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { useAuthStore } from './store/authStore'
 import ProtectedRoute from './components/ProtectedRoute'
+import Layout from './components/Layout'
 import LoginPage from './pages/LoginPage'
+import DashboardPage from './pages/DashboardPage'
+import ProximamentePage from './pages/ProximamentePage'
 
-// Router mínimo para verificar login + rutas protegidas (Task 2). El shell
-// completo (Layout, Sidebar, Dashboard real y el resto de rutas del diseño)
-// se construye en la Task 5.
+// Rutas del diseño (Recursio_Diseno.md): todas protegidas salvo /login.
+// Las que no están implementadas todavía muestran "Próximamente" con el
+// shell completo (Layout + Sidebar), no una página en blanco.
 function App() {
   const cargarSesion = useAuthStore((s) => s.cargarSesion)
 
@@ -22,11 +25,18 @@ function App() {
           path="/"
           element={
             <ProtectedRoute>
-              <div className="page">Sesión iniciada. Próximamente: dashboard.</div>
+              <Layout />
             </ProtectedRoute>
           }
-        />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        >
+          <Route index element={<DashboardPage />} />
+          <Route path="legajos" element={<ProximamentePage titulo="Legajos" />} />
+          <Route path="liquidacion" element={<ProximamentePage titulo="Liquidación" />} />
+          <Route path="aprobaciones" element={<ProximamentePage titulo="Aprobaciones" />} />
+          <Route path="reportes" element={<ProximamentePage titulo="Reportes" />} />
+          <Route path="usuarios" element={<ProximamentePage titulo="Usuarios" />} />
+          <Route path="configuracion" element={<ProximamentePage titulo="Configuración" />} />
+        </Route>
       </Routes>
     </BrowserRouter>
   )
