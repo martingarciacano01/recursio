@@ -33,7 +33,7 @@ export default function ConfiguracionPage() {
 
   const personalizar = async () => {
     setClonando(true); setErrorClonado(null)
-    const r = await clonarConvenio(convenio.id)
+    const r = await clonarConvenio(convenio.id, empresaActiva.id)
     setClonando(false)
     if (!r.ok) { setErrorClonado(r.error); return }
     await cargarConvenios(empresaActiva.id)

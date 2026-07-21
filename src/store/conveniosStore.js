@@ -17,9 +17,14 @@ export const useConveniosStore = create((set) => ({
   },
 
   // Clona un convenio global a la empresa (función SQL SECURITY DEFINER,
-  // migración 0012). Devuelve el id del convenio propio.
-  clonarConvenio: async (convenioGlobalId) => {
-    const { data, error } = await supabase.rpc('clonar_convenio', { convenio_global_id: convenioGlobalId })
+  // migración 0012/0013). Devuelve el id del convenio propio. empresaId es
+  // necesario cuando lo ejecuta un Superadmin "viendo como" una empresa
+  // (auth_empresa_id() da NULL para él); para un usuario normal se ignora
+  // del lado del servidor.
+  clonarConvenio: async (convenioGlobalId, empresaId) => {
+    const { data, error } = await supabase.rpc('clonar_convenio', {
+      convenio_global_id: convenioGlobalId, p_empresa_id: empresaId ?? null,
+    })
     if (error) return { ok: false, error: error.message }
     return { ok: true, convenioId: data }
   },
