@@ -1,5 +1,6 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
+import { puede } from '../utils/permisos'
 import {
   LayoutDashboard, FileText, Settings, Calculator,
   CheckSquare, BarChart3, UserCog, LogOut, Landmark, ShieldAlert, LogIn,
@@ -9,14 +10,18 @@ import {
 // plan de ejecución Task 5). Simplificada respecto al Sidebar de
 // Presencio (fichaobra/src/components/layout/Sidebar.jsx): sin roles
 // custom por config todavía (llega con el flujo de aprobación, Fase 3).
+//
+// `accion` (Fase 5G Task 29): gating de UI por rol de nómina (ver
+// src/utils/permisos.js). Dashboard no tiene `accion` = siempre visible
+// para cualquier usuario logueado.
 const NAV_ITEMS = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/legajos', icon: FileText, label: 'Legajos' },
-  { to: '/liquidacion', icon: Calculator, label: 'Liquidación' },
-  { to: '/aprobaciones', icon: CheckSquare, label: 'Aprobaciones' },
-  { to: '/reportes', icon: BarChart3, label: 'Reportes' },
-  { to: '/usuarios', icon: UserCog, label: 'Usuarios' },
-  { to: '/configuracion', icon: Settings, label: 'Configuración' },
+  { to: '/legajos', icon: FileText, label: 'Legajos', accion: 'ver_legajos' },
+  { to: '/liquidacion', icon: Calculator, label: 'Liquidación', accion: 'ver_liquidacion' },
+  { to: '/aprobaciones', icon: CheckSquare, label: 'Aprobaciones', accion: 'aprobar' },
+  { to: '/reportes', icon: BarChart3, label: 'Reportes', accion: 'ver_reportes' },
+  { to: '/usuarios', icon: UserCog, label: 'Usuarios', accion: 'gestionar_usuarios' },
+  { to: '/configuracion', icon: Settings, label: 'Configuración', accion: 'ver_configuracion' },
 ]
 
 const navLinkStyle = (isActive) => ({
@@ -30,7 +35,7 @@ const navLinkStyle = (isActive) => ({
 })
 
 export default function Sidebar() {
-  const { usuario, rol, empresa, empresaVista, logout, salirDeEmpresa } = useAuthStore()
+  const { usuario, rol, empresa, empresaVista, rolesNomina, logout, salirDeEmpresa } = useAuthStore()
   const navigate = useNavigate()
 
   const handleLogout = async () => {
@@ -46,9 +51,15 @@ export default function Sidebar() {
   // Mismo patrón que Presencio (fichaobra/src/components/layout/Sidebar.jsx,
   // NAV_BASE): el item de Superadmin va al final con un separador antes,
   // visible solo para ese rol.
-  const navItems = rol === 'superadmin'
+  // Gating de UI por rol (Fase 5G Task 29, diseño §2.3): superadmin sigue
+  // viendo todo, igual que hoy; para usuarios de empresa se filtra cada
+  // item con `accion` según lo que permite puede(rolesNomina, accion).
+  // Esto es SOLO gating de UI — la RLS del backend (0026_rls_roles.sql,
+  // pendiente) es la que realmente protege los datos.
+  const navItems = (rol === 'superadmin'
     ? [...NAV_ITEMS, { to: '/superadmin', icon: ShieldAlert, label: 'Superadmin', dividerBefore: true }]
     : NAV_ITEMS
+  ).filter((item) => !item.accion || rol === 'superadmin' || puede(rolesNomina, item.accion))
 
   return (
     <aside style={{
