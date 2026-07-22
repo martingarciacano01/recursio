@@ -29,6 +29,8 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
     jornada: legajo?.jornada || 'completa',
     convenioId: legajo?.convenioId || '',
     categoriaId: legajo?.categoriaId || '',
+    fueraConvenio: legajo?.fueraConvenio || false,
+    sueldoConvenido: legajo?.sueldoConvenido || '',
   })
 
   useEffect(() => {
@@ -111,19 +113,61 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
         </select>
       </div>
       <div>
+        <label htmlFor="fuera-convenio-checkbox" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem' }}>
+          <input
+            id="fuera-convenio-checkbox"
+            type="checkbox"
+            checked={form.fueraConvenio}
+            onChange={(e) => {
+              const fueraConvenio = e.target.checked
+              setForm((f) => ({
+                ...f,
+                fueraConvenio,
+                ...(fueraConvenio ? { convenioId: '', categoriaId: '' } : {}),
+              }))
+            }}
+          />
+          Fuera de convenio
+        </label>
+      </div>
+      <div>
         <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Convenio</label>
-        <select className="input" value={form.convenioId} onChange={(e) => setForm((f) => ({ ...f, convenioId: e.target.value, categoriaId: '' }))}>
+        <select
+          className="input"
+          aria-label="Convenio"
+          value={form.convenioId}
+          onChange={(e) => setForm((f) => ({ ...f, convenioId: e.target.value, categoriaId: '' }))}
+          disabled={form.fueraConvenio}
+        >
           <option value="">Elegir convenio…</option>
           {convenios.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
         </select>
       </div>
       <div>
         <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Categoría</label>
-        <select className="input" value={form.categoriaId} onChange={(e) => setForm((f) => ({ ...f, categoriaId: e.target.value }))} disabled={!form.convenioId}>
+        <select
+          className="input"
+          aria-label="Categoría"
+          value={form.categoriaId}
+          onChange={(e) => setForm((f) => ({ ...f, categoriaId: e.target.value }))}
+          disabled={form.fueraConvenio || !form.convenioId}
+        >
           <option value="">Elegir categoría…</option>
           {categorias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
         </select>
       </div>
+      {form.fueraConvenio && (
+        <div>
+          <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Sueldo convenido mensual</label>
+          <input
+            className="input"
+            type="number"
+            placeholder="Sueldo convenido mensual"
+            value={form.sueldoConvenido}
+            onChange={(e) => setForm((f) => ({ ...f, sueldoConvenido: e.target.value }))}
+          />
+        </div>
+      )}
 
       {error && <div style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{error}</div>}
 

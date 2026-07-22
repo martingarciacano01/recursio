@@ -204,28 +204,42 @@ Deno.serve(async (req) => {
   const resultados = []
   for (const persona of personal || []) {
     const legajo = legajoPorPersonal.get(persona.id)
-    if (!legajo?.cuil || !legajo?.cbu || !legajo?.convenio_id || !legajo?.categoria_id) {
-      const faltan = [!legajo?.cuil && 'CUIL', !legajo?.cbu && 'CBU',
-        !legajo?.convenio_id && 'convenio', !legajo?.categoria_id && 'categoría'].filter(Boolean).join(', ')
+    const incompleto = !legajo?.cuil || !legajo?.cbu ||
+      (!legajo?.fuera_convenio && (!legajo?.convenio_id || !legajo?.categoria_id)) ||
+      (legajo?.fuera_convenio && !legajo?.sueldo_convenido)
+    if (incompleto) {
+      const faltan = [
+        !legajo?.cuil && 'CUIL', !legajo?.cbu && 'CBU',
+        !legajo?.fuera_convenio && !legajo?.convenio_id && 'convenio',
+        !legajo?.fuera_convenio && !legajo?.categoria_id && 'categoría',
+        legajo?.fuera_convenio && !legajo?.sueldo_convenido && 'sueldo convenido',
+      ].filter(Boolean).join(', ')
       omitidos.push({ personal_id: persona.id, nombre: persona.nombre, motivo: `legajo incompleto: falta ${faltan}` })
       continue
     }
 
-    const nombreCategoria = nombrePorCategoria.get(legajo.categoria_id) ?? ''
-    const convenioCategoria = convenioPorCategoria.get(legajo.categoria_id) ?? null
-    // 1º intento: convenio del legajo. 2º intento (fallback): convenio de
-    // la fila de categoría, por si el legajo apunta al global pero la
-    // escala se cargó en el clon (o viceversa tras clonar_convenio).
-    let basico = await basicoCacheado(legajo.convenio_id, nombreCategoria)
-    if (basico === null) basico = await basicoCacheado(convenioCategoria, nombreCategoria)
-    if (basico === null || basico.basico === 0) {
-      advertencias.push({
-        personal_id: persona.id,
-        mensaje: `sin escala vigente para "${nombreCategoria}" al ${periodo.fecha_hasta} (convenio ${legajo.convenio_id})`,
-      })
+    // Legajos fuera de convenio no tienen categoria_id, así que no hay
+    // nombre/escala que resolver — solo se calcula para el resto.
+    let nombreCategoria = ''
+    let basico: { basico: number; modalidad: string } | null = null
+    let noRem: number | null = null
+    if (!legajo.fuera_convenio) {
+      nombreCategoria = nombrePorCategoria.get(legajo.categoria_id) ?? ''
+      const convenioCategoria = convenioPorCategoria.get(legajo.categoria_id) ?? null
+      // 1º intento: convenio del legajo. 2º intento (fallback): convenio de
+      // la fila de categoría, por si el legajo apunta al global pero la
+      // escala se cargó en el clon (o viceversa tras clonar_convenio).
+      basico = await basicoCacheado(legajo.convenio_id, nombreCategoria)
+      if (basico === null) basico = await basicoCacheado(convenioCategoria, nombreCategoria)
+      if (basico === null || basico.basico === 0) {
+        advertencias.push({
+          personal_id: persona.id,
+          mensaje: `sin escala vigente para "${nombreCategoria}" al ${periodo.fecha_hasta} (convenio ${legajo.convenio_id})`,
+        })
+      }
+      noRem = await noRemCacheado(legajo.convenio_id, nombreCategoria)
+      if (noRem === null) noRem = await noRemCacheado(convenioCategoria, nombreCategoria)
     }
-    let noRem = await noRemCacheado(legajo.convenio_id, nombreCategoria)
-    if (noRem === null) noRem = await noRemCacheado(convenioCategoria, nombreCategoria)
 
     const { data: fichajes, error: errFichajes } = await supabase.from('nom_v_horas_dia').select('*')
       .eq('personal_id', persona.id).gte('timestamp', periodo.fecha_desde).lte('timestamp', periodo.fecha_hasta)
@@ -251,18 +265,42 @@ Deno.serve(async (req) => {
     // de período liquidado — ver packages/motor/src/basico.ts.
     // basico_convenio se mantiene por compatibilidad con fórmulas viejas
     // que aún lo referencien directamente.
-    const basicoPeriodo = basico
-      ? calcularBasicoPeriodo({
-          modalidad: basico.modalidad as 'hora' | 'mensual' | 'quincenal',
-          basico: basico.basico,
-          tipoPeriodo: periodo.tipo === 'mensual' ? 'mensual' : 'quincenal',
-          horasTrabajadas: asistencia.horasTrabajadas,
-          faltasInjustificadas: asistencia.faltasInjustificadas,
-        })
-      : 0
+    let basicoPeriodo: number
+    let conceptosLegajo: ConceptoConConvenio[]
+    if (legajo.fuera_convenio) {
+      // Sin convenio/categoría: el básico sale directo de sueldo_convenido,
+      // siempre en modalidad "mensual" (pactado como sueldo mensual, no por
+      // hora ni escala). Los conceptos que aplican son los "generales" de
+      // la empresa (convenio_id NULL) — no los de ningún convenio con
+      // categorías, ya que este legajo no pertenece a ninguno.
+      basicoPeriodo = calcularBasicoPeriodo({
+        modalidad: 'mensual',
+        basico: Number(legajo.sueldo_convenido),
+        tipoPeriodo: periodo.tipo === 'mensual' ? 'mensual' : 'quincenal',
+        horasTrabajadas: asistencia.horasTrabajadas,
+        faltasInjustificadas: asistencia.faltasInjustificadas,
+      })
+      conceptosLegajo = conceptosMotor.filter((c) => c.convenioId === null)
+    } else {
+      basicoPeriodo = basico
+        ? calcularBasicoPeriodo({
+            modalidad: basico.modalidad as 'hora' | 'mensual' | 'quincenal',
+            basico: basico.basico,
+            tipoPeriodo: periodo.tipo === 'mensual' ? 'mensual' : 'quincenal',
+            horasTrabajadas: asistencia.horasTrabajadas,
+            faltasInjustificadas: asistencia.faltasInjustificadas,
+          })
+        : 0
+      // Solo conceptos del convenio del legajo (evita duplicar plantilla
+      // global + copia de empresa tras clonar_convenio) y de su categoría.
+      conceptosLegajo = filtrarPorCategoria(
+        conceptosMotor.filter((c) => c.convenioId === legajo.convenio_id),
+        nombreCategoria
+      )
+    }
 
     const variablesBase = {
-      basico_convenio: basico?.basico ?? 0,
+      basico_convenio: legajo.fuera_convenio ? Number(legajo.sueldo_convenido) : (basico?.basico ?? 0),
       basico_periodo: basicoPeriodo,
       horas_trabajadas: asistencia.horasTrabajadas,
       tardanzas: asistencia.tardanzas,
@@ -276,12 +314,6 @@ Deno.serve(async (req) => {
       remunerativo_quincena1: remunerativoQuincena1PorPersona.get(persona.id) ?? 0,
     }
 
-    // Solo conceptos del convenio del legajo (evita duplicar plantilla
-    // global + copia de empresa tras clonar_convenio) y de su categoría.
-    const conceptosLegajo = filtrarPorCategoria(
-      conceptosMotor.filter((c) => c.convenioId === legajo.convenio_id),
-      nombreCategoria
-    )
     const resultado = liquidarConceptos(conceptosLegajo, variablesBase)
 
     // Ajuste de consolidación quincenal: los conceptos con base

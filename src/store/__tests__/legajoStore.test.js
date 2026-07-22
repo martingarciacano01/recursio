@@ -9,6 +9,7 @@ describe('mappers de legajo', () => {
       fechaNacimiento: '1990-01-01', domicilio: 'Calle 1', fechaIngreso: '2020-01-01',
       convenioId: 'c1', categoriaId: 'cat1', cbu: '0000', banco: 'BNA',
       obraSocial: 'OSDE', jornada: 'completa',
+      fueraConvenio: false, sueldoConvenido: undefined,
     })
   })
 

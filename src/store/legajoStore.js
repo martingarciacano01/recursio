@@ -7,6 +7,7 @@ export const legajoFromDB = (r) => ({
   fechaNacimiento: r.fecha_nacimiento, domicilio: r.domicilio, fechaIngreso: r.fecha_ingreso,
   convenioId: r.convenio_id, categoriaId: r.categoria_id, cbu: r.cbu, banco: r.banco,
   obraSocial: r.obra_social, jornada: r.jornada,
+  fueraConvenio: r.fuera_convenio ?? false, sueldoConvenido: r.sueldo_convenido,
 })
 
 export const legajoToDB = (l, empresaId) => ({
@@ -22,6 +23,8 @@ export const legajoToDB = (l, empresaId) => ({
   ...(l.banco !== undefined && { banco: l.banco }),
   ...(l.obraSocial !== undefined && { obra_social: l.obraSocial }),
   ...(l.jornada !== undefined && { jornada: l.jornada }),
+  ...(l.fueraConvenio !== undefined && { fuera_convenio: l.fueraConvenio }),
+  ...(l.sueldoConvenido !== undefined && { sueldo_convenido: l.sueldoConvenido ? Number(l.sueldoConvenido) : null }),
 })
 
 export const familiarFromDB = (r) => ({

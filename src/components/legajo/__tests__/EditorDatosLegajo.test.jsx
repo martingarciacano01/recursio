@@ -40,4 +40,13 @@ describe('EditorDatosLegajo', () => {
     })
     expect(screen.getByText('Comercio')).toBeInTheDocument()
   })
+
+  it('tildar "Fuera de convenio" deshabilita los selects de convenio/categoria', async () => {
+    render(<EditorDatosLegajo legajo={{}} personalId="p1" empresaId="emp-1" />)
+    fireEvent.click(screen.getByText('Editar'))
+    fireEvent.click(screen.getByLabelText('Fuera de convenio'))
+    expect(screen.getByLabelText('Convenio')).toBeDisabled()
+    expect(screen.getByLabelText('Categoría')).toBeDisabled()
+    expect(screen.getByPlaceholderText('Sueldo convenido mensual')).toBeInTheDocument()
+  })
 })
