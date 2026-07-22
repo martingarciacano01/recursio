@@ -7,6 +7,7 @@ import { useFlujosStore } from '../store/flujosStore'
 import { generarReciboPdf } from '../utils/reciboPdf'
 import { calcularHashPdf } from '../utils/reciboHash'
 import { exportarCsv } from '../utils/exportCsv'
+import SelectorPeriodo from '../components/SelectorPeriodo'
 
 export default function LiquidacionPage() {
   const empresa = useAuthStore((s) => s.empresa)
@@ -192,13 +193,13 @@ export default function LiquidacionPage() {
       )}
 
       <div className="card" style={{ marginBottom: '1rem', display: 'flex', gap: 12, alignItems: 'center' }}>
-        <select className="input" value={periodoSeleccionado} onChange={(e) => setPeriodoSeleccionado(e.target.value)} disabled={!empresaId} style={{ maxWidth: 320 }}>
-          <option value="">Elegir período…</option>
-          {periodos.map((p) => (
-            <option key={p.id} value={p.id}>{p.tipo} — {p.fecha_desde} a {p.fecha_hasta} ({p.estado})</option>
-          ))}
-        </select>
-        <button className="btn btn-primary btn-sm" onClick={handleCalcular} disabled={!periodoSeleccionado || calculando}>
+        <SelectorPeriodo periodos={periodos} value={periodoSeleccionado} onChange={setPeriodoSeleccionado} />
+        <button
+          className="btn btn-primary btn-sm"
+          onClick={handleCalcular}
+          disabled={!periodoSeleccionado || calculando || periodoActivo?.estado === 'cerrado'}
+          title={periodoActivo?.estado === 'cerrado' ? 'período cerrado: no se puede recalcular' : undefined}
+        >
           {calculando ? 'Calculando…' : 'Calcular'}
         </button>
         <button className="btn btn-ghost btn-sm" onClick={() => setMostrarFormNuevo((v) => !v)} disabled={!empresaId}>
