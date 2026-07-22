@@ -40,6 +40,22 @@ Deno.serve(async (req) => {
       })
     }
 
+    // has_rol_nomina() solo prueba "soy admin de ALGUNA empresa" (la propia,
+    // resuelta server-side vía auth_empresa_id()) — NO prueba que sea admin
+    // de la empresa indicada en el body. Sin este chequeo, un admin de la
+    // Empresa A podría mandar empresaId de la Empresa B y auto-otorgarse
+    // (o a un tercero) el rol admin ahí. Superadmin sigue exceptuado, igual
+    // que en el resto del código (ver 0008_superadmin_bypass.sql).
+    const { data: esSuperadmin } = await supabase.rpc('is_superadmin')
+    if (!esSuperadmin) {
+      const { data: miEmpresaId } = await supabase.rpc('auth_empresa_id')
+      if (!miEmpresaId || miEmpresaId !== empresaId) {
+        return new Response(JSON.stringify({ error: 'no autorizado para esta empresa' }), {
+          status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+    }
+
     let usuarioId: string
     const { data: existentes } = await supabase.auth.admin.listUsers()
     const existente = existentes?.users?.find((u: any) => u.email === email)
