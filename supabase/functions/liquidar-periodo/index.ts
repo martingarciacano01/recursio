@@ -214,20 +214,18 @@ Deno.serve(async (req) => {
     const tipoPeriodo = periodo.tipo === 'mensual' ? 'mensual' : 'quincenal'
     if (legajo.fuera_convenio) {
       // Sin convenio/categoría: el básico sale directo de sueldo_convenido,
-      // siempre en modalidad "mensual" (pactado como sueldo mensual, no por
-      // hora ni escala). Los conceptos que aplican son los "generales" de
+      // un monto FIJO mensual pactado individualmente con el empleado — no
+      // se calcula con horas trabajadas ni se descuenta por faltas
+      // injustificadas (a diferencia del básico "mensual" de un convenio
+      // normal, que sí las descuenta vía calcularBasicoPeriodo). En período
+      // quincenal se paga la mitad del mensual pactado; en período mensual,
+      // el monto completo. Los conceptos que aplican son los "generales" de
       // la empresa (convenio_id NULL) — no los de ningún convenio con
       // categorías, ya que este legajo no pertenece a ninguno. Nunca se
       // empuja la advertencia de "sin escala vigente": no hay escala que
       // resolver para un legajo fuera de convenio.
       const basicoConvenio = Number(legajo.sueldo_convenido)
-      const basicoPeriodo = calcularBasicoPeriodo({
-        modalidad: 'mensual',
-        basico: basicoConvenio,
-        tipoPeriodo,
-        horasTrabajadas: asistencia.horasTrabajadas,
-        faltasInjustificadas: asistencia.faltasInjustificadas,
-      })
+      const basicoPeriodo = tipoPeriodo === 'mensual' ? basicoConvenio : basicoConvenio / 2
       return {
         basicoPeriodo,
         basicoConvenio,
