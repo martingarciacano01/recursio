@@ -359,8 +359,9 @@ Deno.serve(async (req) => {
   if (Array.isArray(personalIds) && personalIds.length > 0) queryPrevias = queryPrevias.in('personal_id', personalIds)
   const { data: liquidacionesPrevias } = await queryPrevias
   if (liquidacionesPrevias?.length) {
-    await supabase.from('nom_liquidacion_items').delete().in('liquidacion_id', liquidacionesPrevias.map((l: any) => l.id))
-    await supabase.from('nom_liquidaciones').delete().eq('periodo_id', periodoId)
+    const idsPrevias = liquidacionesPrevias.map((l: any) => l.id)
+    await supabase.from('nom_liquidacion_items').delete().in('liquidacion_id', idsPrevias)
+    await supabase.from('nom_liquidaciones').delete().in('id', idsPrevias)
   }
 
   for (const r of resultados) {
