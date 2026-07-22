@@ -49,4 +49,16 @@ describe('EditorDatosLegajo', () => {
     expect(screen.getByLabelText('Categoría')).toBeDisabled()
     expect(screen.getByPlaceholderText('Sueldo convenido mensual')).toBeInTheDocument()
   })
+
+  it('destildar "Fuera de convenio" limpia el sueldo convenido cargado', async () => {
+    render(<EditorDatosLegajo legajo={{}} personalId="p1" empresaId="emp-1" />)
+    fireEvent.click(screen.getByText('Editar'))
+    fireEvent.click(screen.getByLabelText('Fuera de convenio'))
+    fireEvent.change(screen.getByPlaceholderText('Sueldo convenido mensual'), { target: { value: '123456' } })
+    expect(screen.getByPlaceholderText('Sueldo convenido mensual')).toHaveValue(123456)
+
+    fireEvent.click(screen.getByLabelText('Fuera de convenio'))
+    fireEvent.click(screen.getByLabelText('Fuera de convenio'))
+    expect(screen.getByPlaceholderText('Sueldo convenido mensual')).toHaveValue(null)
+  })
 })

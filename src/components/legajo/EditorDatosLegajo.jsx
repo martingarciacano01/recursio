@@ -123,7 +123,7 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
               setForm((f) => ({
                 ...f,
                 fueraConvenio,
-                ...(fueraConvenio ? { convenioId: '', categoriaId: '' } : {}),
+                ...(fueraConvenio ? { convenioId: '', categoriaId: '' } : { sueldoConvenido: '' }),
               }))
             }}
           />
