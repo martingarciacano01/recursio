@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuthStore } from '../store/authStore'
 import { useConveniosStore } from '../store/conveniosStore'
+import { filtrarConveniosVisibles } from '../utils/convenios'
 import TabEscalas from '../components/config/TabEscalas'
 import TabNoRemunerativos from '../components/config/TabNoRemunerativos'
 import TabAportes from '../components/config/TabAportes'
@@ -31,6 +32,12 @@ export default function ConfiguracionPage() {
 
   const convenio = convenios.find((c) => c.id === convenioId) || null
   const esGlobal = convenio?.empresaId === null
+  // El clon de la empresa pisa al global homónimo en el <select> (evita
+  // ver "UOCRA" repetido); `convenios` sin filtrar se sigue usando arriba
+  // para resolver el convenio activo y detectar si ya existe un clon.
+  const conveniosVisibles = filtrarConveniosVisibles(
+    convenios.map((c) => ({ ...c, empresa_id: c.empresaId }))
+  )
 
   const personalizar = async () => {
     setClonando(true); setErrorClonado(null)
@@ -56,7 +63,7 @@ export default function ConfiguracionPage() {
         <>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
             <select className="input" style={{ maxWidth: 320 }} value={convenioId ?? ''} onChange={(e) => setConvenioId(e.target.value)}>
-              {convenios.map((c) => (
+              {conveniosVisibles.map((c) => (
                 <option key={c.id} value={c.id}>{c.nombre}{c.empresaId === null ? ' (plantilla)' : ''}</option>
               ))}
             </select>

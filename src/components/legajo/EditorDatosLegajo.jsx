@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useLegajoStore } from '../../store/legajoStore'
+import { filtrarConveniosVisibles, categoriasVigentes } from '../../utils/convenios'
 
 // Formulario de edición de "Datos y estado" del legajo — no existía UI
 // para completar CUIL/CBU/convenio/categoría (Fase 1 solo construyó la
@@ -12,8 +13,13 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState('')
 
-  const [convenios, setConvenios] = useState([])
-  const [categorias, setCategorias] = useState([])
+  // `todosConvenios`/`todasCategorias`: listas SIN filtrar, para resolver el
+  // nombre en la vista de solo lectura (el legajo puede apuntar a un id que
+  // el filtro de visibilidad oculta, ej. el global cuando ya existe un clon,
+  // o una versión de categoría vieja). `convenios`/`categorias`: listas
+  // filtradas, solo para los <select> de edición.
+  const [todosConvenios, setTodosConvenios] = useState([])
+  const [todasCategorias, setTodasCategorias] = useState([])
 
   const [form, setForm] = useState({
     cuil: legajo?.cuil || '',
@@ -26,18 +32,28 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
   })
 
   useEffect(() => {
-    if (!editando) return
+    // Se carga siempre (no solo al editar): la vista de solo lectura
+    // también necesita el nombre del convenio para no mostrar el UUID
+    // crudo (bug reportado: "Categoría" resolvía bien porque `categorias`
+    // se recalculaba a partir de form.convenioId en el mount, pero
+    // `convenios` solo se pedía al entrar en modo edición).
     // Convenios visibles: plantillas globales (empresa_id NULL) + los
-    // propios de la empresa (RLS ya filtra, ver 0002_nomina_core.sql).
-    supabase.from('nom_convenios').select('id, nombre').order('nombre')
-      .then(({ data }) => setConvenios(data || []))
-  }, [editando])
+    // propios de la empresa (RLS ya filtra, ver 0002_nomina_core.sql). El
+    // clon de la empresa pisa al global homónimo en el <select>
+    // (filtrarConveniosVisibles); esta lista sin filtrar solo se usa para
+    // resolver el nombre en la vista de solo lectura.
+    supabase.from('nom_convenios').select('id, nombre, empresa_id').order('nombre')
+      .then(({ data }) => setTodosConvenios(data || []))
+  }, [])
 
   useEffect(() => {
-    if (!form.convenioId) { setCategorias([]); return }
-    supabase.from('nom_categorias').select('id, nombre').eq('convenio_id', form.convenioId).order('nombre')
-      .then(({ data }) => setCategorias(data || []))
+    if (!form.convenioId) { setTodasCategorias([]); return }
+    supabase.from('nom_categorias').select('id, nombre, vigencia_desde').eq('convenio_id', form.convenioId).order('nombre')
+      .then(({ data }) => setTodasCategorias(data || []))
   }, [form.convenioId])
+
+  const convenios = filtrarConveniosVisibles(todosConvenios)
+  const categorias = categoriasVigentes(todasCategorias)
 
   const handleGuardar = async () => {
     setError('')
@@ -59,8 +75,8 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
         <p>Banco: {legajo?.banco || '—'}</p>
         <p>Obra social: {legajo?.obraSocial || '—'}</p>
         <p>Jornada: {legajo?.jornada || '—'}</p>
-        <p>Convenio: {convenios.find((c) => c.id === legajo?.convenioId)?.nombre || (legajo?.convenioId ? legajo.convenioId : '—')}</p>
-        <p>Categoría: {categorias.find((c) => c.id === legajo?.categoriaId)?.nombre || (legajo?.categoriaId ? legajo.categoriaId : '—')}</p>
+        <p>Convenio: {todosConvenios.find((c) => c.id === legajo?.convenioId)?.nombre || (legajo?.convenioId ? legajo.convenioId : '—')}</p>
+        <p>Categoría: {todasCategorias.find((c) => c.id === legajo?.categoriaId)?.nombre || (legajo?.categoriaId ? legajo.categoriaId : '—')}</p>
         <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => setEditando(true)}>Editar</button>
       </div>
     )
