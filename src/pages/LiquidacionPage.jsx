@@ -16,7 +16,8 @@ export default function LiquidacionPage() {
   const empresaActiva = empresa || empresaVista
   const empresaId = empresaActiva?.id || ''
 
-  const { liquidaciones, calculando, error, calcularPeriodo, cargarLiquidaciones, emitirRecibo } = useLiquidacionStore()
+  const { liquidaciones, calculando, error, omitidos, advertencias, calcularPeriodo, cargarLiquidaciones, emitirRecibo } = useLiquidacionStore()
+  const [mostrarAvisos, setMostrarAvisos] = useState(false)
   const [emitiendoRecibo, setEmitiendoRecibo] = useState(null)
   const [errorRecibo, setErrorRecibo] = useState('')
   const { flujos, cargarFlujos, iniciarFlujo } = useFlujosStore()
@@ -224,6 +225,28 @@ export default function LiquidacionPage() {
 
       {error && <div className="card" style={{ color: 'var(--danger)' }}>Error: {error}</div>}
       {errorRecibo && <div className="card" style={{ color: 'var(--danger)' }}>Error al emitir recibo: {errorRecibo}</div>}
+
+      {(omitidos.length > 0 || advertencias.length > 0) && (
+        <div className="card" style={{ marginBottom: '1rem', background: 'var(--warning-bg, rgba(234,179,8,0.12))', border: '1px solid var(--warning, #eab308)' }}>
+          <div
+            style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+            onClick={() => setMostrarAvisos((v) => !v)}
+          >
+            <strong>⚠ {omitidos.length} persona(s) no liquidada(s) / {advertencias.length} advertencia(s)</strong>
+            <span style={{ marginLeft: 'auto' }}>{mostrarAvisos ? '▾' : '▸'}</span>
+          </div>
+          {mostrarAvisos && (
+            <div style={{ marginTop: 8, fontSize: '0.85rem' }}>
+              {omitidos.map((o) => (
+                <div key={o.personal_id}>• {o.nombre || o.personal_id}: {o.motivo}</div>
+              ))}
+              {advertencias.map((a, i) => (
+                <div key={`${a.personal_id}-${i}`}>• {personalPorId.get(a.personal_id) || a.personal_id}: {a.mensaje}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {liquidaciones.length > 0 && periodoActivo && (
         <div className="card" style={{ marginBottom: '1rem', display: 'flex', gap: 16, alignItems: 'baseline', flexWrap: 'wrap' }}>

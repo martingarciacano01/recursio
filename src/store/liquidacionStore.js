@@ -23,12 +23,18 @@ export const itemFromDB = (r) => ({
 // Ejecucion_Sonnet5.md, instrucción 6).
 export const useLiquidacionStore = create((set) => ({
   liquidaciones: [], items: [], calculando: false, error: null,
+  // Legajos que la Edge Function saltea (incompletos) y advertencias de
+  // escala faltante por persona — nada de $0 silenciosos (Fase 5A Task 2).
+  omitidos: [], advertencias: [],
 
   calcularPeriodo: async (periodoId) => {
     set({ calculando: true, error: null })
     const { data, error } = await supabase.functions.invoke('liquidar-periodo', { body: { periodoId } })
-    if (error) { set({ error: error.message, calculando: false }); return { ok: false, error: error.message } }
-    set({ calculando: false })
+    if (error) {
+      set({ error: error.message, calculando: false, omitidos: [], advertencias: [] })
+      return { ok: false, error: error.message }
+    }
+    set({ calculando: false, omitidos: data?.omitidos ?? [], advertencias: data?.advertencias ?? [] })
     return { ok: true, data }
   },
 

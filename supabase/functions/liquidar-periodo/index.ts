@@ -12,6 +12,30 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// clave de escala: convenio + nombre de la categoría, vigente al cierre del
+// período. Se prueba primero contra el convenio del LEGAJO (si el legajo
+// quedó apuntando a la fila de categoría del convenio global tras
+// clonar_convenio, la escala cargada en el clon de la empresa igual se
+// encuentra) y, si no hay nada ahí, se cae al convenio de la fila de
+// categoría — nunca se devuelve $0 en silencio: null indica "no hay escala".
+async function resolverBasico(supabase: any, convenioId: string | null, nombre: string, fechaHasta: string): Promise<number | null> {
+  if (!convenioId) return null
+  const { data } = await supabase.from('nom_categorias').select('basico')
+    .eq('convenio_id', convenioId).eq('nombre', nombre)
+    .lte('vigencia_desde', fechaHasta)
+    .order('vigencia_desde', { ascending: false }).limit(1)
+  return data?.length ? Number(data[0].basico) : null
+}
+
+async function resolverNoRem(supabase: any, convenioId: string | null, nombre: string, fechaHasta: string): Promise<number | null> {
+  if (!convenioId) return null
+  const { data } = await supabase.from('nom_no_remunerativos').select('monto')
+    .eq('convenio_id', convenioId).eq('categoria_nombre', nombre)
+    .lte('vigencia_desde', fechaHasta)
+    .order('vigencia_desde', { ascending: false }).limit(1)
+  return data?.length ? Number(data[0].monto) : null
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -54,7 +78,7 @@ Deno.serve(async (req) => {
     reglas: (c.nom_concepto_reglas || []).map((r: any) => ({ orden: r.orden, condicion: r.condicion, formula: r.formula })),
   }))
 
-  const { data: personal, error: errPersonal } = await supabase.from('nom_v_personal').select('id').eq('empresa_id', periodo.empresa_id).eq('estado', 'activo')
+  const { data: personal, error: errPersonal } = await supabase.from('nom_v_personal').select('id, nombre').eq('empresa_id', periodo.empresa_id).eq('estado', 'activo')
   const { data: legajos, error: errLegajos } = await supabase.from('nom_legajo').select('*').eq('empresa_id', periodo.empresa_id)
 
   // Estos errores se ignoraban (data quedaba null) y la función devolvía
@@ -136,13 +160,12 @@ Deno.serve(async (req) => {
     adelantoPorPersona.set(a.personal_id, (adelantoPorPersona.get(a.personal_id) ?? 0) + Number(a.monto))
   }
 
-  // basico vigente por categoría: legajo.categoria_id apunta a UNA fila de
-  // nom_categorias, pero la escala se versiona por (convenio, nombre,
-  // vigencia_desde) — hay que buscar la fila vigente al cierre del período.
+  // categoria_id → { convenioId, nombre } de la fila a la que apunta el
+  // legajo (solo para tener el nombre; la escala real se resuelve por
+  // persona más abajo, probando primero el convenio DEL LEGAJO).
   const categoriaIds = [...new Set((legajos || []).map((l: any) => l.categoria_id).filter(Boolean))]
-  const basicoPorCategoria = new Map<string, number>()
   const nombrePorCategoria = new Map<string, string>()
-  const noRemPorCategoria = new Map<string, number>()
+  const convenioPorCategoria = new Map<string, string>()
   if (categoriaIds.length > 0) {
     const { data: cats, error: errCats } = await supabase.from('nom_categorias')
       .select('id, convenio_id, nombre').in('id', categoriaIds)
@@ -152,25 +175,56 @@ Deno.serve(async (req) => {
       })
     }
     for (const cat of cats || []) {
-      const { data: vig } = await supabase.from('nom_categorias').select('basico')
-        .eq('convenio_id', cat.convenio_id).eq('nombre', cat.nombre)
-        .lte('vigencia_desde', periodo.fecha_hasta)
-        .order('vigencia_desde', { ascending: false }).limit(1)
-      basicoPorCategoria.set(cat.id, Number(vig?.[0]?.basico ?? 0))
-
       nombrePorCategoria.set(cat.id, cat.nombre)
-      const { data: nr } = await supabase.from('nom_no_remunerativos').select('monto')
-        .eq('convenio_id', cat.convenio_id).eq('categoria_nombre', cat.nombre)
-        .lte('vigencia_desde', periodo.fecha_hasta)
-        .order('vigencia_desde', { ascending: false }).limit(1)
-      noRemPorCategoria.set(cat.id, Number(nr?.[0]?.monto ?? 0))
+      convenioPorCategoria.set(cat.id, cat.convenio_id)
     }
   }
+
+  // Caches por clave `${convenioId}:${nombre}` para no repetir queries
+  // entre legajos que comparten convenio y categoría.
+  const cacheBasico = new Map<string, number | null>()
+  const cacheNoRem = new Map<string, number | null>()
+  async function basicoCacheado(convenioId: string | null, nombre: string) {
+    const clave = `${convenioId}:${nombre}`
+    if (!cacheBasico.has(clave)) cacheBasico.set(clave, await resolverBasico(supabase, convenioId, nombre, periodo.fecha_hasta))
+    return cacheBasico.get(clave) ?? null
+  }
+  async function noRemCacheado(convenioId: string | null, nombre: string) {
+    const clave = `${convenioId}:${nombre}`
+    if (!cacheNoRem.has(clave)) cacheNoRem.set(clave, await resolverNoRem(supabase, convenioId, nombre, periodo.fecha_hasta))
+    return cacheNoRem.get(clave) ?? null
+  }
+
+  // Legajos que se saltean (incompletos) y advertencias de escala faltante
+  // por persona — nunca más un $0 silencioso sin explicación.
+  const omitidos: { personal_id: string; nombre: string; motivo: string }[] = []
+  const advertencias: { personal_id: string; mensaje: string }[] = []
 
   const resultados = []
   for (const persona of personal || []) {
     const legajo = legajoPorPersonal.get(persona.id)
-    if (!legajo?.cuil || !legajo?.cbu || !legajo?.convenio_id || !legajo?.categoria_id) continue // legajo incompleto, no liquida
+    if (!legajo?.cuil || !legajo?.cbu || !legajo?.convenio_id || !legajo?.categoria_id) {
+      const faltan = [!legajo?.cuil && 'CUIL', !legajo?.cbu && 'CBU',
+        !legajo?.convenio_id && 'convenio', !legajo?.categoria_id && 'categoría'].filter(Boolean).join(', ')
+      omitidos.push({ personal_id: persona.id, nombre: persona.nombre, motivo: `legajo incompleto: falta ${faltan}` })
+      continue
+    }
+
+    const nombreCategoria = nombrePorCategoria.get(legajo.categoria_id) ?? ''
+    const convenioCategoria = convenioPorCategoria.get(legajo.categoria_id) ?? null
+    // 1º intento: convenio del legajo. 2º intento (fallback): convenio de
+    // la fila de categoría, por si el legajo apunta al global pero la
+    // escala se cargó en el clon (o viceversa tras clonar_convenio).
+    let basico = await basicoCacheado(legajo.convenio_id, nombreCategoria)
+    if (basico === null) basico = await basicoCacheado(convenioCategoria, nombreCategoria)
+    if (basico === null || basico === 0) {
+      advertencias.push({
+        personal_id: persona.id,
+        mensaje: `sin escala vigente para "${nombreCategoria}" al ${periodo.fecha_hasta} (convenio ${legajo.convenio_id})`,
+      })
+    }
+    let noRem = await noRemCacheado(legajo.convenio_id, nombreCategoria)
+    if (noRem === null) noRem = await noRemCacheado(convenioCategoria, nombreCategoria)
 
     const { data: fichajes, error: errFichajes } = await supabase.from('nom_v_horas_dia').select('*')
       .eq('personal_id', persona.id).gte('timestamp', periodo.fecha_desde).lte('timestamp', periodo.fecha_hasta)
@@ -192,7 +246,7 @@ Deno.serve(async (req) => {
     const asistencia = calcularAsistencia(dias, 15, legajo.jornada === 'parcial' ? 4 : 8)
 
     const variablesBase = {
-      basico_convenio: basicoPorCategoria.get(legajo.categoria_id) ?? 0,
+      basico_convenio: basico ?? 0,
       horas_trabajadas: asistencia.horasTrabajadas,
       tardanzas: asistencia.tardanzas,
       faltas_injustificadas: asistencia.faltasInjustificadas,
@@ -201,7 +255,7 @@ Deno.serve(async (req) => {
       horas_extra_100: asistencia.horasExtra100,
       adelanto_monto: adelantoPorPersona.get(persona.id) ?? 0,
       tope_sipa: topeSipa,
-      no_rem_convenio: noRemPorCategoria.get(legajo.categoria_id) ?? 0,
+      no_rem_convenio: noRem ?? 0,
       remunerativo_quincena1: remunerativoQuincena1PorPersona.get(persona.id) ?? 0,
     }
 
@@ -209,7 +263,7 @@ Deno.serve(async (req) => {
     // global + copia de empresa tras clonar_convenio) y de su categoría.
     const conceptosLegajo = filtrarPorCategoria(
       conceptosMotor.filter((c) => c.convenioId === legajo.convenio_id),
-      nombrePorCategoria.get(legajo.categoria_id) ?? ''
+      nombreCategoria
     )
     const resultado = liquidarConceptos(conceptosLegajo, variablesBase)
 
@@ -261,7 +315,7 @@ Deno.serve(async (req) => {
     }
   }
 
-  return new Response(JSON.stringify({ liquidadas: resultados.length }), {
+  return new Response(JSON.stringify({ liquidadas: resultados.length, omitidos, advertencias }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
   } catch (err) {

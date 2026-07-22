@@ -1,5 +1,20 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { liquidacionFromDB, itemFromDB } from '../liquidacionStore'
+
+vi.mock('../../lib/supabase', () => ({
+  supabase: {
+    functions: {
+      invoke: vi.fn().mockResolvedValue({
+        data: {
+          liquidadas: 1,
+          omitidos: [{ personal_id: 'p1', nombre: 'Juan Pérez', motivo: 'legajo incompleto: falta CUIL' }],
+          advertencias: [{ personal_id: 'p2', mensaje: 'sin escala vigente para "Oficial" al 2026-07-31 (convenio c1)' }],
+        },
+        error: null,
+      }),
+    },
+  },
+}))
 
 describe('mappers de liquidacion', () => {
   it('liquidacionFromDB mapea snake_case a camelCase', () => {
@@ -16,5 +31,16 @@ describe('mappers de liquidacion', () => {
     expect(itemFromDB(row)).toEqual({
       id: 'i1', liquidacionId: 'l1', conceptoCodigo: 'basico', conceptoNombre: 'Básico', tipo: 'remunerativo', monto: 500, reglaAplicada: 'base',
     })
+  })
+})
+
+describe('calcularPeriodo', () => {
+  it('guarda omitidos y advertencias devueltos por la Edge Function', async () => {
+    const { useLiquidacionStore } = await import('../liquidacionStore')
+    const r = await useLiquidacionStore.getState().calcularPeriodo('periodo-1')
+    expect(r.ok).toBe(true)
+    const estado = useLiquidacionStore.getState()
+    expect(estado.omitidos).toEqual([{ personal_id: 'p1', nombre: 'Juan Pérez', motivo: 'legajo incompleto: falta CUIL' }])
+    expect(estado.advertencias).toEqual([{ personal_id: 'p2', mensaje: 'sin escala vigente para "Oficial" al 2026-07-31 (convenio c1)' }])
   })
 })
