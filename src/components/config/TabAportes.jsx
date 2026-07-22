@@ -20,11 +20,11 @@ export default function TabAportes({ convenio, empresaId, soloLectura }) {
   const delConvenio = conceptos.filter((c) => c.convenioId === convenio?.id)
   const lista = delConvenio.filter((c) => c.tipo === 'descuento' || c.tipo === 'aporte_patronal')
 
-  const crear = async ({ config, formula }) => {
+  const crear = async ({ config, formula, codigoRecibo }) => {
     const orden = Math.max(0, ...delConvenio.map((c) => c.orden)) + 1
     const r = await guardarConcepto({
       convenioId: convenio.id, codigo: slug(nuevoNombre), nombre: nuevoNombre.trim(),
-      tipo: nuevoTipo, formula, orden, imprimible: true, config,
+      tipo: nuevoTipo, formula, orden, imprimible: true, config, codigoRecibo,
     }, empresaId)
     if (r.ok) { setNuevoNombre(''); setCreando(false) } else { setErrorGuardado(r.error) }
     return r
@@ -39,8 +39,8 @@ export default function TabAportes({ convenio, empresaId, soloLectura }) {
           <p style={{ color: 'var(--text-secondary)', fontFamily: 'monospace', fontSize: '0.85rem' }}>{c.formula}</p>
           {!soloLectura && (
             <FormularioConcepto concepto={c} categorias={null} conMonto={false}
-              onGuardar={async ({ config, formula }) => {
-                const r = await guardarConcepto({ ...c, config, formula }, empresaId)
+              onGuardar={async ({ config, formula, codigoRecibo }) => {
+                const r = await guardarConcepto({ ...c, config, formula, codigoRecibo }, empresaId)
                 setErrorGuardado(r.ok ? null : r.error)
                 return r
               }} />

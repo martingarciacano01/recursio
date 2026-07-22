@@ -22,7 +22,7 @@ export function validarYGenerarFormula(config) {
 //  concepto: existente (con config) o null para alta
 //  categorias: nombres disponibles del convenio (para el multiselect; null = ocultar)
 //  conMonto: permitir modo nominal (Adicionales sí, Aportes no)
-//  onGuardar({ config, formula, categorias }) → { ok, error? }
+//  onGuardar({ config, formula, categorias, codigoRecibo }) → { ok, error? }
 export default function FormularioConcepto({ concepto, categorias, conMonto, onGuardar }) {
   const cfg = concepto?.config || {}
   const [modo, setModo] = useState(cfg.modo || 'porcentaje')
@@ -31,6 +31,7 @@ export default function FormularioConcepto({ concepto, categorias, conMonto, onG
   const [conTope, setConTope] = useState(Boolean(cfg.tope))
   const [monto, setMonto] = useState(cfg.monto ?? '')
   const [seleccion, setSeleccion] = useState(concepto?.categorias || [])
+  const [codigoRecibo, setCodigoRecibo] = useState(concepto?.codigoRecibo || '')
   const [error, setError] = useState(null)
   const [guardando, setGuardando] = useState(false)
 
@@ -41,7 +42,10 @@ export default function FormularioConcepto({ concepto, categorias, conMonto, onG
     const v = validarYGenerarFormula(config)
     if (!v.ok) { setError(v.error); return }
     setGuardando(true); setError(null)
-    const r = await onGuardar({ config, formula: v.formula, categorias: seleccion.length > 0 ? seleccion : null })
+    const r = await onGuardar({
+      config, formula: v.formula, categorias: seleccion.length > 0 ? seleccion : null,
+      codigoRecibo: codigoRecibo.trim() || null,
+    })
     setGuardando(false)
     if (!r?.ok) setError(r?.error || 'No se pudo guardar')
   }
@@ -86,6 +90,10 @@ export default function FormularioConcepto({ concepto, categorias, conMonto, onG
           <span style={{ color: 'var(--text-secondary)' }}>(ninguna marcada = todas)</span>
         </div>
       )}
+      <div style={{ marginTop: 8 }}>
+        <input className="input" style={{ width: 140 }} placeholder="Código de recibo (ej: 0015)"
+          value={codigoRecibo} onChange={(e) => setCodigoRecibo(e.target.value)} />
+      </div>
       {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
       <button className="btn btn-primary btn-sm" style={{ marginTop: 8 }} onClick={guardar} disabled={guardando}>
         {guardando ? 'Guardando…' : 'Guardar'}

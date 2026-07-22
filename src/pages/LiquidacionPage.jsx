@@ -8,6 +8,7 @@ import { generarReciboPdf } from '../utils/reciboPdf'
 import { calcularHashPdf } from '../utils/reciboHash'
 import { exportarCsv } from '../utils/exportCsv'
 import SelectorPeriodo from '../components/SelectorPeriodo'
+import { etiquetaConcepto } from '../utils/etiquetaConcepto'
 
 export default function LiquidacionPage() {
   const empresa = useAuthStore((s) => s.empresa)
@@ -350,7 +351,7 @@ export default function LiquidacionPage() {
                                   <tbody>
                                     {delGrupo.map((i) => (
                                       <tr key={i.id}>
-                                        <td style={{ width: '55%' }}>{i.concepto_nombre} <span style={{ opacity: 0.6 }}>({i.concepto_codigo})</span></td>
+                                        <td style={{ width: '55%' }}>{etiquetaConcepto(i)} <span style={{ opacity: 0.6 }}>({i.concepto_codigo})</span></td>
                                         <td style={{ opacity: 0.6 }}>regla: {i.regla_aplicada}</td>
                                         <td style={{ textAlign: 'right' }}>${fmt(i.monto)}</td>
                                       </tr>
