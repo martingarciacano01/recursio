@@ -6,6 +6,7 @@ import { useLiquidacionStore } from '../store/liquidacionStore'
 import { useFlujosStore } from '../store/flujosStore'
 import { generarReciboPdf } from '../utils/reciboPdf'
 import { calcularHashPdf } from '../utils/reciboHash'
+import { exportarCsv } from '../utils/exportCsv'
 
 export default function LiquidacionPage() {
   const empresa = useAuthStore((s) => s.empresa)
@@ -37,6 +38,7 @@ export default function LiquidacionPage() {
 
   const [liqExpandida, setLiqExpandida] = useState(null)
   const [itemsPorLiq, setItemsPorLiq] = useState({})
+  const [busqueda, setBusqueda] = useState('')
 
   const periodoActivo = periodos.find((p) => p.id === periodoSeleccionado)
   const fmt = (n) => (Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -126,6 +128,25 @@ export default function LiquidacionPage() {
     if (r.ok) cargarLiquidaciones(periodoSeleccionado)
   }
 
+  const liquidacionesFiltradas = liquidaciones.filter((l) => {
+    const nombre = personalPorId.get(l.personalId) || ''
+    return nombre.toLowerCase().includes(busqueda.toLowerCase())
+  })
+
+  const descargarCsv = () => {
+    exportarCsv(`liquidacion-${periodoActivo?.tipo}-${periodoActivo?.fecha_desde}.csv`, [
+      { titulo: 'Legajo', valor: (l) => l.personalId.slice(0, 8) },
+      { titulo: 'Nombre', valor: (l) => personalPorId.get(l.personalId) || l.personalId },
+      { titulo: 'Horas', valor: (l) => l.detalleHoras?.horasTrabajadas ?? 0 },
+      { titulo: 'HE 50%', valor: (l) => l.detalleHoras?.horasExtra50 ?? 0 },
+      { titulo: 'HE 100%', valor: (l) => l.detalleHoras?.horasExtra100 ?? 0 },
+      { titulo: 'Bruto', valor: (l) => l.bruto },
+      { titulo: 'Aportes', valor: (l) => l.totalAportes },
+      { titulo: 'Contribuciones', valor: (l) => l.totalContribuciones },
+      { titulo: 'Neto', valor: (l) => l.neto },
+    ], liquidacionesFiltradas)
+  }
+
   const handleCrearPeriodo = async () => {
     setErrorCrearPeriodo('')
     if (!empresaId) {
@@ -182,6 +203,9 @@ export default function LiquidacionPage() {
         </button>
         <button className="btn btn-ghost btn-sm" onClick={() => setMostrarFormNuevo((v) => !v)} disabled={!empresaId}>
           {mostrarFormNuevo ? 'Cancelar' : 'Nuevo período'}
+        </button>
+        <button className="btn btn-ghost btn-sm" onClick={descargarCsv} disabled={liquidacionesFiltradas.length === 0}>
+          Descargar CSV
         </button>
         {periodoActivo?.estado === 'abierto' && flujos.length > 0 && (
           <>
@@ -258,6 +282,13 @@ export default function LiquidacionPage() {
       )}
 
       {liquidaciones.length > 0 && (
+        <div className="card" style={{ marginBottom: '1rem' }}>
+          <input className="input" placeholder="Buscar por nombre…" value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)} style={{ maxWidth: 260 }} />
+        </div>
+      )}
+
+      {liquidaciones.length > 0 && (
         <div className="card table-scroll">
           <table className="table">
             <thead>
@@ -268,7 +299,7 @@ export default function LiquidacionPage() {
               </tr>
             </thead>
             <tbody>
-              {liquidaciones.map((l) => {
+              {liquidacionesFiltradas.map((l) => {
                 const dh = l.detalleHoras || {}
                 const items = itemsPorLiq[l.id] || []
                 const grupos = [

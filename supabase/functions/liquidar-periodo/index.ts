@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-  const { periodoId } = await req.json()
+  const { periodoId, personalIds } = await req.json()
   const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
 
   const { data: periodo, error: errPeriodo } = await supabase.from('nom_periodos').select('*').eq('id', periodoId).single()
@@ -79,7 +79,9 @@ Deno.serve(async (req) => {
     reglas: (c.nom_concepto_reglas || []).map((r: any) => ({ orden: r.orden, condicion: r.condicion, formula: r.formula })),
   }))
 
-  const { data: personal, error: errPersonal } = await supabase.from('nom_v_personal').select('id, nombre').eq('empresa_id', periodo.empresa_id).eq('estado', 'activo')
+  let queryPersonal = supabase.from('nom_v_personal').select('id, nombre').eq('empresa_id', periodo.empresa_id).eq('estado', 'activo')
+  if (Array.isArray(personalIds) && personalIds.length > 0) queryPersonal = queryPersonal.in('id', personalIds)
+  const { data: personal, error: errPersonal } = await queryPersonal
   const { data: legajos, error: errLegajos } = await supabase.from('nom_legajo').select('*').eq('empresa_id', periodo.empresa_id)
 
   // Estos errores se ignoraban (data quedaba null) y la función devolvía
@@ -353,7 +355,9 @@ Deno.serve(async (req) => {
 
   // Idempotencia: borra liquidaciones/items previos de este período antes
   // de reinsertar, así un reintento no duplica filas.
-  const { data: liquidacionesPrevias } = await supabase.from('nom_liquidaciones').select('id').eq('periodo_id', periodoId)
+  let queryPrevias = supabase.from('nom_liquidaciones').select('id').eq('periodo_id', periodoId)
+  if (Array.isArray(personalIds) && personalIds.length > 0) queryPrevias = queryPrevias.in('personal_id', personalIds)
+  const { data: liquidacionesPrevias } = await queryPrevias
   if (liquidacionesPrevias?.length) {
     await supabase.from('nom_liquidacion_items').delete().in('liquidacion_id', liquidacionesPrevias.map((l: any) => l.id))
     await supabase.from('nom_liquidaciones').delete().eq('periodo_id', periodoId)
