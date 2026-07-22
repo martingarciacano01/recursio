@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { liquidarConceptos, filtrarPorCategoria, type Concepto } from './motor'
+import { generarFormula } from './formulas'
 
 const presentismoEscalonado = {
   codigo: 'presentismo',
@@ -86,6 +87,20 @@ describe('no_remunerativo_acumulado', () => {
       { codigo: 'x', nombre: 'X', tipo: 'informativo', orden: 1, formula: 'no_remunerativo_acumulado', imprimible: true },
     ]
     expect(liquidarConceptos(conceptos, {}).items[0].monto).toBe(0)
+  })
+})
+
+describe('liquidarConceptos — contribucion sobre base "ambos"', () => {
+  it('18% sobre remunerativo + no remunerativo acumulados', () => {
+    const basico = { codigo: 'basico', nombre: 'Básico', tipo: 'remunerativo' as const, orden: 1, formula: 'basico_periodo', imprimible: true }
+    const sumaNoRem = { codigo: 'suma_no_rem', nombre: 'Suma no remunerativa', tipo: 'no_remunerativo' as const, orden: 2, formula: 'no_rem_convenio', imprimible: true }
+    const contribucion = {
+      codigo: 'contrib_18', nombre: 'Contribución 18%', tipo: 'aporte_patronal' as const, orden: 3,
+      formula: generarFormula({ modo: 'porcentaje', porcentaje: 18, base: 'ambos' }), imprimible: true,
+    }
+    const r = liquidarConceptos([basico, sumaNoRem, contribucion], { basico_periodo: 100000, no_rem_convenio: 50000 })
+    const item = r.items.find((i) => i.codigo === 'contrib_18')!
+    expect(item.monto).toBeCloseTo((100000 + 50000) * 0.18, 2) // 27000
   })
 })
 
