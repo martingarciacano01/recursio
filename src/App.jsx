@@ -38,13 +38,13 @@ function App() {
           }
         >
           <Route index element={<DashboardPage />} />
-          <Route path="legajos" element={<LegajosPage />} />
-          <Route path="legajos/:personalId" element={<FichaLegajoPage />} />
-          <Route path="liquidacion" element={<LiquidacionPage />} />
-          <Route path="aprobaciones" element={<AprobacionesPage />} />
-          <Route path="reportes" element={<ReportesPage />} />
-          <Route path="usuarios" element={<UsuariosPage />} />
-          <Route path="configuracion" element={<ConfiguracionPage />} />
+          <Route path="legajos" element={<ProtectedRoute accion="ver_legajos"><LegajosPage /></ProtectedRoute>} />
+          <Route path="legajos/:personalId" element={<ProtectedRoute accion="ver_legajos"><FichaLegajoPage /></ProtectedRoute>} />
+          <Route path="liquidacion" element={<ProtectedRoute accion="ver_liquidacion"><LiquidacionPage /></ProtectedRoute>} />
+          <Route path="aprobaciones" element={<ProtectedRoute accion="aprobar"><AprobacionesPage /></ProtectedRoute>} />
+          <Route path="reportes" element={<ProtectedRoute accion="ver_reportes"><ReportesPage /></ProtectedRoute>} />
+          <Route path="usuarios" element={<ProtectedRoute accion="gestionar_usuarios"><UsuariosPage /></ProtectedRoute>} />
+          <Route path="configuracion" element={<ProtectedRoute accion="ver_configuracion"><ConfiguracionPage /></ProtectedRoute>} />
           <Route path="superadmin" element={<SuperAdminPage />} />
         </Route>
       </Routes>
