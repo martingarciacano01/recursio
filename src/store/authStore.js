@@ -10,6 +10,7 @@ export const useAuthStore = create((set, get) => ({
   usuario: null,
   empresa: null,
   rol: null,
+  rolesNomina: [],
   cargando: true,
 
   // "Entrar en empresa": solo para usuarios Superadmin (que no tienen
@@ -30,6 +31,7 @@ export const useAuthStore = create((set, get) => ({
     const meta = user.user_metadata || {}
     let rol = meta.rol || null
     let empresaId = meta.empresa_id || null
+    let rolesNomina = []
     try {
       const { data: perfil } = await supabase.rpc('whoami').single()
       if (perfil) {
@@ -39,9 +41,16 @@ export const useAuthStore = create((set, get) => ({
     } catch {
       // sin red o RPC no disponible: se usa el fallback de metadata
     }
+    try {
+      const { data: roles } = await supabase.rpc('whoami_nomina')
+      rolesNomina = roles || []
+    } catch {
+      // sin red o RPC no disponible: sin roles de nomina (gating cierra todo)
+    }
     return {
       usuario: { id: user.id, email: user.email, nombre: meta.nombre || user.email.split('@')[0] },
       rol,
+      rolesNomina,
       empresa: empresaId ? { id: empresaId } : null,
     }
   },
@@ -56,7 +65,7 @@ export const useAuthStore = create((set, get) => ({
 
   logout: async () => {
     await supabase.auth.signOut()
-    set({ session: null, usuario: null, empresa: null, rol: null, empresaVista: null })
+    set({ session: null, usuario: null, empresa: null, rol: null, rolesNomina: [], empresaVista: null })
   },
 
   // Solo debería llamarse con rol === 'superadmin'; no hay chequeo acá
@@ -89,7 +98,7 @@ export const useAuthStore = create((set, get) => ({
     set({ cargando: true })
     const { data } = await supabase.auth.getSession()
     if (!data.session) {
-      set({ session: null, usuario: null, empresa: null, rol: null, empresaVista: null, cargando: false })
+      set({ session: null, usuario: null, empresa: null, rol: null, rolesNomina: [], empresaVista: null, cargando: false })
       return
     }
     const perfil = await get()._resolverPerfil(data.session.user)

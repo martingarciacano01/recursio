@@ -13,6 +13,7 @@ import LiquidacionPage from './pages/LiquidacionPage'
 import AprobacionesPage from './pages/AprobacionesPage'
 import ReportesPage from './pages/ReportesPage'
 import SuperAdminPage from './pages/SuperAdminPage'
+import UsuariosPage from './pages/UsuariosPage'
 
 // Rutas del diseño (Recursio_Diseno.md): todas protegidas salvo /login.
 // Las que no están implementadas todavía muestran "Próximamente" con el
@@ -42,7 +43,7 @@ function App() {
           <Route path="liquidacion" element={<LiquidacionPage />} />
           <Route path="aprobaciones" element={<AprobacionesPage />} />
           <Route path="reportes" element={<ReportesPage />} />
-          <Route path="usuarios" element={<ProximamentePage titulo="Usuarios" />} />
+          <Route path="usuarios" element={<UsuariosPage />} />
           <Route path="configuracion" element={<ConfiguracionPage />} />
           <Route path="superadmin" element={<SuperAdminPage />} />
         </Route>

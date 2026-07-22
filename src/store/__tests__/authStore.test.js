@@ -88,6 +88,19 @@ describe('authStore', () => {
     expect(useAuthStore.getState().empresaVista).toEqual({ id: 'e1', nombre: 'Asset Construcciones', colorPrimario: null, colorSecundario: null })
   })
 
+  it('cargarSesion resuelve rolesNomina via whoami_nomina()', async () => {
+    supabase.auth.getSession.mockResolvedValue({
+      data: { session: { user: { id: 'u1', email: 'a@a.com', user_metadata: {} } } },
+    })
+    supabase.rpc.mockImplementation((fn) => {
+      if (fn === 'whoami') return { single: () => Promise.resolve({ data: { rol: 'admin', empresa_id: 'e1' } }) }
+      if (fn === 'whoami_nomina') return Promise.resolve({ data: [{ rol: 'rrhh', alcance_tipo: 'empresa', alcance_id: null, empresa_id: 'e1' }], error: null })
+      return { single: () => Promise.resolve({ data: null }) }
+    })
+    await useAuthStore.getState().cargarSesion()
+    expect(useAuthStore.getState().rolesNomina).toEqual([{ rol: 'rrhh', alcance_tipo: 'empresa', alcance_id: null, empresa_id: 'e1' }])
+  })
+
   it('salirDeEmpresa limpia empresaVista', () => {
     useAuthStore.setState({ empresaVista: { id: 'e1', nombre: 'Asset' } })
     useAuthStore.getState().salirDeEmpresa()
