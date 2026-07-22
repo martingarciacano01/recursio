@@ -27,13 +27,19 @@ describe('generarFormula', () => {
       .toBe('min(remunerativo_acumulado, tope_sipa) * 0.11')
   })
 
+  it('base acumulado_mensual suma remunerativo_quincena1 (consolidacion Q1+Q2)', () => {
+    expect(generarFormula({ modo: 'porcentaje', porcentaje: 11, base: 'acumulado_mensual', tope: 'tope_sipa' }))
+      .toBe('min((remunerativo_acumulado + remunerativo_quincena1), tope_sipa) * 0.11')
+  })
+
   it('las fórmulas generadas son evaluables por el intérprete', () => {
     const configs: ConfigConcepto[] = [
       { modo: 'nominal', monto: 500.5 },
       { modo: 'porcentaje', porcentaje: 11, base: 'remunerativo', tope: 'tope_sipa' },
       { modo: 'porcentaje', porcentaje: 9, base: 'ambos' },
+      { modo: 'porcentaje', porcentaje: 11, base: 'acumulado_mensual', tope: 'tope_sipa' },
     ]
-    const vars = { remunerativo_acumulado: 1000000, no_remunerativo_acumulado: 100000, tope_sipa: 800000 }
+    const vars = { remunerativo_acumulado: 1000000, no_remunerativo_acumulado: 100000, tope_sipa: 800000, remunerativo_quincena1: 500000 }
     for (const c of configs) {
       expect(typeof evaluar(generarFormula(c), vars)).toBe('number')
     }

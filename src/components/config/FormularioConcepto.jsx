@@ -65,6 +65,7 @@ export default function FormularioConcepto({ concepto, categorias, conMonto, onG
             <option value="remunerativo">lo remunerativo</option>
             <option value="no_remunerativo">lo no remunerativo</option>
             <option value="ambos">remunerativo + no remunerativo</option>
+            <option value="acumulado_mensual">acumulado del mes (quincena 1+2, UOCRA)</option>
           </select>
           <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <input type="checkbox" checked={conTope} onChange={(e) => setConTope(e.target.checked)} />

@@ -47,10 +47,10 @@ Deno.serve(async (req) => {
     .select('*, nom_concepto_reglas(*)')
     .or(`empresa_id.is.null,empresa_id.eq.${periodo.empresa_id}`)
 
-  type ConceptoConConvenio = Concepto & { convenioId: string | null }
+  type ConceptoConConvenio = Concepto & { convenioId: string | null; config: any }
   const conceptosMotor: ConceptoConConvenio[] = (conceptos || []).map((c: any) => ({
     codigo: c.codigo, nombre: c.nombre, tipo: c.tipo, orden: c.orden, formula: c.formula, imprimible: c.imprimible,
-    categorias: c.categorias ?? null, convenioId: c.convenio_id ?? null,
+    categorias: c.categorias ?? null, convenioId: c.convenio_id ?? null, config: c.config ?? null,
     reglas: (c.nom_concepto_reglas || []).map((r: any) => ({ orden: r.orden, condicion: r.condicion, formula: r.formula })),
   }))
 
@@ -68,6 +68,50 @@ Deno.serve(async (req) => {
     })
   }
   const legajoPorPersonal = new Map((legajos || []).map((l: any) => [l.personal_id, l]))
+
+  // ─── Consolidación quincenal (Fase 4, Task 28) ────────────────────
+  // Si este período es la quincena 2 de un grupo mensual, se expone
+  // remunerativo_quincena1 (bruto remunerativo ya liquidado en la
+  // quincena 1 del mismo mes, por persona) para que un concepto con
+  // base 'acumulado_mensual' (packages/motor/src/formulas.ts) calcule
+  // el tope sobre el acumulado del mes y no sobre cada quincena aparte.
+  const remunerativoQuincena1PorPersona = new Map<string, number>()
+  // clave `${personalId}|${conceptoCodigo}` → monto ya liquidado en Q1 para
+  // ese concepto puntual; se usa para restar la diferencia en los
+  // conceptos que consolidan sobre 'acumulado_mensual' (ver más abajo,
+  // tras liquidarConceptos) y así no cobrar el mes completo dos veces.
+  const montoQuincena1PorPersonaYCodigo = new Map<string, number>()
+  if (periodo.tipo === 'quincena_2' && periodo.grupo_mensual_id) {
+    const { data: q1 } = await supabase.from('nom_periodos').select('id')
+      .eq('grupo_mensual_id', periodo.grupo_mensual_id).eq('tipo', 'quincena_1').maybeSingle()
+    if (q1) {
+      const { data: liqsQ1 } = await supabase.from('nom_liquidaciones').select('id, personal_id').eq('periodo_id', q1.id)
+      const personalPorLiq = new Map((liqsQ1 || []).map((l: any) => [l.id, l.personal_id]))
+      const idsQ1 = (liqsQ1 || []).map((l: any) => l.id)
+      if (idsQ1.length > 0) {
+        const { data: itemsQ1 } = await supabase.from('nom_liquidacion_items').select('liquidacion_id, monto, tipo, concepto_codigo')
+          .in('liquidacion_id', idsQ1)
+        for (const i of itemsQ1 || []) {
+          const personalId = personalPorLiq.get(i.liquidacion_id)
+          if (!personalId) continue
+          if (i.tipo === 'remunerativo') {
+            remunerativoQuincena1PorPersona.set(personalId, (remunerativoQuincena1PorPersona.get(personalId) ?? 0) + Number(i.monto))
+          }
+          const clave = `${personalId}|${i.concepto_codigo}`
+          montoQuincena1PorPersonaYCodigo.set(clave, (montoQuincena1PorPersonaYCodigo.get(clave) ?? 0) + Number(i.monto))
+        }
+      }
+    }
+  }
+  // Códigos de concepto que consolidan sobre el acumulado del mes: se
+  // liquidan sobre remunerativo_acumulado + remunerativo_quincena1, así
+  // que en la quincena 2 hay que restar lo ya pagado en la quincena 1
+  // para ese mismo concepto (si no, se cobraría el mes completo dos
+  // veces). Resuelto acá y no en el motor puro para no atarlo a la
+  // existencia de "quincenas" — el motor no sabe de calendarios.
+  const codigosConsolidadosPorAcumuladoMensual = new Set(
+    (conceptos || []).filter((c: any) => c.config?.base === 'acumulado_mensual').map((c: any) => c.codigo)
+  )
 
   // ─── Variables que antes eran TODO ────────────────────────────────
   // tope_sipa vigente para el período (nom_parametros, versionado por vigencia)
@@ -158,6 +202,7 @@ Deno.serve(async (req) => {
       adelanto_monto: adelantoPorPersona.get(persona.id) ?? 0,
       tope_sipa: topeSipa,
       no_rem_convenio: noRemPorCategoria.get(legajo.categoria_id) ?? 0,
+      remunerativo_quincena1: remunerativoQuincena1PorPersona.get(persona.id) ?? 0,
     }
 
     // Solo conceptos del convenio del legajo (evita duplicar plantilla
@@ -167,6 +212,25 @@ Deno.serve(async (req) => {
       nombrePorCategoria.get(legajo.categoria_id) ?? ''
     )
     const resultado = liquidarConceptos(conceptosLegajo, variablesBase)
+
+    // Ajuste de consolidación quincenal: los conceptos con base
+    // 'acumulado_mensual' calcularon sobre remunerativo_acumulado +
+    // remunerativo_quincena1 (el mes completo); hay que restar lo ya
+    // pagado en Q1 para ese mismo concepto y no cobrar el mes dos veces.
+    if (periodo.tipo === 'quincena_2' && codigosConsolidadosPorAcumuladoMensual.size > 0) {
+      for (const item of resultado.items) {
+        if (!codigosConsolidadosPorAcumuladoMensual.has(item.codigo)) continue
+        const yaPagadoQ1 = montoQuincena1PorPersonaYCodigo.get(`${persona.id}|${item.codigo}`) ?? 0
+        if (yaPagadoQ1 === 0) continue
+        const original = item.monto
+        item.monto = original - yaPagadoQ1
+        const delta = item.monto - original
+        if (item.tipo === 'descuento') resultado.totalDescuentos += delta
+        if (item.tipo === 'remunerativo' || item.tipo === 'no_remunerativo') resultado.bruto += delta
+      }
+      resultado.neto = resultado.bruto - resultado.totalDescuentos
+    }
+
     resultados.push({ personalId: persona.id, resultado, asistencia })
   }
 

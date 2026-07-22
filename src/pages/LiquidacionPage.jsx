@@ -4,6 +4,8 @@ import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import { useLiquidacionStore } from '../store/liquidacionStore'
 import { useFlujosStore } from '../store/flujosStore'
+import { generarReciboPdf } from '../utils/reciboPdf'
+import { calcularHashPdf } from '../utils/reciboHash'
 
 export default function LiquidacionPage() {
   const empresa = useAuthStore((s) => s.empresa)
@@ -14,7 +16,9 @@ export default function LiquidacionPage() {
   const empresaActiva = empresa || empresaVista
   const empresaId = empresaActiva?.id || ''
 
-  const { liquidaciones, calculando, error, calcularPeriodo, cargarLiquidaciones } = useLiquidacionStore()
+  const { liquidaciones, calculando, error, calcularPeriodo, cargarLiquidaciones, emitirRecibo } = useLiquidacionStore()
+  const [emitiendoRecibo, setEmitiendoRecibo] = useState(null)
+  const [errorRecibo, setErrorRecibo] = useState('')
   const { flujos, cargarFlujos, iniciarFlujo } = useFlujosStore()
   const [flujoElegido, setFlujoElegido] = useState('')
   const [enviandoFlujo, setEnviandoFlujo] = useState(false)
@@ -75,6 +79,45 @@ export default function LiquidacionPage() {
     setItemsPorLiq({})
     if (periodoSeleccionado) cargarLiquidaciones(periodoSeleccionado)
   }, [periodoSeleccionado])
+
+  // Genera el PDF real (art. 140 LCT, src/utils/reciboPdf.js), calcula su
+  // hash SHA-256 (src/utils/reciboHash.js) y asigna numero_recibo vía RPC
+  // (emitir_recibo, migración 0016) — best-effort en los datos de empresa/
+  // legajo que esta pantalla no tenía cargados hasta ahora, para no
+  // duplicar todo el fetching que ya hacen FichaLegajoPage/SuperAdminPage.
+  const handleEmitirRecibo = async (l) => {
+    setErrorRecibo(''); setEmitiendoRecibo(l.id)
+    try {
+      const [{ data: empresaRow }, { data: legajoRow }] = await Promise.all([
+        supabase.from('empresas').select('nombre, cuit, domicilio').eq('id', empresaId).single(),
+        supabase.from('nom_legajo').select('cuil, categoria_id, fecha_ingreso').eq('personal_id', l.personalId).eq('empresa_id', empresaId).single(),
+      ])
+      let categoriaNombre = '—'
+      if (legajoRow?.categoria_id) {
+        const { data: cat } = await supabase.from('nom_categorias').select('nombre').eq('id', legajoRow.categoria_id).single()
+        categoriaNombre = cat?.nombre || '—'
+      }
+      const items = (itemsPorLiq[l.id] || []).map((i) => ({ nombre: i.concepto_nombre, tipo: i.tipo, monto: Number(i.monto) }))
+      const doc = generarReciboPdf({
+        empresa: { nombre: empresaRow?.nombre || empresaActiva?.nombre || '—', cuit: empresaRow?.cuit || '—', domicilio: empresaRow?.domicilio || '—' },
+        persona: {
+          nombre: personalPorId.get(l.personalId) || l.personalId, cuil: legajoRow?.cuil || '—',
+          legajo: l.personalId.slice(0, 8), categoria: categoriaNombre, fechaIngreso: legajoRow?.fecha_ingreso || '—',
+        },
+        periodo: { descripcion: periodoActivo ? `${periodoActivo.tipo} — ${periodoActivo.fecha_desde} a ${periodoActivo.fecha_hasta}` : '' },
+        items,
+        neto: l.neto,
+      })
+      const hash = await calcularHashPdf(doc)
+      const r = await emitirRecibo(l.id, hash)
+      if (!r.ok) { setErrorRecibo(r.error); setEmitiendoRecibo(null); return }
+      doc.save(`recibo-${personalPorId.get(l.personalId) || l.personalId}-${r.numeroRecibo}.pdf`)
+      await cargarLiquidaciones(periodoSeleccionado)
+    } catch (e) {
+      setErrorRecibo(e instanceof Error ? e.message : String(e))
+    }
+    setEmitiendoRecibo(null)
+  }
 
   const handleCalcular = async () => {
     if (!periodoSeleccionado) return
@@ -180,6 +223,7 @@ export default function LiquidacionPage() {
       )}
 
       {error && <div className="card" style={{ color: 'var(--danger)' }}>Error: {error}</div>}
+      {errorRecibo && <div className="card" style={{ color: 'var(--danger)' }}>Error al emitir recibo: {errorRecibo}</div>}
 
       {liquidaciones.length > 0 && periodoActivo && (
         <div className="card" style={{ marginBottom: '1rem', display: 'flex', gap: 16, alignItems: 'baseline', flexWrap: 'wrap' }}>
@@ -235,6 +279,12 @@ export default function LiquidacionPage() {
                     {liqExpandida === l.id && (
                       <tr>
                         <td colSpan={13} style={{ background: 'var(--bg-subtle, rgba(255,255,255,0.03))' }}>
+                          {items.length > 0 && !l.anulado && (
+                            <button className="btn btn-primary btn-sm" style={{ marginBottom: 8 }}
+                              onClick={(e) => { e.stopPropagation(); handleEmitirRecibo(l) }} disabled={emitiendoRecibo === l.id}>
+                              {emitiendoRecibo === l.id ? 'Generando…' : l.numeroRecibo ? 'Regenerar recibo PDF' : 'Emitir recibo PDF'}
+                            </button>
+                          )}
                           {items.length === 0 ? 'Cargando detalle…' : grupos.map(([tipo, titulo]) => {
                             const delGrupo = items.filter((i) => i.tipo === tipo)
                             if (delGrupo.length === 0) return null
