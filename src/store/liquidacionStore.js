@@ -7,6 +7,11 @@ export const liquidacionFromDB = (r) => ({
   totalAportes: r.total_aportes ?? 0,
   totalContribuciones: r.total_contribuciones ?? 0,
   detalleHoras: r.detalle_horas || null,
+  numeroRecibo: r.numero_recibo ?? null,
+  hashPdf: r.hash_pdf ?? null,
+  version: r.version ?? 1,
+  anulado: r.anulado ?? false,
+  motivoAnulacion: r.motivo_anulacion ?? null,
 })
 
 export const itemFromDB = (r) => ({
@@ -37,5 +42,22 @@ export const useLiquidacionStore = create((set) => ({
     const { data, error } = await supabase.from('nom_liquidacion_items').select('*').eq('liquidacion_id', liquidacionId)
     if (error) { set({ error: error.message }); return }
     set({ items: (data || []).map(itemFromDB) })
+  },
+
+  // Asigna numero_recibo (si no tenía) y guarda el hash del PDF entregado
+  // (migración 0016, función emitir_recibo). Se llama después de generar
+  // el PDF con jsPDF y calcularHashPdf (src/utils/reciboHash.js).
+  emitirRecibo: async (liquidacionId, hashPdf) => {
+    const { data, error } = await supabase.rpc('emitir_recibo', { p_liquidacion_id: liquidacionId, p_hash_pdf: hashPdf })
+    if (error) return { ok: false, error: error.message }
+    return { ok: true, numeroRecibo: data }
+  },
+
+  // Anula la liquidación (auditoría, no borra). El caller es responsable
+  // de crear la v+1 con liquidacionAnteriorId si corresponde reliquidar.
+  anularLiquidacion: async (liquidacionId, motivo) => {
+    const { error } = await supabase.rpc('anular_liquidacion', { p_liquidacion_id: liquidacionId, p_motivo: motivo })
+    if (error) return { ok: false, error: error.message }
+    return { ok: true }
   },
 }))

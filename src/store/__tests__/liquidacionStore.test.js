@@ -7,6 +7,7 @@ describe('mappers de liquidacion', () => {
     expect(liquidacionFromDB(row)).toEqual({
       id: 'l1', empresaId: 'e1', periodoId: 'p1', personalId: 'per1', bruto: 1000, neto: 800, estado: 'preliminar',
       totalAportes: 0, totalContribuciones: 0, detalleHoras: null,
+      numeroRecibo: null, hashPdf: null, version: 1, anulado: false, motivoAnulacion: null,
     })
   })
 

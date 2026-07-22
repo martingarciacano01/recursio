@@ -3,6 +3,7 @@ const FragmentoLiquidacion = Fragment
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import { useLiquidacionStore } from '../store/liquidacionStore'
+import { useFlujosStore } from '../store/flujosStore'
 
 export default function LiquidacionPage() {
   const empresa = useAuthStore((s) => s.empresa)
@@ -14,6 +15,10 @@ export default function LiquidacionPage() {
   const empresaId = empresaActiva?.id || ''
 
   const { liquidaciones, calculando, error, calcularPeriodo, cargarLiquidaciones } = useLiquidacionStore()
+  const { flujos, cargarFlujos, iniciarFlujo } = useFlujosStore()
+  const [flujoElegido, setFlujoElegido] = useState('')
+  const [enviandoFlujo, setEnviandoFlujo] = useState(false)
+  const [errorFlujo, setErrorFlujo] = useState('')
   const [periodos, setPeriodos] = useState([])
   const [periodoSeleccionado, setPeriodoSeleccionado] = useState('')
   const [personalPorId, setPersonalPorId] = useState(new Map())
@@ -53,7 +58,17 @@ export default function LiquidacionPage() {
     if (!empresaId) return
     supabase.from('nom_v_personal').select('id, nombre').eq('empresa_id', empresaId)
       .then(({ data }) => setPersonalPorId(new Map((data || []).map((p) => [p.id, p.nombre]))))
+    cargarFlujos(empresaId)
   }, [empresaId])
+
+  const handleEnviarAFlujo = async () => {
+    if (!periodoSeleccionado || !flujoElegido) return
+    setEnviandoFlujo(true); setErrorFlujo('')
+    const r = await iniciarFlujo(periodoSeleccionado, flujoElegido)
+    setEnviandoFlujo(false)
+    if (!r.ok) { setErrorFlujo(r.error); return }
+    cargarPeriodos()
+  }
 
   useEffect(() => {
     setLiqExpandida(null)
@@ -124,6 +139,18 @@ export default function LiquidacionPage() {
         <button className="btn btn-ghost btn-sm" onClick={() => setMostrarFormNuevo((v) => !v)} disabled={!empresaId}>
           {mostrarFormNuevo ? 'Cancelar' : 'Nuevo período'}
         </button>
+        {periodoActivo?.estado === 'abierto' && flujos.length > 0 && (
+          <>
+            <select className="input" style={{ maxWidth: 220 }} value={flujoElegido} onChange={(e) => setFlujoElegido(e.target.value)}>
+              <option value="">Elegir flujo…</option>
+              {flujos.map((f) => <option key={f.id} value={f.id}>{f.nombre}</option>)}
+            </select>
+            <button className="btn btn-ghost btn-sm" onClick={handleEnviarAFlujo} disabled={!flujoElegido || enviandoFlujo}>
+              {enviandoFlujo ? 'Enviando…' : 'Enviar a aprobación'}
+            </button>
+          </>
+        )}
+        {errorFlujo && <span style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{errorFlujo}</span>}
       </div>
 
       {mostrarFormNuevo && (
@@ -198,7 +225,11 @@ export default function LiquidacionPage() {
                       <td>${fmt(l.totalAportes)}</td>
                       <td>${fmt(l.totalContribuciones)}</td>
                       <td><strong>${fmt(l.neto)}</strong></td>
-                      <td><span className="badge badge-neutral">{l.estado}</span></td>
+                      <td>
+                        <span className="badge badge-neutral">{l.estado}</span>
+                        {l.numeroRecibo && <span className="badge badge-neutral" style={{ marginLeft: 4 }}>recibo #{l.numeroRecibo}{l.version > 1 ? ` v${l.version}` : ''}</span>}
+                        {l.anulado && <span className="badge badge-warning" style={{ marginLeft: 4 }}>anulado</span>}
+                      </td>
                       <td>{liqExpandida === l.id ? '▾' : '▸'}</td>
                     </tr>
                     {liqExpandida === l.id && (

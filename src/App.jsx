@@ -10,6 +10,8 @@ import FichaLegajoPage from './pages/FichaLegajoPage'
 import ProximamentePage from './pages/ProximamentePage'
 import ConfiguracionPage from './pages/ConfiguracionPage'
 import LiquidacionPage from './pages/LiquidacionPage'
+import AprobacionesPage from './pages/AprobacionesPage'
+import ReportesPage from './pages/ReportesPage'
 import SuperAdminPage from './pages/SuperAdminPage'
 
 // Rutas del diseño (Recursio_Diseno.md): todas protegidas salvo /login.
@@ -38,8 +40,8 @@ function App() {
           <Route path="legajos" element={<LegajosPage />} />
           <Route path="legajos/:personalId" element={<FichaLegajoPage />} />
           <Route path="liquidacion" element={<LiquidacionPage />} />
-          <Route path="aprobaciones" element={<ProximamentePage titulo="Aprobaciones" />} />
-          <Route path="reportes" element={<ProximamentePage titulo="Reportes" />} />
+          <Route path="aprobaciones" element={<AprobacionesPage />} />
+          <Route path="reportes" element={<ReportesPage />} />
           <Route path="usuarios" element={<ProximamentePage titulo="Usuarios" />} />
           <Route path="configuracion" element={<ConfiguracionPage />} />
           <Route path="superadmin" element={<SuperAdminPage />} />
