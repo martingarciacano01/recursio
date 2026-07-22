@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 // Fila genérica versionada: { nombre, valor, vigenciaDesde }
 export const categoriaFromDB = (r) => ({
   id: r.id, convenioId: r.convenio_id, nombre: r.nombre, valor: Number(r.basico), vigenciaDesde: r.vigencia_desde,
+  modalidad: r.modalidad,
 })
 
 // Agrupa filas versionadas por nombre: vigente = mayor vigenciaDesde <= hoy;
@@ -39,6 +40,7 @@ export const useEscalasStore = create((set) => ({
   guardarVigencias: async (convenioId, filas, vigenciaDesde) => {
     const rows = filas.map((f) => ({
       convenio_id: convenioId, nombre: f.nombre, basico: f.valor, vigencia_desde: vigenciaDesde,
+      modalidad: f.modalidad || 'hora',
     }))
     const { error } = await supabase.from('nom_categorias').insert(rows)
     if (error) return { ok: false, error: error.message }

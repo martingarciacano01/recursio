@@ -2,6 +2,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { liquidarConceptos, filtrarPorCategoria, type Concepto } from '../../../packages/motor/src/motor.ts'
 import { calcularAsistencia, construirDiasPeriodo } from '../../../packages/motor/src/asistencia.ts'
+import { calcularBasicoPeriodo } from '../../../packages/motor/src/basico.ts'
 
 // Mismo patrón CORS que el resto de las Edge Functions de Presencio
 // (fichaobra/supabase/functions/invite-user/index.ts): sin esto, el
@@ -18,13 +19,13 @@ const corsHeaders = {
 // clonar_convenio, la escala cargada en el clon de la empresa igual se
 // encuentra) y, si no hay nada ahí, se cae al convenio de la fila de
 // categoría — nunca se devuelve $0 en silencio: null indica "no hay escala".
-async function resolverBasico(supabase: any, convenioId: string | null, nombre: string, fechaHasta: string): Promise<number | null> {
+async function resolverBasico(supabase: any, convenioId: string | null, nombre: string, fechaHasta: string): Promise<{ basico: number; modalidad: string } | null> {
   if (!convenioId) return null
-  const { data } = await supabase.from('nom_categorias').select('basico')
+  const { data } = await supabase.from('nom_categorias').select('basico, modalidad')
     .eq('convenio_id', convenioId).eq('nombre', nombre)
     .lte('vigencia_desde', fechaHasta)
     .order('vigencia_desde', { ascending: false }).limit(1)
-  return data?.length ? Number(data[0].basico) : null
+  return data?.length ? { basico: Number(data[0].basico), modalidad: data[0].modalidad ?? 'hora' } : null
 }
 
 async function resolverNoRem(supabase: any, convenioId: string | null, nombre: string, fechaHasta: string): Promise<number | null> {
@@ -182,7 +183,7 @@ Deno.serve(async (req) => {
 
   // Caches por clave `${convenioId}:${nombre}` para no repetir queries
   // entre legajos que comparten convenio y categoría.
-  const cacheBasico = new Map<string, number | null>()
+  const cacheBasico = new Map<string, { basico: number; modalidad: string } | null>()
   const cacheNoRem = new Map<string, number | null>()
   async function basicoCacheado(convenioId: string | null, nombre: string) {
     const clave = `${convenioId}:${nombre}`
@@ -217,7 +218,7 @@ Deno.serve(async (req) => {
     // escala se cargó en el clon (o viceversa tras clonar_convenio).
     let basico = await basicoCacheado(legajo.convenio_id, nombreCategoria)
     if (basico === null) basico = await basicoCacheado(convenioCategoria, nombreCategoria)
-    if (basico === null || basico === 0) {
+    if (basico === null || basico.basico === 0) {
       advertencias.push({
         personal_id: persona.id,
         mensaje: `sin escala vigente para "${nombreCategoria}" al ${periodo.fecha_hasta} (convenio ${legajo.convenio_id})`,
@@ -245,8 +246,24 @@ Deno.serve(async (req) => {
     )
     const asistencia = calcularAsistencia(dias, 15, legajo.jornada === 'parcial' ? 4 : 8)
 
+    // basico_periodo: la base del concepto "básico" ya resuelta según la
+    // modalidad pactada en la escala (hora/mensual/quincenal) vs. el tipo
+    // de período liquidado — ver packages/motor/src/basico.ts.
+    // basico_convenio se mantiene por compatibilidad con fórmulas viejas
+    // que aún lo referencien directamente.
+    const basicoPeriodo = basico
+      ? calcularBasicoPeriodo({
+          modalidad: basico.modalidad as 'hora' | 'mensual' | 'quincenal',
+          basico: basico.basico,
+          tipoPeriodo: periodo.tipo === 'mensual' ? 'mensual' : 'quincenal',
+          horasTrabajadas: asistencia.horasTrabajadas,
+          faltasInjustificadas: asistencia.faltasInjustificadas,
+        })
+      : 0
+
     const variablesBase = {
-      basico_convenio: basico ?? 0,
+      basico_convenio: basico?.basico ?? 0,
+      basico_periodo: basicoPeriodo,
       horas_trabajadas: asistencia.horasTrabajadas,
       tardanzas: asistencia.tardanzas,
       faltas_injustificadas: asistencia.faltasInjustificadas,

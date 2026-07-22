@@ -18,6 +18,7 @@ export default function TabEscalas({ convenio, soloLectura }) {
         items={agruparVigencias(categorias, hoy)}
         etiquetaValor="Básico"
         soloLectura={soloLectura}
+        conModalidad
         onGuardar={async (filas, fecha) => {
           const r = await guardarVigencias(convenio.id, filas, fecha)
           if (r.ok) await cargarEscala(convenio.id)

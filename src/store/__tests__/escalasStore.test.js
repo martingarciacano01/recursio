@@ -37,4 +37,9 @@ describe('categoriaFromDB', () => {
     expect(categoriaFromDB({ id: 'k1', convenio_id: 'cv1', nombre: 'Oficial', basico: '123.45', vigencia_desde: '2026-06-01' }))
       .toEqual({ id: 'k1', convenioId: 'cv1', nombre: 'Oficial', valor: 123.45, vigenciaDesde: '2026-06-01' })
   })
+
+  it('categoriaFromDB incluye la modalidad', () => {
+    const row = { id: 'c1', convenio_id: 'v1', nombre: 'Oficial', basico: 1000, vigencia_desde: '2026-01-01', modalidad: 'mensual' }
+    expect(categoriaFromDB(row).modalidad).toBe('mensual')
+  })
 })

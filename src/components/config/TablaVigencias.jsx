@@ -4,9 +4,13 @@ const fmt = (n) => `$ ${Number(n).toLocaleString('es-AR')}`
 
 // items: salida de agruparVigencias → [{ nombre, vigente, historial }]
 // onGuardar(filas, vigenciaDesde) → { ok, error? }
-export default function TablaVigencias({ items, etiquetaValor, soloLectura, onGuardar }) {
+// conModalidad: agrega el selector "Modalidad" (hora/mensual/quincenal) al
+// alta de vigencia — solo tiene sentido para escalas de básico, no para
+// no remunerativos (que no tienen modalidad de pago).
+export default function TablaVigencias({ items, etiquetaValor, soloLectura, onGuardar, conModalidad = false }) {
   const [abierto, setAbierto] = useState(false)
   const [valores, setValores] = useState({})       // nombre -> monto tipeado
+  const [modalidades, setModalidades] = useState({}) // nombre -> modalidad elegida
   const [nuevoNombre, setNuevoNombre] = useState('')
   const [vigenciaDesde, setVigenciaDesde] = useState('')
   const [expandido, setExpandido] = useState(null) // nombre con historial visible
@@ -18,14 +22,14 @@ export default function TablaVigencias({ items, etiquetaValor, soloLectura, onGu
   const guardar = async () => {
     const filas = nombres
       .filter((n) => valores[n] !== undefined && valores[n] !== '')
-      .map((n) => ({ nombre: n, valor: Number(valores[n]) }))
+      .map((n) => ({ nombre: n, valor: Number(valores[n]), ...(conModalidad ? { modalidad: modalidades[n] || 'hora' } : {}) }))
     if (filas.length === 0 || !vigenciaDesde) { setError('Cargá al menos un monto y la fecha de vigencia'); return }
     if (filas.some((f) => !Number.isFinite(f.valor))) { setError('Hay montos inválidos'); return }
     setGuardando(true); setError(null)
     const r = await onGuardar(filas, vigenciaDesde)
     setGuardando(false)
     if (!r?.ok) { setError(r?.error || 'No se pudo guardar'); return }
-    setAbierto(false); setValores({}); setNuevoNombre('')
+    setAbierto(false); setValores({}); setModalidades({}); setNuevoNombre('')
   }
 
   return (
@@ -52,6 +56,18 @@ export default function TablaVigencias({ items, etiquetaValor, soloLectura, onGu
               <span style={{ flex: 1 }}>{n}</span>
               <input className="input" type="number" placeholder="monto" style={{ width: 140 }}
                 value={valores[n] ?? ''} onChange={(e) => setValores((v) => ({ ...v, [n]: e.target.value }))} />
+              {conModalidad && (
+                <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  modalidad
+                  <select aria-label={`modalidad ${n}`} className="input" style={{ width: 120 }}
+                    value={modalidades[n] ?? 'hora'}
+                    onChange={(e) => setModalidades((m) => ({ ...m, [n]: e.target.value }))}>
+                    <option value="hora">hora</option>
+                    <option value="mensual">mensual</option>
+                    <option value="quincenal">quincenal</option>
+                  </select>
+                </label>
+              )}
             </div>
           ))}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
