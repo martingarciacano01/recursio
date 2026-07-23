@@ -32,13 +32,16 @@ export default function FormularioConcepto({ concepto, categorias, conMonto, onG
   const [monto, setMonto] = useState(cfg.monto ?? '')
   const [seleccion, setSeleccion] = useState(concepto?.categorias || [])
   const [codigoRecibo, setCodigoRecibo] = useState(concepto?.codigoRecibo || '')
+  const [grupoRecibo, setGrupoRecibo] = useState(cfg.recibo?.grupo || '')
+  const [detalleRecibo, setDetalleRecibo] = useState(cfg.recibo?.detalle || '')
   const [error, setError] = useState(null)
   const [guardando, setGuardando] = useState(false)
 
   const guardar = async () => {
+    const recibo = { grupo: grupoRecibo || null, detalle: detalleRecibo || null }
     const config = modo === 'nominal'
-      ? { modo, monto: Number(monto) }
-      : { modo, porcentaje: Number(porcentaje), base, tope: conTope ? 'tope_sipa' : null }
+      ? { modo, monto: Number(monto), recibo }
+      : { modo, porcentaje: Number(porcentaje), base, tope: conTope ? 'tope_sipa' : null, recibo }
     const v = validarYGenerarFormula(config)
     if (!v.ok) { setError(v.error); return }
     setGuardando(true); setError(null)
@@ -90,6 +93,27 @@ export default function FormularioConcepto({ concepto, categorias, conMonto, onG
           <span style={{ color: 'var(--text-secondary)' }}>(ninguna marcada = todas)</span>
         </div>
       )}
+      <div style={{ marginTop: 8 }}>
+        <label htmlFor="grupoRecibo" style={{ display: 'block', color: 'var(--text-secondary)' }}>Sección del recibo</label>
+        <select id="grupoRecibo" className="input" style={{ width: 260 }} value={grupoRecibo} onChange={(e) => setGrupoRecibo(e.target.value)}>
+          <option value="">— (no imprime en secciones de recibo) —</option>
+          <option value="contribucion">Costo empleador (contribución)</option>
+          <option value="cct">Costo derivado del CCT</option>
+          <option value="remunerativo">Remunerativo</option>
+          <option value="no_remunerativo">No remunerativo</option>
+          <option value="descuento">Descuento</option>
+        </select>
+        <label htmlFor="detalleRecibo" style={{ display: 'block', color: 'var(--text-secondary)', marginTop: 6 }}>Organismo (detalle inferior)</label>
+        <select id="detalleRecibo" className="input" style={{ width: 260 }} value={detalleRecibo} onChange={(e) => setDetalleRecibo(e.target.value)}>
+          <option value="">— (no participa del detalle) —</option>
+          <option value="sindical">Sindical</option>
+          <option value="seguridad_social">Seguridad Social</option>
+          <option value="obra_social">Obra Social</option>
+          <option value="inssjp">INSSJP</option>
+          <option value="art">ART</option>
+          <option value="scvo">SCVO</option>
+        </select>
+      </div>
       <div style={{ marginTop: 8 }}>
         <input className="input" style={{ width: 140 }} placeholder="Código de recibo (ej: 0015)"
           value={codigoRecibo} onChange={(e) => setCodigoRecibo(e.target.value)} />
