@@ -29,4 +29,22 @@ describe('generarReciboPdf', () => {
     const texto = doc.internal.pages.map((p) => (Array.isArray(p) ? p.join(' ') : '')).join(' ')
     expect(texto).toContain('30-71823067-1')
   })
+
+  it('genera la hoja en A4 apaisado (doble copia lado a lado)', () => {
+    const doc = generarReciboPdf(datosFake)
+    expect(doc.internal.pageSize.getWidth()).toBeGreaterThan(doc.internal.pageSize.getHeight())
+  })
+
+  it('no tira excepción sin logo, con items no_remunerativos/aporte_patronal y sin CUIT/domicilio de empresa', () => {
+    expect(() => generarReciboPdf({
+      ...datosFake,
+      empresa: { nombre: 'Sin datos fiscales', cuit: null, domicilio: null, logoBase64: null },
+      codigoRecibo: '0001',
+      items: [
+        ...datosFake.items,
+        { nombre: 'Bono no remunerativo', tipo: 'no_remunerativo', monto: 50000, codigo: '0099' },
+        { nombre: 'Contribución patronal', tipo: 'aporte_patronal', monto: 30000, codigo: '0088' },
+      ],
+    })).not.toThrow()
+  })
 })

@@ -93,8 +93,12 @@ export default function LiquidacionPage() {
   const handleEmitirRecibo = async (l) => {
     setErrorRecibo(''); setEmitiendoRecibo(l.id)
     try {
-      const [{ data: empresaRow }, { data: legajoRow }] = await Promise.all([
-        supabase.from('empresas').select('nombre, cuit, domicilio').eq('id', empresaId).single(),
+      const [{ data: empresaRow }, { data: configRow }, { data: legajoRow }] = await Promise.all([
+        // `empresas` es compartida con Presencio: solo tiene `nombre` y
+        // `logo_url` (no `cuit`/`domicilio`, que viven en la tabla satélite
+        // `nom_empresa_config`, migración 0021 — pedirlas acá tiraba error).
+        supabase.from('empresas').select('nombre, logo_url').eq('id', empresaId).single(),
+        supabase.from('nom_empresa_config').select('cuit, domicilio').eq('empresa_id', empresaId).maybeSingle(),
         supabase.from('nom_legajo').select('cuil, categoria_id, fecha_ingreso').eq('personal_id', l.personalId).eq('empresa_id', empresaId).single(),
       ])
       let categoriaNombre = '—'
@@ -102,9 +106,34 @@ export default function LiquidacionPage() {
         const { data: cat } = await supabase.from('nom_categorias').select('nombre').eq('id', legajoRow.categoria_id).single()
         categoriaNombre = cat?.nombre || '—'
       }
-      const items = (itemsPorLiq[l.id] || []).map((i) => ({ nombre: i.concepto_nombre, tipo: i.tipo, monto: Number(i.monto) }))
+      // Logo opcional en base64: si falla la descarga (URL vencida, CORS,
+      // red), el recibo se emite igual sin logo — nunca bloquea la emisión.
+      let logoBase64 = null
+      if (empresaRow?.logo_url) {
+        try {
+          const resp = await fetch(empresaRow.logo_url)
+          const blob = await resp.blob()
+          logoBase64 = await new Promise((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () => resolve(reader.result)
+            reader.onerror = reject
+            reader.readAsDataURL(blob)
+          })
+        } catch {
+          logoBase64 = null
+        }
+      }
+      // `nom_liquidacion_items` no persiste `codigo_recibo` (limitación
+      // conocida de la Fase 5B Task 9) — se usa `concepto_codigo`, que sí
+      // está disponible, como columna "Cod" de la tabla del recibo.
+      const items = (itemsPorLiq[l.id] || []).map((i) => ({ nombre: i.concepto_nombre, tipo: i.tipo, monto: Number(i.monto), codigo: i.concepto_codigo }))
       const doc = generarReciboPdf({
-        empresa: { nombre: empresaRow?.nombre || empresaActiva?.nombre || '—', cuit: empresaRow?.cuit || '—', domicilio: empresaRow?.domicilio || '—' },
+        empresa: {
+          nombre: empresaRow?.nombre || empresaActiva?.nombre || '—',
+          cuit: configRow?.cuit || '—',
+          domicilio: configRow?.domicilio || '—',
+          logoBase64,
+        },
         persona: {
           nombre: personalPorId.get(l.personalId) || l.personalId, cuil: legajoRow?.cuil || '—',
           legajo: l.personalId.slice(0, 8), categoria: categoriaNombre, fechaIngreso: legajoRow?.fecha_ingreso || '—',
