@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import SemaforoLegajo from '../components/legajo/SemaforoLegajo'
 import { useAuthStore } from '../store/authStore'
 import { usePaginado } from '../hooks/usePaginado'
+import { filtrarLegajos } from '../utils/filtrarLegajos'
 
 export default function LegajosPage() {
   const empresa = useAuthStore((s) => s.empresa)
@@ -16,6 +17,8 @@ export default function LegajosPage() {
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState('')
   const [total, setTotal] = useState(0)
+  const [busqueda, setBusqueda] = useState('')
+  const [filtroEstado, setFiltroEstado] = useState('todos')
   const { rango, siguientePagina, reset, hayMasPaginas } = usePaginado(100)
 
   // Al cambiar de empresa hay que volver a la página 0: si no, se
@@ -29,10 +32,16 @@ export default function LegajosPage() {
     async function cargar() {
       setCargando(true)
       setError('')
+      // El filtro de estado (activo/inactivo/todos) ahora es client-side
+      // (filtrarLegajos, Task 44/Fase 5D), así que acá NO filtramos por
+      // estado: traemos todos los estados. El count/range de usePaginado
+      // (Fase 5I) sigue aplicándose sobre esta query sin filtro de
+      // estado, o sea que la paginación es server-side sobre el total
+      // real de personal (todos los estados); el filtro de estado se
+      // aplica después, en memoria, solo sobre lo ya cargado en `filas`.
       let qPersonal = supabase
         .from('nom_v_personal')
         .select('id, nombre, dni, puesto, estado', { count: 'estimated' })
-        .eq('estado', 'activo')
         .order('nombre')
         .range(rango[0], rango[1])
       // nom_legajo NO se pagina: sigue trayendo TODOS los legajos de la
@@ -75,14 +84,32 @@ export default function LegajosPage() {
       {error && <div className="card" style={{ color: 'var(--danger)' }}>Error: {error}</div>}
       {!error && empresaActiva && (
         <div className="card table-scroll">
+          <div className="filtros-legajos" style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+            <input
+              type="text"
+              placeholder="Buscar por nombre o DNI…"
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              className="input"
+            />
+            <select
+              value={filtroEstado}
+              onChange={(e) => setFiltroEstado(e.target.value)}
+              className="select"
+            >
+              <option value="activo">Activo</option>
+              <option value="inactivo">Inactivo</option>
+              <option value="todos">Todos</option>
+            </select>
+          </div>
           <table className="table">
             <thead>
               <tr><th>Nombre</th><th>DNI</th><th>Puesto</th><th>Legajo</th><th aria-label="Acciones"></th></tr>
             </thead>
             <tbody>
               {cargando && <tr><td colSpan={5}>Cargando…</td></tr>}
-              {!cargando && filas.length === 0 && <tr><td colSpan={5}>No hay personal activo.</td></tr>}
-              {filas.map((f) => (
+              {!cargando && filtrarLegajos(filas, busqueda, filtroEstado).length === 0 && <tr><td colSpan={5}>No hay personal para mostrar.</td></tr>}
+              {filtrarLegajos(filas, busqueda, filtroEstado).map((f) => (
                 <tr key={f.id}>
                   <td>{f.nombre}</td>
                   <td>{f.dni || '—'}</td>
