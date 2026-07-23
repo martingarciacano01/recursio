@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { liquidacionFromDB, itemFromDB } from '../liquidacionStore'
+import { supabase } from '../../lib/supabase'
 
 vi.mock('../../lib/supabase', () => ({
   supabase: {
@@ -42,5 +43,16 @@ describe('calcularPeriodo', () => {
     const estado = useLiquidacionStore.getState()
     expect(estado.omitidos).toEqual([{ personal_id: 'p1', nombre: 'Juan Pérez', motivo: 'legajo incompleto: falta CUIL' }])
     expect(estado.advertencias).toEqual([{ personal_id: 'p2', mensaje: 'sin escala vigente para "Oficial" al 2026-07-31 (convenio c1)' }])
+  })
+
+  it('reintenta con reanudar:true hasta que la respuesta indica completo', async () => {
+    const { useLiquidacionStore } = await import('../liquidacionStore')
+    const invoke = vi.fn()
+      .mockResolvedValueOnce({ data: { liquidadas: 50, omitidos: [], advertencias: [], completo: false, procesados: 50, total: 120 }, error: null })
+      .mockResolvedValueOnce({ data: { liquidadas: 70, omitidos: [], advertencias: [], completo: true, procesados: 120, total: 120 }, error: null })
+    supabase.functions.invoke = invoke
+    await useLiquidacionStore.getState().calcularPeriodo('periodo-1')
+    expect(invoke).toHaveBeenCalledTimes(2)
+    expect(invoke.mock.calls[1][1].body.reanudar).toBe(true)
   })
 })

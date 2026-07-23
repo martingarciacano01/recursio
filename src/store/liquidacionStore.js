@@ -19,6 +19,21 @@ export const itemFromDB = (r) => ({
   conceptoNombre: r.concepto_nombre, tipo: r.tipo, monto: r.monto, reglaAplicada: r.regla_aplicada,
 })
 
+// Reintenta la Edge Function liquidar-periodo con reanudar:true mientras
+// la respuesta indique completo:false (corte por timeout de la Edge
+// Function con muchos empleados). Tope de 20 intentos: con lotes de ~50
+// personas por invocación cubre 1000 personas, más que el objetivo de
+// 500-1000 de la Decisión 10 del plan maestro (Fase 5i Task 38).
+async function invocarConReintento(body) {
+  let respuesta = await supabase.functions.invoke('liquidar-periodo', { body })
+  let intentos = 1
+  while (!respuesta.error && respuesta.data?.completo === false && intentos < 20) {
+    respuesta = await supabase.functions.invoke('liquidar-periodo', { body: { ...body, reanudar: true } })
+    intentos += 1
+  }
+  return respuesta
+}
+
 // Store SIN persist: contiene montos de sueldo reales (Recursio_Plan_
 // Ejecucion_Sonnet5.md, instrucción 6).
 export const useLiquidacionStore = create((set) => ({
@@ -29,7 +44,7 @@ export const useLiquidacionStore = create((set) => ({
 
   calcularPeriodo: async (periodoId) => {
     set({ calculando: true, error: null })
-    const { data, error } = await supabase.functions.invoke('liquidar-periodo', { body: { periodoId } })
+    const { data, error } = await invocarConReintento({ periodoId })
     if (error) {
       set({ error: error.message, calculando: false, omitidos: [], advertencias: [] })
       return { ok: false, error: error.message }

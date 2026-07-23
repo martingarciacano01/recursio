@@ -290,7 +290,13 @@ export default function LiquidacionPage() {
         </div>
       )}
 
-      {liquidaciones.length > 0 && (
+      {calculando && (
+        <div className="card" style={{ marginBottom: '1rem' }}>
+          Calculando liquidación… (puede tardar unos segundos con muchos empleados)
+        </div>
+      )}
+
+      {!calculando && liquidaciones.length > 0 && (
         <div className="card table-scroll">
           <table className="table">
             <thead>
