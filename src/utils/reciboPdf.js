@@ -1,7 +1,7 @@
 import { jsPDF } from 'jspdf'
-import { numeroALetras } from './numeroALetras'
-import { armarRecibo } from './reciboLayout'
-import { dibujarTorta } from './reciboPie'
+import { numeroALetras } from './numeroALetras.js'
+import { armarRecibo } from './reciboLayout.js'
+import { dibujarTorta } from './reciboPie.js'
 
 const VERDE = [198, 224, 180]        // banda de sección (mismo verde del modelo)
 const GRIS = [230, 230, 230]         // sub-encabezados (REMUNERATIVO, etc.)
