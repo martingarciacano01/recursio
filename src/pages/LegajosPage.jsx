@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import SemaforoLegajo from '../components/legajo/SemaforoLegajo'
 import { useAuthStore } from '../store/authStore'
+import { usePaginado } from '../hooks/usePaginado'
 
 export default function LegajosPage() {
   const empresa = useAuthStore((s) => s.empresa)
@@ -14,30 +15,51 @@ export default function LegajosPage() {
   const [filas, setFilas] = useState([])
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState('')
+  const [total, setTotal] = useState(0)
+  const { rango, siguientePagina, reset, hayMasPaginas } = usePaginado(100)
+
+  // Al cambiar de empresa hay que volver a la página 0: si no, se
+  // arrastraría el offset de paginación de la empresa anterior.
+  useEffect(() => {
+    reset()
+  }, [empresaActiva?.id])
 
   useEffect(() => {
     let cancelado = false
     async function cargar() {
       setCargando(true)
       setError('')
-      let qPersonal = supabase.from('nom_v_personal').select('id, nombre, dni, puesto, estado').eq('estado', 'activo').order('nombre')
+      let qPersonal = supabase
+        .from('nom_v_personal')
+        .select('id, nombre, dni, puesto, estado', { count: 'estimated' })
+        .eq('estado', 'activo')
+        .order('nombre')
+        .range(rango[0], rango[1])
+      // nom_legajo NO se pagina: sigue trayendo TODOS los legajos de la
+      // empresa en cada carga. Son filas livianas (pocos campos, una por
+      // persona) y el Map de lookup por personal_id necesita cubrir a
+      // todo el personal ya cargado en páginas anteriores, no solo a la
+      // página actual — si se paginara, las filas de páginas previas
+      // quedarían sin su legajo asociado.
       let qLegajos = supabase.from('nom_legajo').select('personal_id, cuil, cbu, convenio_id, categoria_id')
       if (empresaActiva?.id) {
         qPersonal = qPersonal.eq('empresa_id', empresaActiva.id)
         qLegajos = qLegajos.eq('empresa_id', empresaActiva.id)
       }
-      const [{ data: personal, error: e1 }, { data: legajos, error: e2 }] = await Promise.all([qPersonal, qLegajos])
+      const [{ data: personal, error: e1, count }, { data: legajos, error: e2 }] = await Promise.all([qPersonal, qLegajos])
       if (cancelado) return
       if (e1 || e2) { setError((e1 || e2).message); setCargando(false); return }
+      if (typeof count === 'number') setTotal(count)
       const porPersonal = new Map((legajos || []).map((l) => [l.personal_id, {
         cuil: l.cuil, cbu: l.cbu, convenioId: l.convenio_id, categoriaId: l.categoria_id,
       }]))
-      setFilas((personal || []).map((p) => ({ ...p, legajo: porPersonal.get(p.id) || null })))
+      const nuevasFilas = (personal || []).map((p) => ({ ...p, legajo: porPersonal.get(p.id) || null }))
+      setFilas((prev) => (rango[0] === 0 ? nuevasFilas : [...prev, ...nuevasFilas]))
       setCargando(false)
     }
     cargar()
     return () => { cancelado = true }
-  }, [empresaActiva?.id])
+  }, [empresaActiva?.id, rango[1]])
 
   return (
     <div className="page">
@@ -71,6 +93,9 @@ export default function LegajosPage() {
               ))}
             </tbody>
           </table>
+          {hayMasPaginas(total) && (
+            <button className="btn btn-ghost btn-sm" onClick={siguientePagina}>Cargar más</button>
+          )}
         </div>
       )}
     </div>
