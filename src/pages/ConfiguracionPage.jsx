@@ -8,8 +8,9 @@ import TabAportes from '../components/config/TabAportes'
 import TabAdicionales from '../components/config/TabAdicionales'
 import TabParametros from '../components/config/TabParametros'
 import TabFlujo from '../components/config/TabFlujo'
+import TabEmpresa from '../components/config/TabEmpresa'
 
-const PESTANAS = ['Escalas salariales', 'No remunerativos', 'Aportes y contribuciones', 'Adicionales', 'Parámetros', 'Flujo de aprobación']
+const PESTANAS = ['Escalas salariales', 'No remunerativos', 'Aportes y contribuciones', 'Adicionales', 'Parámetros', 'Flujo de aprobación', 'Empresa']
 
 export default function ConfiguracionPage() {
   const empresa = useAuthStore((s) => s.empresa)
@@ -93,6 +94,7 @@ export default function ConfiguracionPage() {
           {pestana === 'Adicionales' && <TabAdicionales convenio={convenio} empresaId={empresaActiva.id} soloLectura={esGlobal} />}
           {pestana === 'Parámetros' && <TabParametros empresaId={empresaActiva.id} />}
           {pestana === 'Flujo de aprobación' && <TabFlujo empresaId={empresaActiva.id} />}
+          {pestana === 'Empresa' && <TabEmpresa empresaId={empresaActiva.id} />}
         </>
       )}
     </div>
