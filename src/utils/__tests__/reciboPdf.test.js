@@ -1,50 +1,56 @@
+// src/utils/__tests__/reciboPdf.test.js
 import { describe, it, expect } from 'vitest'
 import { generarReciboPdf } from '../reciboPdf'
 
-const datosFake = {
-  empresa: { nombre: 'Asset Construcciones SA', cuit: '30-71823067-1', domicilio: 'Bauness 2047 4A - CABA' },
-  persona: { nombre: 'García Cano, Juan Martín', cuil: '20-33901676-4', legajo: '47', categoria: 'Fuera de convenio', fechaIngreso: '1/7/2025' },
-  periodo: { descripcion: 'Diciembre 2025' },
-  items: [
-    { nombre: 'Sueldo', tipo: 'remunerativo', monto: 2277447.03 },
-    { nombre: 'Jubilación', tipo: 'descuento', monto: 250519.17 },
-    { nombre: 'Ley 19.032', tipo: 'descuento', monto: 68323.41 },
-    { nombre: 'Obra social', tipo: 'descuento', monto: 68323.41 },
-  ],
-  neto: 1890282.00,
+const cabecera = {
+  empresa: { nombre: 'LA EMPRESA S.A.', cuit: '30-99999999-9', domicilio: 'Aconquija 123456 (1080) – CABA' },
+  persona: {
+    nombre: 'Perez José', legajo: '99', cuil: '20-99999999-9', categoria: 'Maestranza y Servicios A',
+    fechaIngreso: '01/01/2021', antiguedadReconocida: 0, banco: 'Macro',
+  },
+  periodo: { mes: '06', anio: '2026', descripcion: '04/2026 - 10/05/2026', fechaPago: '10/05/2026' },
+  codigoRecibo: 'A-0001',
 }
 
-describe('generarReciboPdf', () => {
-  it('genera un documento con el nombre del empleado y el neto', () => {
-    const doc = generarReciboPdf(datosFake)
-    const texto = doc.internal.pages.map((p) => (Array.isArray(p) ? p.join(' ') : '')).join(' ')
-    expect(texto).toContain('García Cano, Juan Martín')
-    // El neto se formatea con toLocaleString('es-AR'), que usa punto como
-    // separador de miles (ej. "1.890.282"), no el número plano.
-    expect(texto).toContain((1890282).toLocaleString('es-AR'))
+const items = [
+  { codigo: 'SIPA', nombre: 'SIPA – Ley 24.241', tipo: 'aporte_patronal', monto: 133545.68, unidadTexto: '10,77 %', baseCalculo: 1239978.42, grupoRecibo: 'contribucion', detalleRecibo: 'seguridad_social' },
+  { codigo: 'OSECAC', nombre: 'Contribución Solidaria OSECAC', tipo: 'aporte_patronal', monto: 28000, unidadTexto: '1', baseCalculo: 28000, grupoRecibo: 'cct', detalleRecibo: 'sindical' },
+  { codigo: 'BAS', nombre: 'Sueldo Básico', tipo: 'remunerativo', monto: 1096248, unidadTexto: '30', baseCalculo: 36541.60, grupoRecibo: 'remunerativo', detalleRecibo: null },
+  { codigo: 'INR', nombre: 'Incremento No Remunerativo', tipo: 'no_remunerativo', monto: 100000, unidadTexto: '30', baseCalculo: 3333.33, grupoRecibo: 'no_remunerativo', detalleRecibo: null },
+  { codigo: 'JUB', nombre: 'Jubilación', tipo: 'descuento', monto: 137168.03, unidadTexto: '11,00 %', baseCalculo: 1246982.10, grupoRecibo: 'descuento', detalleRecibo: 'seguridad_social' },
+]
+
+// Extrae todo el texto dibujado del stream del PDF. Es el MISMO patrón que
+// ya usan los tests previos de este archivo (doc.internal.pages) — probado y
+// funcionando en el repo; no inventar otro método.
+const textoDe = (doc) => doc.internal.pages.map((p) => (Array.isArray(p) ? p.join(' ') : '')).join(' ')
+
+describe('generarReciboPdf (formato costo laboral vertical)', () => {
+  it('devuelve un jsPDF en A4 vertical', () => {
+    const doc = generarReciboPdf({ ...cabecera, items })
+    expect(doc).toBeTruthy()
+    expect(doc.internal.pageSize.getWidth()).toBeLessThan(doc.internal.pageSize.getHeight()) // portrait
   })
 
-  it('incluye los datos del empleador (CUIT)', () => {
-    const doc = generarReciboPdf(datosFake)
-    const texto = doc.internal.pages.map((p) => (Array.isArray(p) ? p.join(' ') : '')).join(' ')
-    expect(texto).toContain('30-71823067-1')
+  it('no lanza con items vacíos', () => {
+    expect(() => generarReciboPdf({ ...cabecera, items: [] })).not.toThrow()
   })
 
-  it('genera la hoja en A4 apaisado (doble copia lado a lado)', () => {
-    const doc = generarReciboPdf(datosFake)
-    expect(doc.internal.pageSize.getWidth()).toBeGreaterThan(doc.internal.pageSize.getHeight())
+  it('escribe los títulos de sección del modelo', () => {
+    const doc = generarReciboPdf({ ...cabecera, items })
+    const texto = textoDe(doc)
+    // Substrings SOLO ASCII: los acentos se codifican distinto en el stream.
+    expect(texto).toContain('COSTO TOTAL EMPLEADOR')
+    expect(texto).toContain('DERIVADO DEL CCT')
+    expect(texto).toContain('SUELDO BRUTO')
+    expect(texto).toContain('SUELDO NETO')
+    expect(texto).toContain('Detalle de la')
   })
 
-  it('no tira excepción sin logo, con items no_remunerativos/aporte_patronal y sin CUIT/domicilio de empresa', () => {
-    expect(() => generarReciboPdf({
-      ...datosFake,
-      empresa: { nombre: 'Sin datos fiscales', cuit: null, domicilio: null, logoBase64: null },
-      codigoRecibo: '0001',
-      items: [
-        ...datosFake.items,
-        { nombre: 'Bono no remunerativo', tipo: 'no_remunerativo', monto: 50000, codigo: '0099' },
-        { nombre: 'Contribución patronal', tipo: 'aporte_patronal', monto: 30000, codigo: '0088' },
-      ],
-    })).not.toThrow()
+  it('incluye el nombre de la empresa y del empleado', () => {
+    const doc = generarReciboPdf({ ...cabecera, items })
+    const texto = textoDe(doc)
+    expect(texto).toContain('LA EMPRESA S.A.')
+    expect(texto).toContain('Perez')
   })
 })

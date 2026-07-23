@@ -1,149 +1,165 @@
 import { jsPDF } from 'jspdf'
 import { numeroALetras } from './numeroALetras'
+import { armarRecibo } from './reciboLayout'
+import { dibujarTorta } from './reciboPie'
 
-const LEYENDA_RECEPCION = 'Recibí el importe neto y duplicado de la presente liquidación en pago de mi remuneración correspondiente al período indicado.'
+const VERDE = [198, 224, 180]        // banda de sección (mismo verde del modelo)
+const GRIS = [230, 230, 230]         // sub-encabezados (REMUNERATIVO, etc.)
+const LEYENDA = 'Recibí conforme copia del original del presente recibo, y el importe neto en pago de mi remuneración del período indicado.'
 
-// Recibo de haberes en doble copia (A4 apaisado): dos mitades idénticas
-// dentro de la misma hoja — izquierda "Firma Empleador", derecha "Firma
-// Empleado" con la leyenda de recepción agregada. Incluye logo opcional,
-// tabla de conceptos (Cod/Concepto/Hab. C-Desc/Hab. S-Desc/Deducciones) y
-// el neto expresado en letras (numeroALetras, Fase 5C Task 41).
-export function generarReciboPdf({ empresa, persona, periodo, items, neto, codigoRecibo }) {
-  const doc = new jsPDF({ orientation: 'landscape', format: 'a4' })
-  const anchoPagina = doc.internal.pageSize.getWidth()
-  const altoPagina = doc.internal.pageSize.getHeight()
-  const margenExterno = 10
-  const margenCentral = 6
-  const anchoMitad = (anchoPagina - margenExterno * 2 - margenCentral) / 2
+const fmt = (n) => `$${(Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
-  const fmtMonto = (n) => `$${(Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+// Recibo de costo laboral (modelo AR), A4 vertical, una hoja. Segrega costo
+// empleador (contribuciones + derivados CCT) y sueldo del trabajador
+// (remunerativo/no remunerativo/descuentos), con columnas Unidad/Base/Monto,
+// composición salarial, neto en letras, detalle por organismo y torta.
+export function generarReciboPdf({ empresa, persona, periodo, items, codigoRecibo }) {
+  const doc = new jsPDF({ orientation: 'portrait', format: 'a4' })
+  const R = armarRecibo(items)
+  const M = 10                         // margen
+  const W = doc.internal.pageSize.getWidth()
+  const anchoUtil = W - M * 2
+  // Columnas de la tabla (x absolutas): Concepto | Unidad | Base | Monto
+  const colConcepto = M + 1
+  const colUnidad = M + anchoUtil * 0.52
+  const colBase = M + anchoUtil * 0.68
+  const colMonto = M + anchoUtil * 0.99 // alineado a derecha
+  let y = 12
 
-  const dibujarCopia = (offsetX, ancho, esCopiaEmpleado) => {
-    let y = 12
-    const xIzq = offsetX + 4
-    const anchoUtil = ancho - 8
-
-    // Encabezado: logo (opcional, nunca rompe el layout si falta) + datos
-    // fiscales de la empresa (nombre, CUIT, domicilio).
-    let xTexto = xIzq
-    if (empresa?.logoBase64) {
-      try {
-        doc.addImage(empresa.logoBase64, 'PNG', xIzq, y, 18, 18)
-        xTexto = xIzq + 22
-      } catch {
-        // Logo inválido/corrupto: se ignora y el recibo se genera sin él.
-        xTexto = xIzq
-      }
-    }
-    doc.setFontSize(11)
-    doc.setFont(undefined, 'bold')
-    doc.text(String(empresa?.nombre || '—'), xTexto, y + 4)
+  const banda = (titulo, total) => {
+    doc.setFillColor(...VERDE)
+    doc.rect(M, y - 4, anchoUtil, 6, 'F')
+    doc.setFont(undefined, 'bold'); doc.setFontSize(9)
+    doc.text(titulo, colConcepto, y)
+    if (total != null) doc.text(fmt(total), colMonto, y, { align: 'right' })
     doc.setFont(undefined, 'normal')
-    doc.setFontSize(8)
-    doc.text(`CUIT: ${empresa?.cuit || '—'}`, xTexto, y + 9)
-    doc.text(String(empresa?.domicilio || '—'), xTexto, y + 13)
-    y += 22
-
-    doc.setFontSize(11)
-    doc.setFont(undefined, 'bold')
-    doc.text('RECIBO DE REMUNERACIONES', xIzq, y)
-    doc.setFont(undefined, 'normal')
-    doc.setFontSize(8)
-    y += 5
-    if (codigoRecibo) { doc.text(`Recibo N°: ${codigoRecibo}`, xIzq, y); y += 4 }
-    doc.text(`Período: ${periodo?.descripcion || '—'}`, xIzq, y)
-    y += 6
-
-    // Bloque empleado.
-    doc.setFontSize(8)
-    doc.text(`Legajo: ${persona?.legajo || '—'}`, xIzq, y)
-    doc.text(`Apellido y Nombres: ${persona?.nombre || '—'}`, xIzq + 30, y)
-    y += 4
-    doc.text(`CUIL: ${persona?.cuil || '—'}`, xIzq, y)
-    doc.text(`Fecha Ing.: ${persona?.fechaIngreso || '—'}`, xIzq + 45, y)
-    doc.text(`Categoría: ${persona?.categoria || '—'}`, xIzq + 90, y)
-    y += 6
-
-    // Tabla de conceptos (manual, mismo estilo que el resto del archivo:
-    // columnas de x fijas dentro de la mitad, sin librería adicional).
-    const colCod = xIzq
-    const colConcepto = xIzq + 12
-    const colHabCD = xIzq + anchoUtil * 0.55
-    const colHabSD = xIzq + anchoUtil * 0.72
-    const colDeduc = xIzq + anchoUtil * 0.89
-
-    doc.setFont(undefined, 'bold')
-    doc.text('Cod', colCod, y)
-    doc.text('Concepto', colConcepto, y)
-    doc.text('Hab. C/Desc.', colHabCD, y)
-    doc.text('Hab. S/Desc.', colHabSD, y)
-    doc.text('Deducciones', colDeduc, y)
-    doc.setFont(undefined, 'normal')
-    y += 2
-    doc.line(xIzq, y, xIzq + anchoUtil, y)
-    y += 4
-
-    let totalHabCD = 0
-    let totalHabSD = 0
-    let totalDeduc = 0
-
-    ;(items || []).forEach((i) => {
-      const monto = Number(i.monto) || 0
-      doc.text(String(i.codigo || i.concepto_codigo || '—'), colCod, y)
-      doc.text(String(i.nombre || ''), colConcepto, y)
-      if (i.tipo === 'remunerativo') {
-        doc.text(fmtMonto(monto), colHabCD, y)
-        totalHabCD += monto
-      } else if (i.tipo === 'no_remunerativo') {
-        doc.text(fmtMonto(monto), colHabSD, y)
-        totalHabSD += monto
-      } else if (i.tipo === 'descuento' || i.tipo === 'aporte_patronal') {
-        doc.text(fmtMonto(monto), colDeduc, y)
-        totalDeduc += monto
-      }
-      y += 4.5
-    })
-
-    y += 2
-    doc.line(xIzq, y, xIzq + anchoUtil, y)
-    y += 4
-
-    // Pie: totales, neto y monto en letras.
-    doc.setFont(undefined, 'bold')
-    doc.text('TOTALES', colConcepto, y)
-    doc.text(fmtMonto(totalHabCD), colHabCD, y)
-    doc.text(fmtMonto(totalHabSD), colHabSD, y)
-    doc.text(fmtMonto(totalDeduc), colDeduc, y)
-    doc.setFont(undefined, 'normal')
-    y += 6
-
-    doc.setFont(undefined, 'bold')
-    doc.text(`NETO A COBRAR: ${fmtMonto(neto)}`, xIzq, y)
-    doc.setFont(undefined, 'normal')
-    y += 5
-    doc.setFontSize(7)
-    const sonPesos = doc.splitTextToSize(`Son ${numeroALetras(Number(neto) || 0)}`, anchoUtil)
-    sonPesos.forEach((l) => { doc.text(l, xIzq, y); y += 3.5 })
-    doc.setFontSize(8)
-    y += 4
-
-    // Firmas.
-    const yFirma = Math.max(y, altoPagina - 30)
-    doc.line(xIzq, yFirma, xIzq + anchoUtil * 0.4, yFirma)
-    doc.text(esCopiaEmpleado ? 'Firma Empleado' : 'Firma Empleador', xIzq, yFirma + 4)
-
-    if (esCopiaEmpleado) {
-      doc.setFontSize(6.5)
-      const leyenda = doc.splitTextToSize(LEYENDA_RECEPCION, anchoUtil)
-      let yLeyenda = yFirma + 9
-      leyenda.forEach((l) => { doc.text(l, xIzq, yLeyenda); yLeyenda += 3 })
-      doc.setFontSize(8)
-    }
+    y += 7
   }
 
-  dibujarCopia(margenExterno, anchoMitad, false)
-  doc.line(anchoPagina / 2, 6, anchoPagina / 2, altoPagina - 6)
-  dibujarCopia(margenExterno + anchoMitad + margenCentral, anchoMitad, true)
+  const subEncabezado = (t) => {
+    doc.setFillColor(...GRIS)
+    doc.rect(M, y - 3.5, anchoUtil, 5, 'F')
+    doc.setFont(undefined, 'bold'); doc.setFontSize(7.5)
+    doc.text(t, colConcepto, y)
+    doc.setFont(undefined, 'normal')
+    y += 5.5
+  }
+
+  const encColumnas = () => {
+    doc.setFont(undefined, 'bold'); doc.setFontSize(7)
+    doc.text('CONCEPTO', colConcepto, y)
+    doc.text('UNIDAD', colUnidad, y)
+    doc.text('BASE', colBase, y)
+    doc.text('MONTO', colMonto, y, { align: 'right' })
+    doc.setFont(undefined, 'normal')
+    y += 4
+  }
+
+  const filaItem = (i) => {
+    doc.setFontSize(7.5)
+    doc.text(String(i.nombre || ''), colConcepto, y)
+    if (i.unidadTexto != null) doc.text(String(i.unidadTexto), colUnidad, y)
+    if (i.baseCalculo != null) doc.text(fmt(i.baseCalculo), colBase, y)
+    doc.text(fmt(i.monto), colMonto, y, { align: 'right' })
+    y += 4.2
+  }
+
+  // ── Cabecera: empresa + datos fiscales ──────────────────────────────
+  doc.setFont(undefined, 'bold'); doc.setFontSize(12)
+  doc.text(String(empresa?.nombre || '—'), colConcepto, y); y += 5
+  doc.setFont(undefined, 'normal'); doc.setFontSize(8)
+  doc.text(String(empresa?.domicilio || '—'), colConcepto, y); y += 4
+  doc.text(`C.U.I.T.: ${empresa?.cuit || '—'}`, colConcepto, y); y += 6
+
+  // Grilla de datos del empleado (dos filas, estilo modelo).
+  doc.setFontSize(7.5)
+  const g = (label, valor, x) => { doc.setFont(undefined, 'bold'); doc.text(label, x, y); doc.setFont(undefined, 'normal'); doc.text(String(valor ?? '—'), x, y + 3.5) }
+  g('Mes/Año', `${periodo?.mes || '—'}/${periodo?.anio || '—'}`, M)
+  g('Apellido y Nombre', persona?.nombre || '—', M + 30)
+  g('Legajo', persona?.legajo || '—', M + 95)
+  g('Categoría', persona?.categoria || '—', M + 120)
+  y += 9
+  g('Fecha Ingreso', persona?.fechaIngreso || '—', M)
+  g('Antig. Reconocida', persona?.antiguedadReconocida ?? 0, M + 30)
+  g('C.U.I.L.', persona?.cuil || '—', M + 75)
+  g('Banco', persona?.banco || '—', M + 120)
+  g('Período / Pago', `${periodo?.descripcion || '—'}`, M + 150)
+  y += 11
+
+  // ── COSTO TOTAL EMPLEADOR ───────────────────────────────────────────
+  banda('COSTO TOTAL EMPLEADOR', R.costoTotalEmpleador)
+  encColumnas()
+  R.contribuciones.forEach(filaItem)
+  if (R.cct.length > 0) {
+    subEncabezado('COSTO DERIVADO DEL CCT')
+    R.cct.forEach(filaItem)
+  }
+  banda('SUBTOTAL CONTRIBUCIONES EMPLEADOR', R.subtotalContribuciones)
+
+  // ── SUELDO BRUTO ────────────────────────────────────────────────────
+  banda('SUELDO BRUTO', R.sueldoBruto)
+  encColumnas()
+  subEncabezado('REMUNERATIVO')
+  R.remunerativos.forEach(filaItem)
+  if (R.noRemunerativos.length > 0) {
+    subEncabezado('NO REMUNERATIVO')
+    R.noRemunerativos.forEach(filaItem)
+  }
+  subEncabezado('DESCUENTOS')
+  R.descuentos.forEach(filaItem)
+
+  // ── COMPOSICIÓN SALARIAL ────────────────────────────────────────────
+  y += 1
+  doc.setFillColor(...GRIS); doc.rect(M, y - 3.5, anchoUtil, 5, 'F')
+  doc.setFont(undefined, 'bold'); doc.setFontSize(7.5)
+  doc.text('COMPOSICIÓN SALARIAL »', colConcepto, y)
+  doc.text(`Rem.: ${fmt(R.totalRemunerativo)}`, M + anchoUtil * 0.40, y)
+  doc.text(`No rem.: ${fmt(R.totalNoRemunerativo)}`, M + anchoUtil * 0.62, y)
+  doc.text(`Desc.: ${fmt(R.totalDescuentos)}`, M + anchoUtil * 0.83, y)
+  doc.setFont(undefined, 'normal')
+  y += 6
+
+  // ── SUELDO NETO ─────────────────────────────────────────────────────
+  banda('SUELDO NETO', R.sueldoNeto)
+  doc.setFontSize(7.5)
+  const letras = doc.splitTextToSize(`Son pesos: ${numeroALetras(R.sueldoNeto)}`, anchoUtil)
+  letras.forEach((l) => { doc.text(l, colConcepto, y); y += 3.5 })
+  y += 3
+
+  // ── Detalle de la composición salarial (por organismo) ──────────────
+  doc.setFont(undefined, 'bold'); doc.setFontSize(8)
+  doc.text('Detalle de la composición salarial', colConcepto, y)
+  doc.setFont(undefined, 'normal'); y += 4
+  doc.setFontSize(7)
+  doc.setFont(undefined, 'bold')
+  doc.text('Organismo', colConcepto, y)
+  doc.text('Empleador', M + anchoUtil * 0.22, y)
+  doc.text('Trabajador', M + anchoUtil * 0.35, y)
+  doc.setFont(undefined, 'normal'); y += 4
+  const yDetalleInicio = y
+  R.detalle.forEach((d) => {
+    doc.text(d.etiqueta, colConcepto, y)
+    doc.text(fmt(d.empleador), M + anchoUtil * 0.22, y)
+    doc.text(fmt(d.trabajador), M + anchoUtil * 0.35, y)
+    y += 4
+  })
+
+  // ── Torta (a la derecha del detalle) ────────────────────────────────
+  dibujarTorta(doc, {
+    cx: M + anchoUtil * 0.72, cy: yDetalleInicio + 14, radio: 15,
+    porciones: R.torta, legendX: M + anchoUtil * 0.82, legendY: yDetalleInicio,
+  })
+
+  // ── Firma ───────────────────────────────────────────────────────────
+  const altoPagina = doc.internal.pageSize.getHeight()
+  let yFirma = Math.max(y + 8, altoPagina - 24)
+  doc.setFontSize(7)
+  const leyenda = doc.splitTextToSize(LEYENDA, anchoUtil)
+  leyenda.forEach((l) => { doc.text(l, colConcepto, yFirma); yFirma += 3.2 })
+  yFirma += 8
+  doc.line(M + anchoUtil * 0.55, yFirma, M + anchoUtil, yFirma)
+  doc.text('Firma del Empleado', M + anchoUtil * 0.7, yFirma + 4)
+  if (codigoRecibo) doc.text(`Recibo N°: ${codigoRecibo}`, colConcepto, yFirma + 4)
 
   return doc
 }
