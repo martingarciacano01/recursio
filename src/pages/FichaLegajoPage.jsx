@@ -3,11 +3,12 @@ import { useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useLegajoStore } from '../store/legajoStore'
 import { useAuthStore } from '../store/authStore'
-import SeccionColapsable from '../components/legajo/SeccionColapsable'
 import SemaforoLegajo from '../components/legajo/SemaforoLegajo'
 import DocumentosLegajo from '../components/legajo/DocumentosLegajo'
 import EditorDatosLegajo from '../components/legajo/EditorDatosLegajo'
 import { generarLegajoPdf } from '../utils/legajoPdf'
+
+const PESTANAS = ['Datos', 'Familiares', 'Documentación', 'Sanciones', 'Ausencias', 'Liquidaciones']
 
 export default function FichaLegajoPage() {
   const { personalId } = useParams()
@@ -20,10 +21,13 @@ export default function FichaLegajoPage() {
   const { legajos, familiares, sanciones, error: errorLegajo, cargarLegajos, cargarFamiliares, cargarSanciones } = useLegajoStore()
   const [persona, setPersona] = useState(null)
   const [ausencias, setAusencias] = useState([])
+  const [liquidaciones, setLiquidaciones] = useState([])
   const [cargandoPersona, setCargandoPersona] = useState(true)
   const [errorPersona, setErrorPersona] = useState('')
   const [errorAusencias, setErrorAusencias] = useState('')
+  const [errorLiquidaciones, setErrorLiquidaciones] = useState('')
   const [errorExport, setErrorExport] = useState('')
+  const [pestana, setPestana] = useState(PESTANAS[0])
 
   useEffect(() => {
     // Reset explícito: sin esto, al navegar de una ficha a otra la página
@@ -31,18 +35,20 @@ export default function FichaLegajoPage() {
     // llegan las nuevas cargas (revisión de calidad, Task 10).
     setPersona(null)
     setAusencias([])
+    setLiquidaciones([])
     setCargandoPersona(true)
     setErrorPersona('')
     setErrorAusencias('')
+    setErrorLiquidaciones('')
     useLegajoStore.setState({ familiares: [], sanciones: [] })
 
     let cancelado = false
     // cargarLegajos necesita un empresa_id explícito para filtrar
     // nom_legajo (esa tabla no tiene excepción de superadmin en su RLS
     // todavía). El resto de las consultas (persona, ausencias, familiares,
-    // sanciones) NO dependen de `empresa` en el cliente: la RLS del lado
-    // del servidor ya resuelve el aislamiento a partir del JWT. Un
-    // Superadmin sin `empresa` fija usa `empresaVista` (elegida en
+    // sanciones, liquidaciones) NO dependen de `empresa` en el cliente: la
+    // RLS del lado del servidor ya resuelve el aislamiento a partir del
+    // JWT. Un Superadmin sin `empresa` fija usa `empresaVista` (elegida en
     // /superadmin) para que cargarLegajos tenga un id explícito.
     if (empresaActiva?.id) cargarLegajos(empresaActiva.id)
     cargarFamiliares(personalId)
@@ -57,6 +63,11 @@ export default function FichaLegajoPage() {
       if (cancelado) return
       if (error) setErrorAusencias(error.message)
       setAusencias(data || [])
+    })
+    supabase.from('nom_liquidaciones').select('*, nom_periodos(tipo, fecha_desde, fecha_hasta)').eq('personal_id', personalId).order('created_at', { ascending: false }).then(({ data, error }) => {
+      if (cancelado) return
+      if (error) setErrorLiquidaciones(error.message)
+      setLiquidaciones(data || [])
     })
     return () => { cancelado = true }
   }, [personalId, empresaActiva?.id])
@@ -92,34 +103,75 @@ export default function FichaLegajoPage() {
       {errorAusencias && <div className="card" style={{ color: 'var(--danger)', marginBottom: '1rem' }}>Error al cargar ausencias: {errorAusencias}</div>}
       {errorExport && <div className="card" style={{ color: 'var(--danger)', marginBottom: '1rem' }}>{errorExport}</div>}
 
-      <SeccionColapsable titulo="Datos y estado">
+      <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+        {PESTANAS.map((p) => (
+          <button key={p} className={`btn btn-sm ${pestana === p ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setPestana(p)}>{p}</button>
+        ))}
+      </div>
+
+      {pestana === 'Datos' && (
         <EditorDatosLegajo legajo={legajo} personalId={personalId} empresaId={empresaActiva?.id} />
-      </SeccionColapsable>
+      )}
 
-      <SeccionColapsable titulo="Documentación">
+      {pestana === 'Familiares' && (
+        <div className="card">
+          {familiares.length === 0 && <p style={{ color: 'var(--text-secondary)' }}>Sin familiares cargados.</p>}
+          {familiares.map((f) => (
+            <p key={f.id}>{f.nombre} — {f.vinculo}{f.fechaNacimiento ? ` (${f.fechaNacimiento})` : ''}</p>
+          ))}
+        </div>
+      )}
+
+      {pestana === 'Documentación' && (
         <DocumentosLegajo personalId={personalId} />
-      </SeccionColapsable>
+      )}
 
-      <SeccionColapsable titulo="Familiares">
-        {familiares.length === 0 && <p style={{ color: 'var(--text-secondary)' }}>Sin familiares cargados.</p>}
-        {familiares.map((f) => (
-          <p key={f.id}>{f.nombre} — {f.vinculo}{f.fechaNacimiento ? ` (${f.fechaNacimiento})` : ''}</p>
-        ))}
-      </SeccionColapsable>
+      {pestana === 'Sanciones' && (
+        <div className="card">
+          {sanciones.length === 0 && <p style={{ color: 'var(--text-secondary)' }}>Sin sanciones registradas.</p>}
+          {sanciones.map((s) => (
+            <p key={s.id}>{s.fecha} — {s.tipo}: {s.motivo}{s.diasSuspension ? ` (${s.diasSuspension} días)` : ''}</p>
+          ))}
+        </div>
+      )}
 
-      <SeccionColapsable titulo="Sanciones">
-        {sanciones.length === 0 && <p style={{ color: 'var(--text-secondary)' }}>Sin sanciones registradas.</p>}
-        {sanciones.map((s) => (
-          <p key={s.id}>{s.fecha} — {s.tipo}: {s.motivo}{s.diasSuspension ? ` (${s.diasSuspension} días)` : ''}</p>
-        ))}
-      </SeccionColapsable>
+      {pestana === 'Ausencias' && (
+        <div className="card">
+          {ausencias.length === 0 && <p style={{ color: 'var(--text-secondary)' }}>Sin ausencias registradas.</p>}
+          {ausencias.map((a) => (
+            <p key={a.id}>{a.fecha_desde} a {a.fecha_hasta} — {a.tipo} ({a.estado})</p>
+          ))}
+        </div>
+      )}
 
-      <SeccionColapsable titulo="Ausencias" defaultAbierta={false}>
-        {ausencias.length === 0 && <p style={{ color: 'var(--text-secondary)' }}>Sin ausencias registradas.</p>}
-        {ausencias.map((a) => (
-          <p key={a.id}>{a.fecha_desde} a {a.fecha_hasta} — {a.tipo} ({a.estado})</p>
-        ))}
-      </SeccionColapsable>
+      {pestana === 'Liquidaciones' && (
+        <div className="card">
+          {errorLiquidaciones && <p style={{ color: 'var(--danger)' }}>Error al cargar liquidaciones: {errorLiquidaciones}</p>}
+          {liquidaciones.length === 0 && !errorLiquidaciones && <p style={{ color: 'var(--text-secondary)' }}>Sin liquidaciones registradas.</p>}
+          {liquidaciones.length > 0 && (
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Período</th>
+                  <th>Bruto</th>
+                  <th>Neto</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {liquidaciones.map((l) => (
+                  <tr key={l.id}>
+                    <td>{l.nom_periodos ? `${l.nom_periodos.tipo} ${l.nom_periodos.fecha_desde} a ${l.nom_periodos.fecha_hasta}` : '—'}</td>
+                    <td>{l.bruto}</td>
+                    <td>{l.neto}</td>
+                    <td>{l.estado}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
     </div>
   )
 }
