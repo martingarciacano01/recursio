@@ -99,7 +99,7 @@ export default function LiquidacionPage() {
         // `nom_empresa_config`, migración 0021 — pedirlas acá tiraba error).
         supabase.from('empresas').select('nombre, logo_url').eq('id', empresaId).single(),
         supabase.from('nom_empresa_config').select('cuit, domicilio').eq('empresa_id', empresaId).maybeSingle(),
-        supabase.from('nom_legajo').select('cuil, categoria_id, fecha_ingreso').eq('personal_id', l.personalId).eq('empresa_id', empresaId).single(),
+        supabase.from('nom_legajo').select('cuil, categoria_id, fecha_ingreso, banco, antiguedad_reconocida').eq('personal_id', l.personalId).eq('empresa_id', empresaId).single(),
       ])
       let categoriaNombre = '—'
       if (legajoRow?.categoria_id) {
@@ -126,21 +126,36 @@ export default function LiquidacionPage() {
       // `nom_liquidacion_items` no persiste `codigo_recibo` (limitación
       // conocida de la Fase 5B Task 9) — se usa `concepto_codigo`, que sí
       // está disponible, como columna "Cod" de la tabla del recibo.
-      const items = (itemsPorLiq[l.id] || []).map((i) => ({ nombre: i.concepto_nombre, tipo: i.tipo, monto: Number(i.monto), codigo: i.concepto_codigo }))
+      const items = (itemsPorLiq[l.id] || []).map((i) => ({
+        codigo: i.concepto_codigo, nombre: i.concepto_nombre, tipo: i.tipo, monto: Number(i.monto),
+        unidadTexto: i.unidad_texto ?? null,
+        baseCalculo: i.base_calculo != null ? Number(i.base_calculo) : null,
+        grupoRecibo: i.grupo_recibo ?? null,
+        detalleRecibo: i.detalle_recibo ?? null,
+      }))
       const doc = generarReciboPdf({
         empresa: {
           nombre: empresaRow?.nombre || empresaActiva?.nombre || '—',
           cuit: configRow?.cuit || '—',
           domicilio: configRow?.domicilio || '—',
-          logoBase64,
         },
         persona: {
-          nombre: personalPorId.get(l.personalId) || l.personalId, cuil: legajoRow?.cuil || '—',
-          legajo: l.personalId.slice(0, 8), categoria: categoriaNombre, fechaIngreso: legajoRow?.fecha_ingreso || '—',
+          nombre: personalPorId.get(l.personalId) || l.personalId,
+          cuil: legajoRow?.cuil || '—',
+          legajo: l.personalId.slice(0, 8),
+          categoria: categoriaNombre,
+          fechaIngreso: legajoRow?.fecha_ingreso || '—',
+          antiguedadReconocida: legajoRow?.antiguedad_reconocida ?? 0,
+          banco: legajoRow?.banco || '—',
         },
-        periodo: { descripcion: periodoActivo ? `${periodoActivo.tipo} — ${periodoActivo.fecha_desde} a ${periodoActivo.fecha_hasta}` : '' },
+        periodo: {
+          mes: periodoActivo ? String(periodoActivo.fecha_desde).slice(5, 7) : '—',
+          anio: periodoActivo ? String(periodoActivo.fecha_desde).slice(0, 4) : '—',
+          descripcion: periodoActivo ? `${periodoActivo.tipo} — ${periodoActivo.fecha_desde} a ${periodoActivo.fecha_hasta}` : '—',
+          fechaPago: periodoActivo?.fecha_pago || '—',
+        },
         items,
-        neto: l.neto,
+        codigoRecibo: l.numeroRecibo || null,
       })
       const hash = await calcularHashPdf(doc)
       const r = await emitirRecibo(l.id, hash)
