@@ -422,6 +422,10 @@ Deno.serve(async (req) => {
       return r.resultado.items.map((i) => ({
         empresa_id: periodo.empresa_id, liquidacion_id: liqId, concepto_codigo: i.codigo,
         concepto_nombre: i.nombre, tipo: i.tipo, monto: i.monto, regla_aplicada: String(i.reglaAplicada),
+        unidad_texto: i.unidadTexto ?? null,
+        base_calculo: i.baseCalculo ?? null,
+        grupo_recibo: i.grupoRecibo ?? null,
+        detalle_recibo: i.detalleRecibo ?? null,
       }))
     })
     if (itemsLote.length > 0) {
