@@ -3,6 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { liquidarConceptos, filtrarPorCategoria, type Concepto } from '../../../packages/motor/src/motor.ts'
 import { calcularAsistencia, construirDiasPeriodo } from '../../../packages/motor/src/asistencia.ts'
 import { calcularBasicoPeriodo } from '../../../packages/motor/src/basico.ts'
+import { partirEnLotes, agruparPorPersonalId } from '../../../packages/motor/src/lotes.ts'
 
 // Mismo patrón CORS que el resto de las Edge Functions de Presencio
 // (fichaobra/supabase/functions/invite-user/index.ts): sin esto, el
@@ -42,9 +43,14 @@ Deno.serve(async (req) => {
     return new Response('ok', { headers: corsHeaders })
   }
 
+  let periodoId: string | undefined
+  let supabase: ReturnType<typeof createClient> | undefined
   try {
-  const { periodoId, personalIds } = await req.json()
-  const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+  const body = await req.json()
+  periodoId = body.periodoId
+  const personalIds = body.personalIds
+  const reanudar = body.reanudar
+  supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
 
   const { data: periodo, error: errPeriodo } = await supabase.from('nom_periodos').select('*').eq('id', periodoId).single()
   if (errPeriodo) {
@@ -95,6 +101,20 @@ Deno.serve(async (req) => {
     })
   }
   const legajoPorPersonal = new Map((legajos || []).map((l: any) => [l.personal_id, l]))
+
+  let personalAProcesar = personal || []
+  if (reanudar) {
+    const { data: yaLiquidados } = await supabase.from('nom_liquidaciones')
+      .select('personal_id').eq('periodo_id', periodoId)
+    const idsYaLiquidados = new Set((yaLiquidados || []).map((l: any) => l.personal_id))
+    personalAProcesar = personalAProcesar.filter((p: any) => !idsYaLiquidados.has(p.id))
+  }
+
+  await supabase.from('nom_periodos').update({
+    calculo_estado: 'calculando',
+    calculo_total: (personal || []).length,
+    calculo_procesados: (personal || []).length - personalAProcesar.length,
+  }).eq('id', periodoId)
 
   // ─── Consolidación quincenal (Fase 4, Task 28) ────────────────────
   // Si este período es la quincena 2 de un grupo mensual, se expone
@@ -272,8 +292,30 @@ Deno.serve(async (req) => {
     return { basicoPeriodo, basicoConvenio: basico?.basico ?? 0, noRem: noRem ?? 0, conceptosLegajo }
   }
 
+  const idsAProcesar = personalAProcesar.map((p: any) => p.id)
+  const fichajesTodos: any[] = []
+  const ausenciasTodas: any[] = []
+  for (const lote of partirEnLotes(idsAProcesar, 100)) {
+    const [{ data: f, error: eF }, { data: a, error: eA }] = await Promise.all([
+      supabase.from('nom_v_horas_dia').select('*').in('personal_id', lote)
+        .gte('timestamp', periodo.fecha_desde).lte('timestamp', periodo.fecha_hasta),
+      supabase.from('nom_v_ausencias').select('*').in('personal_id', lote).eq('estado', 'aprobada'),
+    ])
+    if (eF || eA) {
+      const e = eF || eA
+      await supabase.from('nom_periodos').update({ calculo_estado: 'error' }).eq('id', periodoId)
+      return new Response(JSON.stringify({ error: `error al leer asistencia en lote: ${e!.message}`, code: e!.code }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+    fichajesTodos.push(...(f || []))
+    ausenciasTodas.push(...(a || []))
+  }
+  const fichajesPorPersona = agruparPorPersonalId(fichajesTodos)
+  const ausenciasPorPersona = agruparPorPersonalId(ausenciasTodas)
+
   const resultados = []
-  for (const persona of personal || []) {
+  for (const persona of personalAProcesar) {
     const legajo = legajoPorPersonal.get(persona.id)
     const incompleto = !legajo?.cuil || !legajo?.cbu ||
       (!legajo?.fuera_convenio && (!legajo?.convenio_id || !legajo?.categoria_id)) ||
@@ -289,16 +331,8 @@ Deno.serve(async (req) => {
       continue
     }
 
-    const { data: fichajes, error: errFichajes } = await supabase.from('nom_v_horas_dia').select('*')
-      .eq('personal_id', persona.id).gte('timestamp', periodo.fecha_desde).lte('timestamp', periodo.fecha_hasta)
-    const { data: ausencias, error: errAusencias } = await supabase.from('nom_v_ausencias').select('*')
-      .eq('personal_id', persona.id).eq('estado', 'aprobada')
-    if (errFichajes || errAusencias) {
-      const e = errFichajes || errAusencias
-      return new Response(JSON.stringify({ error: `error al leer asistencia de ${persona.id}: ${e!.message}`, code: e!.code }), {
-        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
+    const fichajes = fichajesPorPersona.get(persona.id) ?? []
+    const ausencias = ausenciasPorPersona.get(persona.id) ?? []
 
     const dias = construirDiasPeriodo(
       (fichajes || []).map((f: any) => ({ tipo: f.tipo, timestamp: f.timestamp })),
@@ -351,45 +385,69 @@ Deno.serve(async (req) => {
     resultados.push({ personalId: persona.id, resultado, asistencia })
   }
 
-  // Idempotencia: borra liquidaciones/items previos de este período antes
-  // de reinsertar, así un reintento no duplica filas.
-  let queryPrevias = supabase.from('nom_liquidaciones').select('id').eq('periodo_id', periodoId)
-  if (Array.isArray(personalIds) && personalIds.length > 0) queryPrevias = queryPrevias.in('personal_id', personalIds)
-  const { data: liquidacionesPrevias } = await queryPrevias
-  if (liquidacionesPrevias?.length) {
-    const idsPrevias = liquidacionesPrevias.map((l: any) => l.id)
-    await supabase.from('nom_liquidacion_items').delete().in('liquidacion_id', idsPrevias)
-    await supabase.from('nom_liquidaciones').delete().in('id', idsPrevias)
-  }
-
-  for (const r of resultados) {
-    const { data: liq } = await supabase.from('nom_liquidaciones').insert({
+  // Idempotencia: el `upsert` con `onConflict: 'periodo_id,personal_id'`
+  // reemplaza sin duplicar filas, sin necesidad de borrar-todo-y-reinsertar
+  // primero (evita el bug de la Task 7 donde ese borrado podía alcanzar
+  // liquidaciones fuera del scope de `personalIds`).
+  let procesadosAcumulados = personal.length - personalAProcesar.length
+  for (const loteResultados of partirEnLotes(resultados, 50)) {
+    const filasLiquidacion = loteResultados.map((r) => ({
       empresa_id: periodo.empresa_id, periodo_id: periodoId, personal_id: r.personalId,
       bruto: r.resultado.bruto, neto: r.resultado.neto, total_aportes: r.resultado.totalDescuentos,
       total_contribuciones: r.resultado.items
         .filter((i) => i.tipo === 'aporte_patronal')
         .reduce((s, i) => s + i.monto, 0),
       detalle_horas: r.asistencia, estado: 'preliminar',
-    }).select().single()
-    if (liq) {
-      await supabase.from('nom_liquidacion_items').insert(
-        r.resultado.items.map((i) => ({
-          empresa_id: periodo.empresa_id, liquidacion_id: liq.id, concepto_codigo: i.codigo,
-          concepto_nombre: i.nombre, tipo: i.tipo, monto: i.monto, regla_aplicada: String(i.reglaAplicada),
-        }))
-      )
+    }))
+    const { data: liqsLote, error: errUpsert } = await supabase.from('nom_liquidaciones')
+      .upsert(filasLiquidacion, { onConflict: 'periodo_id,personal_id' })
+      .select('id, personal_id')
+    if (errUpsert) {
+      await supabase.from('nom_periodos').update({ calculo_estado: 'error' }).eq('id', periodoId)
+      return new Response(JSON.stringify({ error: `error al guardar liquidaciones: ${errUpsert.message}`, code: errUpsert.code }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
     }
+    const liqIdPorPersonal = new Map((liqsLote || []).map((l: any) => [l.personal_id, l.id]))
+    // Idempotencia de items: al re-liquidar (ej. tras un reanudar parcial de
+    // un intento anterior fallido) hay que limpiar los items viejos de estas
+    // liquidaciones antes de reinsertar, si no se duplican.
+    const idsLote = [...liqIdPorPersonal.values()]
+    if (idsLote.length > 0) {
+      await supabase.from('nom_liquidacion_items').delete().in('liquidacion_id', idsLote)
+    }
+    const itemsLote = loteResultados.flatMap((r) => {
+      const liqId = liqIdPorPersonal.get(r.personalId)
+      if (!liqId) return []
+      return r.resultado.items.map((i) => ({
+        empresa_id: periodo.empresa_id, liquidacion_id: liqId, concepto_codigo: i.codigo,
+        concepto_nombre: i.nombre, tipo: i.tipo, monto: i.monto, regla_aplicada: String(i.reglaAplicada),
+      }))
+    })
+    if (itemsLote.length > 0) {
+      await supabase.from('nom_liquidacion_items').insert(itemsLote)
+    }
+    procesadosAcumulados += loteResultados.length
+    await supabase.from('nom_periodos').update({
+      calculo_procesados: procesadosAcumulados,
+    }).eq('id', periodoId)
   }
 
-  return new Response(JSON.stringify({ liquidadas: resultados.length, omitidos, advertencias }), {
+  const totalFinal = (personal || []).length
+  const procesadosFinal = (personal.length - personalAProcesar.length) + resultados.length
+  const completo = procesadosFinal >= totalFinal
+  await supabase.from('nom_periodos').update({
+    calculo_estado: completo ? 'completo' : 'calculando',
+    calculo_procesados: procesadosFinal,
+  }).eq('id', periodoId)
+
+  return new Response(JSON.stringify({ liquidadas: resultados.length, omitidos, advertencias, completo, procesados: procesadosFinal, total: totalFinal }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
   } catch (err) {
-    // Cualquier error no contemplado explícitamente (JSON inválido en el
-    // body, error de Postgres no manejado, etc.) también debe llevar los
-    // headers CORS — si no, el navegador lo reporta como el mismo
-    // "Failed to send a request to the Edge Function" genérico, aunque la
-    // función sí haya respondido con un error real.
+    if (periodoId && supabase) {
+      await supabase.from('nom_periodos').update({ calculo_estado: 'error' }).eq('id', periodoId)
+    }
     return new Response(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }), {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
