@@ -1,5 +1,21 @@
 import { evaluar } from './interprete.ts'
 
+export interface ConfigRecibo {
+  grupo?: 'contribucion' | 'cct' | 'remunerativo' | 'no_remunerativo' | 'descuento'
+  detalle?: 'sindical' | 'seguridad_social' | 'obra_social' | 'inssjp' | 'art' | 'scvo' | null
+  unidadFormula?: string | null
+  baseFormula?: string | null
+}
+
+export interface ConfigConceptoMotor {
+  modo?: 'porcentaje' | 'nominal'
+  porcentaje?: number
+  base?: 'remunerativo' | 'no_remunerativo' | 'ambos' | 'acumulado_mensual'
+  tope?: string | null
+  monto?: number
+  recibo?: ConfigRecibo
+}
+
 export interface Concepto {
   codigo: string
   nombre: string
@@ -9,6 +25,7 @@ export interface Concepto {
   reglas?: Array<{ orden: number; condicion: string; formula: string }>
   imprimible: boolean
   categorias?: string[] | null
+  config?: ConfigConceptoMotor | null
 }
 
 export interface ItemLiquidado {
@@ -17,6 +34,30 @@ export interface ItemLiquidado {
   tipo: Concepto['tipo']
   monto: number
   reglaAplicada: number | 'base' // índice en `reglas` (0-based tras ordenar por `orden`), o 'base' si no aplicó ninguna
+  unidadTexto: string | null
+  baseCalculo: number | null
+  grupoRecibo: ConfigRecibo['grupo'] | null
+  detalleRecibo: ConfigRecibo['detalle'] | null
+}
+
+// Mismas claves que packages/motor/src/formulas.ts BASES — repetidas acá para
+// no crear una dependencia del motor hacia el generador de fórmulas de la UI.
+const BASES_EXPR: Record<string, string> = {
+  remunerativo: 'remunerativo_acumulado',
+  no_remunerativo: 'no_remunerativo_acumulado',
+  ambos: '(remunerativo_acumulado + no_remunerativo_acumulado)',
+  acumulado_mensual: '(remunerativo_acumulado + remunerativo_quincena1)',
+}
+
+// "10,77 %" — dos decimales, coma decimal (es-AR).
+function formatPorcentaje(pct: number): string {
+  return `${pct.toFixed(2).replace('.', ',')} %`
+}
+
+// Formatea una cantidad (unidad no porcentual): entero sin decimales si es
+// entero, si no dos decimales con coma. Ej.: 30 → "30"; 36541.6 → "36541,60".
+function formatCantidad(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(2).replace('.', ',')
 }
 
 export interface ResultadoLiquidacion {
@@ -64,12 +105,39 @@ export function liquidarConceptos(
 
     const monto = evaluar(formula, vars) as number
 
+    const cfg = concepto.config ?? undefined
+    const recibo = cfg?.recibo ?? undefined
+    let unidadTexto: string | null = null
+    let baseCalculo: number | null = null
+
+    if (recibo?.baseFormula) {
+      baseCalculo = evaluar(recibo.baseFormula, vars) as number
+    } else if (cfg?.modo === 'porcentaje') {
+      const baseExpr = BASES_EXPR[cfg.base ?? 'remunerativo'] ?? 'remunerativo_acumulado'
+      const conTope = cfg.tope ? `min(${baseExpr}, ${cfg.tope})` : baseExpr
+      baseCalculo = evaluar(conTope, vars) as number
+    } else if (cfg?.modo === 'nominal') {
+      baseCalculo = typeof cfg.monto === 'number' ? cfg.monto : monto
+    }
+
+    if (recibo?.unidadFormula) {
+      unidadTexto = formatCantidad(evaluar(recibo.unidadFormula, vars) as number)
+    } else if (cfg?.modo === 'porcentaje' && typeof cfg.porcentaje === 'number') {
+      unidadTexto = formatPorcentaje(cfg.porcentaje)
+    } else if (cfg?.modo === 'nominal') {
+      unidadTexto = '1'
+    }
+
     items.push({
       codigo: concepto.codigo,
       nombre: concepto.nombre,
       tipo: concepto.tipo,
       monto,
       reglaAplicada,
+      unidadTexto,
+      baseCalculo,
+      grupoRecibo: recibo?.grupo ?? null,
+      detalleRecibo: recibo?.detalle ?? null,
     })
 
     switch (concepto.tipo) {

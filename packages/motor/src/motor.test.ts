@@ -118,3 +118,56 @@ describe('filtrarPorCategoria', () => {
     expect(filtrarPorCategoria([{ codigo: 'e', categorias: [] }], 'Oficial').map((c) => c.codigo)).toEqual(['e'])
   })
 })
+
+describe('unidad y base en ítems (recibo costo laboral)', () => {
+  it('porcentaje: unidadTexto = "<pct> %" y baseCalculo = base evaluada', () => {
+    const basico: Concepto = {
+      codigo: 'BAS', nombre: 'Básico', tipo: 'remunerativo', orden: 1, formula: '1000', imprimible: true,
+    }
+    const jub: Concepto = {
+      codigo: 'JUB', nombre: 'Jubilación', tipo: 'descuento', orden: 10,
+      formula: 'remunerativo_acumulado * 0.11', imprimible: true,
+      config: { modo: 'porcentaje', porcentaje: 11, base: 'remunerativo', recibo: { grupo: 'descuento', detalle: 'seguridad_social' } },
+    }
+    const r = liquidarConceptos([basico, jub], {})
+    const item = r.items.find((i) => i.codigo === 'JUB')!
+    expect(item.unidadTexto).toBe('11,00 %')
+    expect(item.baseCalculo).toBe(1000)
+    expect(item.grupoRecibo).toBe('descuento')
+    expect(item.detalleRecibo).toBe('seguridad_social')
+    expect(item.monto).toBeCloseTo(110)
+  })
+
+  it('nominal: unidadTexto = "1" y baseCalculo = monto', () => {
+    const inacap: Concepto = {
+      codigo: 'INA', nombre: 'INACAP', tipo: 'aporte_patronal', orden: 5, formula: '5481.25', imprimible: true,
+      config: { modo: 'nominal', monto: 5481.25, recibo: { grupo: 'cct', detalle: null } },
+    }
+    const r = liquidarConceptos([inacap], {})
+    const item = r.items[0]
+    expect(item.unidadTexto).toBe('1')
+    expect(item.baseCalculo).toBeCloseTo(5481.25)
+    expect(item.grupoRecibo).toBe('cct')
+    expect(item.detalleRecibo).toBeNull()
+  })
+
+  it('sin config: unidad/base/grupos quedan nulos', () => {
+    const z: Concepto = { codigo: 'Z', nombre: 'Z', tipo: 'descuento', orden: 1, formula: '50', imprimible: true }
+    const r = liquidarConceptos([z], {})
+    expect(r.items[0].unidadTexto).toBeNull()
+    expect(r.items[0].baseCalculo).toBeNull()
+    expect(r.items[0].grupoRecibo).toBeNull()
+    expect(r.items[0].detalleRecibo).toBeNull()
+  })
+
+  it('override: config.recibo.baseFormula/unidadFormula tienen prioridad', () => {
+    const bas: Concepto = {
+      codigo: 'BAS', nombre: 'Básico', tipo: 'remunerativo', orden: 1, formula: '36541.60 * 30', imprimible: true,
+      config: { modo: 'nominal', recibo: { grupo: 'remunerativo', detalle: null, unidadFormula: '30', baseFormula: '36541.60' } },
+    }
+    const r = liquidarConceptos([bas], {})
+    const item = r.items[0]
+    expect(item.unidadTexto).toBe('30')
+    expect(item.baseCalculo).toBeCloseTo(36541.6)
+  })
+})
