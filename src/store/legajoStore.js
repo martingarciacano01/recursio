@@ -46,6 +46,15 @@ export const sancionFromDB = (r) => ({
   motivo: r.motivo, fecha: r.fecha, diasSuspension: r.dias_suspension, docPath: r.doc_path,
 })
 
+export const sancionToDB = (s, personalId, empresaId) => ({
+  empresa_id: empresaId,
+  personal_id: personalId,
+  tipo: s.tipo,
+  motivo: s.motivo,
+  fecha: s.fecha,
+  ...(s.diasSuspension !== undefined && { dias_suspension: s.diasSuspension ? Number(s.diasSuspension) : null }),
+})
+
 // Contadores de secuencia por colección: si se dispara una carga nueva
 // antes de que termine la anterior (ej. cambio rápido de empresaId o
 // personalId), la respuesta vieja se descarta al llegar tarde en vez de
@@ -145,6 +154,40 @@ export const useLegajoStore = create((set, get) => ({
     } catch (e) {
       if (miSeq !== seqSanciones) return
       set({ error: e.message, cargando: false })
+    }
+  },
+
+  guardarSancion: async (sancion, personalId, empresaId) => {
+    set({ error: null })
+    try {
+      const row = sancionToDB(sancion, personalId, empresaId)
+      const query = sancion.id
+        ? supabase.from('nom_sanciones_personal').update(row).eq('id', sancion.id).select().single()
+        : supabase.from('nom_sanciones_personal').insert(row).select().single()
+      const { data, error } = await query
+      if (error) { set({ error: error.message }); return { ok: false, error: error.message } }
+      const nueva = sancionFromDB(data)
+      set((s) => {
+        const resto = s.sanciones.filter((x) => x.id !== nueva.id)
+        return { sanciones: [...resto, nueva].sort((a, b) => (a.fecha < b.fecha ? 1 : -1)) }
+      })
+      return { ok: true, sancion: nueva }
+    } catch (e) {
+      set({ error: e.message })
+      return { ok: false, error: e.message }
+    }
+  },
+
+  eliminarSancion: async (id) => {
+    set({ error: null })
+    try {
+      const { error } = await supabase.from('nom_sanciones_personal').delete().eq('id', id)
+      if (error) { set({ error: error.message }); return { ok: false, error: error.message } }
+      set((s) => ({ sanciones: s.sanciones.filter((x) => x.id !== id) }))
+      return { ok: true }
+    } catch (e) {
+      set({ error: e.message })
+      return { ok: false, error: e.message }
     }
   },
 }))

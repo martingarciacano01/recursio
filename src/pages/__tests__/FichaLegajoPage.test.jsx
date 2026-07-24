@@ -52,9 +52,10 @@ describe('FichaLegajoPage', () => {
   it('muestra los botones de las 6 pestañas', async () => {
     render(<FichaLegajoPage />)
     expect(await screen.findByText('editor-datos')).toBeInTheDocument()
-    for (const p of ['Datos', 'Familiares', 'Documentación', 'Sanciones', 'Ausencias', 'Liquidaciones']) {
+    for (const p of ['Datos', 'Familiares', 'Documentación', 'Ausencias', 'Liquidaciones']) {
       expect(screen.getByRole('button', { name: p })).toBeInTheDocument()
     }
+    expect(screen.getByRole('button', { name: 'Sanciones (0)' })).toBeInTheDocument()
   })
 
   it('al clickear Liquidaciones muestra su contenido y oculta Datos', async () => {

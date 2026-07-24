@@ -75,3 +75,20 @@ describe('useLegajoStore - familiares CRUD', () => {
     expect(useLegajoStore.getState().familiares).toEqual([])
   })
 })
+
+describe('useLegajoStore - sanciones CRUD', () => {
+  it('guardarSancion inserta una sancion nueva', async () => {
+    const r = await useLegajoStore.getState().guardarSancion(
+      { tipo: 'apercibimiento', motivo: 'Llegada tarde reiterada', fecha: '2026-07-01' },
+      'personal-1', 'empresa-1'
+    )
+    expect(r.ok).toBe(true)
+  })
+
+  it('eliminarSancion borra por id', async () => {
+    useLegajoStore.setState({ sanciones: [{ id: 's1', motivo: 'X' }] })
+    const r = await useLegajoStore.getState().eliminarSancion('s1')
+    expect(r.ok).toBe(true)
+    expect(useLegajoStore.getState().sanciones).toEqual([])
+  })
+})

@@ -7,6 +7,7 @@ import SemaforoLegajo from '../components/legajo/SemaforoLegajo'
 import DocumentosLegajo from '../components/legajo/DocumentosLegajo'
 import EditorDatosLegajo from '../components/legajo/EditorDatosLegajo'
 import TabFamiliares from '../components/legajo/TabFamiliares'
+import TabSanciones from '../components/legajo/TabSanciones'
 import { generarLegajoPdf } from '../utils/legajoPdf'
 
 const PESTANAS = ['Datos', 'Familiares', 'Documentación', 'Sanciones', 'Ausencias', 'Liquidaciones']
@@ -106,7 +107,9 @@ export default function FichaLegajoPage() {
 
       <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
         {PESTANAS.map((p) => (
-          <button key={p} className={`btn btn-sm ${pestana === p ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setPestana(p)}>{p}</button>
+          <button key={p} className={`btn btn-sm ${pestana === p ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setPestana(p)}>
+            {p === 'Sanciones' ? `Sanciones (${sanciones.length})` : p}
+          </button>
         ))}
       </div>
 
@@ -123,12 +126,7 @@ export default function FichaLegajoPage() {
       )}
 
       {pestana === 'Sanciones' && (
-        <div className="card">
-          {sanciones.length === 0 && <p style={{ color: 'var(--text-secondary)' }}>Sin sanciones registradas.</p>}
-          {sanciones.map((s) => (
-            <p key={s.id}>{s.fecha} — {s.tipo}: {s.motivo}{s.diasSuspension ? ` (${s.diasSuspension} días)` : ''}</p>
-          ))}
-        </div>
+        <TabSanciones personalId={personalId} empresaId={empresaActiva?.id} />
       )}
 
       {pestana === 'Ausencias' && (
