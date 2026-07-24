@@ -8,6 +8,7 @@ import DocumentosLegajo from '../components/legajo/DocumentosLegajo'
 import EditorDatosLegajo from '../components/legajo/EditorDatosLegajo'
 import TabFamiliares from '../components/legajo/TabFamiliares'
 import TabSanciones from '../components/legajo/TabSanciones'
+import TabAusencias from '../components/legajo/TabAusencias'
 import { generarLegajoPdf } from '../utils/legajoPdf'
 
 const PESTANAS = ['Datos', 'Familiares', 'Documentación', 'Sanciones', 'Ausencias', 'Liquidaciones']
@@ -130,12 +131,7 @@ export default function FichaLegajoPage() {
       )}
 
       {pestana === 'Ausencias' && (
-        <div className="card">
-          {ausencias.length === 0 && <p style={{ color: 'var(--text-secondary)' }}>Sin ausencias registradas.</p>}
-          {ausencias.map((a) => (
-            <p key={a.id}>{a.fecha_desde} a {a.fecha_hasta} — {a.tipo} ({a.estado})</p>
-          ))}
-        </div>
+        <TabAusencias personalId={personalId} />
       )}
 
       {pestana === 'Liquidaciones' && (
