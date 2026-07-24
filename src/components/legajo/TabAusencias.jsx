@@ -1,29 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
-import { supabase } from '../../lib/supabase'
+import { useMemo, useState } from 'react'
 import { agruparAusencias } from '../../utils/agruparAusencias'
 
 // Pestaña de solo lectura: nom_v_ausencias es una vista de Presencio, no
 // editable desde acá. Separa justificadas (estado === 'aprobada') de
 // injustificadas (cualquier otro estado) para el año seleccionado, con el
 // total de días de cada grupo (Task 48, Fase 5D).
-export default function TabAusencias({ personalId }) {
-  const [ausencias, setAusencias] = useState([])
-  const [cargando, setCargando] = useState(true)
-  const [error, setError] = useState('')
+// `ausencias` llega ya cargada desde FichaLegajoPage (que la necesita también
+// para generarLegajoPdf): evita refetch duplicado de la misma consulta
+// (revisión de calidad post 22e1016).
+export default function TabAusencias({ ausencias }) {
   const [anio, setAnio] = useState(new Date().getFullYear())
-
-  useEffect(() => {
-    let cancelado = false
-    setCargando(true)
-    setError('')
-    supabase.from('nom_v_ausencias').select('*').eq('personal_id', personalId).order('fecha_desde', { ascending: false }).then(({ data, error }) => {
-      if (cancelado) return
-      if (error) setError(error.message)
-      setAusencias(data || [])
-      setCargando(false)
-    })
-    return () => { cancelado = true }
-  }, [personalId])
 
   const { justificadas, injustificadas, totalDiasJustificadas, totalDiasInjustificadas } = useMemo(
     () => agruparAusencias(ausencias, anio),
@@ -36,11 +22,9 @@ export default function TabAusencias({ personalId }) {
     return Array.from(set).sort((a, b) => b - a)
   }, [ausencias])
 
-  if (cargando) return <div className="card">Cargando…</div>
-
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {error && <div style={{ color: 'var(--danger)' }}>Error al cargar ausencias: {error}</div>}
+      <h3 style={{ margin: 0 }}>Ausencias</h3>
 
       <div>
         <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Año</label>

@@ -131,7 +131,7 @@ export default function FichaLegajoPage() {
       )}
 
       {pestana === 'Ausencias' && (
-        <TabAusencias personalId={personalId} />
+        <TabAusencias ausencias={ausencias} />
       )}
 
       {pestana === 'Liquidaciones' && (
