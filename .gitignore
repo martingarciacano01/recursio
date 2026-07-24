@@ -31,3 +31,11 @@ dist-ssr
 # Directorio .git roto dejado por un problema puntual de locks del sandbox
 # de ejecución (no forma parte del proyecto, ver commit de Task 2).
 .git_broken*/
+
+# Estado local del CLI de Supabase (link al proyecto remoto, no es del repo)
+supabase/.temp/
+
+# Archivos de scratch de sesiones de test/debug
+vitest.temp.config.js
+vitest_resultado.txt
+recibo-muestra.pdf
