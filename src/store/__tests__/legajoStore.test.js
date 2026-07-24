@@ -1,5 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { legajoFromDB, legajoToDB, familiarFromDB, sancionFromDB } from '../legajoStore'
+
+const mockFamiliarRow = {
+  id: 'f2', empresa_id: 'empresa-1', personal_id: 'personal-1', vinculo: 'hijo',
+  nombre: 'Tomás Pérez', cuil: null, fecha_nacimiento: '2015-03-10', doc_path: null,
+}
+
+vi.mock('../../lib/supabase', () => ({
+  supabase: {
+    from: vi.fn(() => ({
+      data: null,
+      error: null,
+      insert: vi.fn().mockReturnThis(),
+      update: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      delete: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: mockFamiliarRow, error: null }),
+    })),
+  },
+}))
+
+import { legajoFromDB, legajoToDB, familiarFromDB, sancionFromDB, useLegajoStore } from '../legajoStore'
 
 describe('mappers de legajo', () => {
   it('legajoFromDB mapea snake_case a camelCase', () => {
@@ -35,5 +56,22 @@ describe('mappers de legajo', () => {
       id: 's1', empresaId: 'e1', personalId: 'p1', tipo: 'suspension',
       motivo: 'llegadas tarde', fecha: '2026-01-01', diasSuspension: 3, docPath: null,
     })
+  })
+})
+
+describe('useLegajoStore - familiares CRUD', () => {
+  it('guardarFamiliar inserta un familiar nuevo (sin id)', async () => {
+    const r = await useLegajoStore.getState().guardarFamiliar(
+      { vinculo: 'hijo', nombre: 'Tomás Pérez', fechaNacimiento: '2015-03-10' },
+      'personal-1', 'empresa-1'
+    )
+    expect(r.ok).toBe(true)
+  })
+
+  it('eliminarFamiliar borra por id y lo saca del estado', async () => {
+    useLegajoStore.setState({ familiares: [{ id: 'f1', nombre: 'X' }] })
+    const r = await useLegajoStore.getState().eliminarFamiliar('f1')
+    expect(r.ok).toBe(true)
+    expect(useLegajoStore.getState().familiares).toEqual([])
   })
 })

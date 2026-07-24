@@ -32,6 +32,15 @@ export const familiarFromDB = (r) => ({
   nombre: r.nombre, cuil: r.cuil, fechaNacimiento: r.fecha_nacimiento, docPath: r.doc_path,
 })
 
+export const familiarToDB = (f, personalId, empresaId) => ({
+  empresa_id: empresaId,
+  personal_id: personalId,
+  vinculo: f.vinculo,
+  nombre: f.nombre,
+  ...(f.cuil !== undefined && { cuil: f.cuil || null }),
+  ...(f.fechaNacimiento !== undefined && { fecha_nacimiento: f.fechaNacimiento || null }),
+})
+
 export const sancionFromDB = (r) => ({
   id: r.id, empresaId: r.empresa_id, personalId: r.personal_id, tipo: r.tipo,
   motivo: r.motivo, fecha: r.fecha, diasSuspension: r.dias_suspension, docPath: r.doc_path,
@@ -91,6 +100,37 @@ export const useLegajoStore = create((set, get) => ({
     } catch (e) {
       if (miSeq !== seqFamiliares) return
       set({ error: e.message, cargando: false })
+    }
+  },
+
+  guardarFamiliar: async (familiar, personalId, empresaId) => {
+    set({ error: null })
+    try {
+      const row = familiarToDB(familiar, personalId, empresaId)
+      const query = familiar.id
+        ? supabase.from('nom_familiares').update(row).eq('id', familiar.id).select().single()
+        : supabase.from('nom_familiares').insert(row).select().single()
+      const { data, error } = await query
+      if (error) { set({ error: error.message }); return { ok: false, error: error.message } }
+      const nuevo = familiarFromDB(data)
+      set((s) => ({ familiares: familiar.id ? s.familiares.map((f) => (f.id === nuevo.id ? nuevo : f)) : [...s.familiares, nuevo] }))
+      return { ok: true, familiar: nuevo }
+    } catch (e) {
+      set({ error: e.message })
+      return { ok: false, error: e.message }
+    }
+  },
+
+  eliminarFamiliar: async (id) => {
+    set({ error: null })
+    try {
+      const { error } = await supabase.from('nom_familiares').delete().eq('id', id)
+      if (error) { set({ error: error.message }); return { ok: false, error: error.message } }
+      set((s) => ({ familiares: s.familiares.filter((f) => f.id !== id) }))
+      return { ok: true }
+    } catch (e) {
+      set({ error: e.message })
+      return { ok: false, error: e.message }
     }
   },
 

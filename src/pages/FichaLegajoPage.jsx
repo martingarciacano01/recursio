@@ -6,6 +6,7 @@ import { useAuthStore } from '../store/authStore'
 import SemaforoLegajo from '../components/legajo/SemaforoLegajo'
 import DocumentosLegajo from '../components/legajo/DocumentosLegajo'
 import EditorDatosLegajo from '../components/legajo/EditorDatosLegajo'
+import TabFamiliares from '../components/legajo/TabFamiliares'
 import { generarLegajoPdf } from '../utils/legajoPdf'
 
 const PESTANAS = ['Datos', 'Familiares', 'Documentación', 'Sanciones', 'Ausencias', 'Liquidaciones']
@@ -114,12 +115,7 @@ export default function FichaLegajoPage() {
       )}
 
       {pestana === 'Familiares' && (
-        <div className="card">
-          {familiares.length === 0 && <p style={{ color: 'var(--text-secondary)' }}>Sin familiares cargados.</p>}
-          {familiares.map((f) => (
-            <p key={f.id}>{f.nombre} — {f.vinculo}{f.fechaNacimiento ? ` (${f.fechaNacimiento})` : ''}</p>
-          ))}
-        </div>
+        <TabFamiliares personalId={personalId} empresaId={empresaActiva?.id} />
       )}
 
       {pestana === 'Documentación' && (
