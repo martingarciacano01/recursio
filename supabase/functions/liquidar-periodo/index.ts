@@ -760,8 +760,9 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
         { codigo: 'sac_proporcional', nombre: 'SAC proporcional', tipo: 'remunerativo', monto: r.sacProporcional },
         { codigo: 'vacaciones_no_gozadas', nombre: 'Vacaciones no gozadas', tipo: 'remunerativo', monto: r.vacacionesNoGozadas },
       ]
-      if (r.indemnizacionAntiguedad > 0) items.push({ codigo: 'indemnizacion_antiguedad', nombre: 'Indemnización por antigüedad', tipo: 'remunerativo', monto: r.indemnizacionAntiguedad })
-      if (r.preaviso > 0) items.push({ codigo: 'preaviso', nombre: 'Preaviso', tipo: 'remunerativo', monto: r.preaviso })
+      // indemnización y preaviso son no remunerativos (exentos de aportes) — art. 245/231 LCT
+      if (r.indemnizacionAntiguedad > 0) items.push({ codigo: 'indemnizacion_antiguedad', nombre: 'Indemnización por antigüedad', tipo: 'no_remunerativo', monto: r.indemnizacionAntiguedad })
+      if (r.preaviso > 0) items.push({ codigo: 'preaviso', nombre: 'Preaviso', tipo: 'no_remunerativo', monto: r.preaviso })
     }
     resultados.push({ personalId: persona.id, bruto: monto, items, esFinal: true })
   }
