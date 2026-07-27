@@ -3,6 +3,10 @@
 // Funciones puras: no leen DB, reciben todo resuelto (mismo patrón que
 // uocra.ts y asistencia.ts).
 
+// Días de vacaciones por antigüedad (art. 150 LCT): reexportado directo de
+// uocra.ts porque la escala es idéntica en ambos regímenes — no duplicar
+// la tabla de tramos en dos archivos (DRY).
+export { diasVacacionesPorAntiguedad } from './uocra.ts'
 import { diasVacacionesPorAntiguedad } from './uocra.ts'
 
 export interface SACInput {
@@ -35,12 +39,9 @@ export interface VacacionesResultado {
   total: number
 }
 
-// Días de vacaciones por antigüedad (art. 150 LCT). Reexportado desde
-// uocra.ts porque la escala es idéntica en ambos regímenes — no duplicar
-// la tabla de tramos en dos archivos (DRY).
-export { diasVacacionesPorAntiguedad }
-
 export function calcularVacaciones(input: VacacionesInput): VacacionesResultado {
+  // Art. 153 LCT: con menos de 6 meses de antigüedad, 1 día de descanso
+  // cada 20 trabajados, en vez de la escala fija del art. 150.
   const dias = input.antiguedadAnios < 0.5
     ? Math.floor(input.diasTrabajadosAnio / 20)
     : diasVacacionesPorAntiguedad(input.antiguedadAnios)
