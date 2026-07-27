@@ -18,6 +18,8 @@ vi.mock('../../lib/supabase', () => ({
       insert: vi.fn().mockReturnThis(),
       select: vi.fn().mockReturnThis(),
       single: vi.fn().mockResolvedValue({ data: { id: 'periodo-final-1' }, error: null }),
+      delete: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ data: null, error: null }),
     })),
   },
 }))
@@ -86,5 +88,37 @@ describe('crearPeriodoFinal', () => {
     const { useLiquidacionStore } = await import('../liquidacionStore')
     const r = await useLiquidacionStore.getState().crearPeriodoFinal('p1', '2026-07-27', 'empresa-1')
     expect(r.ok).toBe(true)
+  })
+
+  it('envia personalIds (camelCase) en el body para acotar la liquidacion a la persona dada de baja', async () => {
+    const invoke = vi.fn().mockResolvedValue({
+      data: { liquidadas: 1, omitidos: [], advertencias: [] },
+      error: null,
+    })
+    supabase.functions.invoke = invoke
+    const { useLiquidacionStore } = await import('../liquidacionStore')
+    await useLiquidacionStore.getState().crearPeriodoFinal('p1', '2026-07-27', 'empresa-1')
+    expect(invoke).toHaveBeenCalledTimes(1)
+    const body = invoke.mock.calls[0][1].body
+    expect(body.personalIds).toEqual(['p1'])
+    expect(body.personal_ids).toBeUndefined()
+  })
+
+  it('borra el nom_periodos recien creado si la Edge Function devuelve error (evita huerfanos)', async () => {
+    supabase.functions.invoke = vi.fn().mockResolvedValue({ data: null, error: { message: 'timeout' } })
+    const deleteFn = vi.fn().mockReturnThis()
+    const eqFn = vi.fn().mockResolvedValue({ data: null, error: null })
+    supabase.from = vi.fn(() => ({
+      insert: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { id: 'periodo-final-1' }, error: null }),
+      delete: deleteFn,
+      eq: eqFn,
+    }))
+    const { useLiquidacionStore } = await import('../liquidacionStore')
+    const r = await useLiquidacionStore.getState().crearPeriodoFinal('p1', '2026-07-27', 'empresa-1')
+    expect(r.ok).toBe(false)
+    expect(deleteFn).toHaveBeenCalled()
+    expect(eqFn).toHaveBeenCalledWith('id', 'periodo-final-1')
   })
 })
