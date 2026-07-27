@@ -1,9 +1,14 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import FichaLegajoPage from '../FichaLegajoPage'
 
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ personalId: 'p1' }),
+}))
+
+const { crearPeriodoFinalMock } = vi.hoisted(() => ({ crearPeriodoFinalMock: vi.fn().mockResolvedValue({ ok: true }) }))
+vi.mock('../../store/liquidacionStore', () => ({
+  useLiquidacionStore: () => ({ crearPeriodoFinal: crearPeriodoFinalMock }),
 }))
 
 vi.mock('../../store/authStore', () => ({
@@ -67,13 +72,25 @@ describe('FichaLegajoPage', () => {
     expect(screen.queryByText('editor-datos')).not.toBeInTheDocument()
   })
 
-  it('legajo con baja muestra badge Inactivo y boton deshabilitado de liquidacion final', async () => {
+  it('legajo con baja muestra badge Inactivo y boton habilitado de liquidacion final', async () => {
     legajosMock.current = [{ personalId: 'p1', fechaBaja: '2026-06-30', motivoBaja: 'renuncia', liquidacionFinalId: null }]
     render(<FichaLegajoPage />)
     await screen.findByText('editor-datos')
     expect(screen.getByText('Inactivo (baja: 2026-06-30)')).toBeInTheDocument()
     const boton = screen.getByRole('button', { name: 'Generar liquidación final' })
-    expect(boton).toBeDisabled()
+    expect(boton).not.toBeDisabled()
+    legajosMock.current = []
+  })
+
+  it('click en "Generar liquidacion final" crea el periodo tipo final y llama a crearPeriodoFinal', async () => {
+    legajosMock.current = [{ id: 'leg1', personalId: 'p1', fechaBaja: '2026-06-30', motivoBaja: 'renuncia', liquidacionFinalId: null }]
+    crearPeriodoFinalMock.mockClear()
+    render(<FichaLegajoPage />)
+    await screen.findByText('editor-datos')
+    fireEvent.click(screen.getByRole('button', { name: 'Generar liquidación final' }))
+    await waitFor(() => {
+      expect(crearPeriodoFinalMock).toHaveBeenCalledWith('p1', '2026-06-30', 'e1')
+    })
     legajosMock.current = []
   })
 

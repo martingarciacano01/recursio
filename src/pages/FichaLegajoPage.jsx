@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useLegajoStore } from '../store/legajoStore'
+import { useLiquidacionStore } from '../store/liquidacionStore'
 import { useAuthStore } from '../store/authStore'
 import SemaforoLegajo from '../components/legajo/SemaforoLegajo'
 import DocumentosLegajo from '../components/legajo/DocumentosLegajo'
@@ -22,6 +23,7 @@ export default function FichaLegajoPage() {
   // filtrar nom_legajo por empresa_id igual que un usuario normal.
   const empresaActiva = empresa || empresaVista
   const { legajos, familiares, sanciones, error: errorLegajo, cargarLegajos, cargarFamiliares, cargarSanciones } = useLegajoStore()
+  const { crearPeriodoFinal } = useLiquidacionStore()
   const [persona, setPersona] = useState(null)
   const [ausencias, setAusencias] = useState([])
   const [liquidaciones, setLiquidaciones] = useState([])
@@ -30,6 +32,8 @@ export default function FichaLegajoPage() {
   const [errorAusencias, setErrorAusencias] = useState('')
   const [errorLiquidaciones, setErrorLiquidaciones] = useState('')
   const [errorExport, setErrorExport] = useState('')
+  const [generandoFinal, setGenerandoFinal] = useState(false)
+  const [errorFinal, setErrorFinal] = useState('')
   const [pestana, setPestana] = useState(PESTANAS[0])
 
   useEffect(() => {
@@ -89,6 +93,15 @@ export default function FichaLegajoPage() {
     }
   }
 
+  const handleGenerarFinal = async () => {
+    setErrorFinal('')
+    setGenerandoFinal(true)
+    const r = await crearPeriodoFinal(personalId, legajo.fechaBaja, empresaActiva?.id)
+    setGenerandoFinal(false)
+    if (!r.ok) { setErrorFinal(r.error); return }
+    if (empresaActiva?.id) cargarLegajos(empresaActiva.id)
+  }
+
   if (cargandoPersona) return <div className="page">Cargando…</div>
   if (errorPersona) return <div className="page"><div className="card" style={{ color: 'var(--danger)' }}>Error al cargar la persona: {errorPersona}</div></div>
   if (!persona) return <div className="page"><div className="card">No se encontró el legajo solicitado.</div></div>
@@ -106,13 +119,14 @@ export default function FichaLegajoPage() {
           <button onClick={handleExportar} className="btn btn-primary btn-sm">Exportar legajo (PDF)</button>
           {legajo?.fechaBaja && !legajo?.liquidacionFinalId && (
             <button
-              className="btn btn-ghost btn-sm"
-              disabled
-              title="Disponible al completar la Fase 5E (SAC, vacaciones y liquidación final)"
+              className="btn btn-primary btn-sm"
+              onClick={handleGenerarFinal}
+              disabled={generandoFinal}
             >
-              Generar liquidación final
+              {generandoFinal ? 'Generando…' : 'Generar liquidación final'}
             </button>
           )}
+          {errorFinal && <span style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{errorFinal}</span>}
         </div>
       </div>
 

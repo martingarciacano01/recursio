@@ -275,6 +275,9 @@ export default function LiquidacionPage() {
               <option value="mensual">Mensual</option>
               <option value="quincenal">Quincenal</option>
               <option value="sac">SAC</option>
+              <option value="sac_1">SAC 1º semestre</option>
+              <option value="sac_2">SAC 2º semestre</option>
+              <option value="vacaciones">Vacaciones</option>
               <option value="final">Liquidación final</option>
             </select>
           </div>

@@ -1,7 +1,8 @@
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 const ETIQUETA_TIPO = {
   mensual: 'Mensual', quincena_1: '1ª quincena', quincena_2: '2ª quincena',
-  sac: 'SAC', vacaciones: 'Vacaciones', final: 'Liquidación final',
+  sac: 'SAC', sac_1: 'SAC 1º semestre', sac_2: 'SAC 2º semestre',
+  vacaciones: 'Vacaciones', final: 'Liquidación final',
 }
 
 // Agrupa períodos por año → mes (según fecha_desde) para el selector de

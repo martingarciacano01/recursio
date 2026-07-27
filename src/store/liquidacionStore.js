@@ -53,6 +53,20 @@ export const useLiquidacionStore = create((set) => ({
     return { ok: true, data }
   },
 
+  // Crea un período tipo 'final' acotado a una sola persona (fecha_desde =
+  // fecha_hasta = fecha de baja) e invoca liquidar-periodo con
+  // personal_ids: [personalId] para no tocar al resto de la nómina
+  // (Fase 5E Task 33 — botón "Generar liquidación final" en FichaLegajoPage).
+  crearPeriodoFinal: async (personalId, fechaBaja, empresaId) => {
+    const { data: periodo, error: errPeriodo } = await supabase.from('nom_periodos').insert({
+      empresa_id: empresaId, tipo: 'final', fecha_desde: fechaBaja, fecha_hasta: fechaBaja, estado: 'abierto',
+    }).select().single()
+    if (errPeriodo) return { ok: false, error: errPeriodo.message }
+    const { data, error } = await invocarConReintento({ periodoId: periodo.id, personal_ids: [personalId] })
+    if (error) return { ok: false, error: error.message }
+    return { ok: true, data }
+  },
+
   cargarLiquidaciones: async (periodoId) => {
     const { data, error } = await supabase.from('nom_liquidaciones').select('*').eq('periodo_id', periodoId)
     if (error) { set({ error: error.message }); return }
