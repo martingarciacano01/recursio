@@ -15,11 +15,11 @@ vi.mock('../../store/authStore', () => ({
   useAuthStore: (selector) => selector({ empresa: { id: 'e1' }, empresaVista: null }),
 }))
 
-const { legajosMock } = vi.hoisted(() => ({ legajosMock: { current: [] } }))
+const { legajosMock, cargarLegajosMock } = vi.hoisted(() => ({ legajosMock: { current: [] }, cargarLegajosMock: vi.fn() }))
 vi.mock('../../store/legajoStore', () => {
   const useLegajoStoreMock = () => ({
     legajos: legajosMock.current, familiares: [], sanciones: [], error: null,
-    cargarLegajos: vi.fn(), cargarFamiliares: vi.fn(), cargarSanciones: vi.fn(),
+    cargarLegajos: cargarLegajosMock, cargarFamiliares: vi.fn(), cargarSanciones: vi.fn(),
   })
   useLegajoStoreMock.setState = vi.fn()
   return { useLegajoStore: useLegajoStoreMock }
@@ -90,6 +90,37 @@ describe('FichaLegajoPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Generar liquidación final' }))
     await waitFor(() => {
       expect(crearPeriodoFinalMock).toHaveBeenCalledWith('p1', '2026-06-30', 'e1')
+    })
+    legajosMock.current = []
+  })
+
+  it('si crearPeriodoFinal falla, muestra el error y no refresca legajos', async () => {
+    legajosMock.current = [{ personalId: 'p1', fechaBaja: '2026-06-30', motivoBaja: 'renuncia', liquidacionFinalId: null }]
+    render(<FichaLegajoPage />)
+    await screen.findByText('editor-datos')
+    // Limpiamos los mocks recien aca (y no antes del render): una llamada
+    // asincrona pendiente de un test anterior (crearPeriodoFinal -> cargarLegajos)
+    // puede resolverse durante el await de arriba y quedar registrada si
+    // limpiamos antes. Total order: esperar que asiente, despues limpiar.
+    crearPeriodoFinalMock.mockClear().mockResolvedValueOnce({ ok: false, error: 'no se pudo crear el periodo' })
+    cargarLegajosMock.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: 'Generar liquidación final' }))
+    await waitFor(() => {
+      expect(screen.getByText('no se pudo crear el periodo')).toBeInTheDocument()
+    })
+    expect(cargarLegajosMock).not.toHaveBeenCalled()
+    legajosMock.current = []
+  })
+
+  it('si crearPeriodoFinal tiene exito, refresca los legajos', async () => {
+    legajosMock.current = [{ personalId: 'p1', fechaBaja: '2026-06-30', motivoBaja: 'renuncia', liquidacionFinalId: null }]
+    render(<FichaLegajoPage />)
+    await screen.findByText('editor-datos')
+    crearPeriodoFinalMock.mockClear().mockResolvedValueOnce({ ok: true })
+    cargarLegajosMock.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: 'Generar liquidación final' }))
+    await waitFor(() => {
+      expect(cargarLegajosMock).toHaveBeenCalledWith('e1')
     })
     legajosMock.current = []
   })
