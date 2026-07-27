@@ -2,8 +2,9 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import EditorDatosLegajo from '../EditorDatosLegajo'
 
+const guardarLegajoMock = vi.fn().mockResolvedValue({ ok: true })
 vi.mock('../../../store/legajoStore', () => ({
-  useLegajoStore: (selector) => selector({ guardarLegajo: vi.fn() }),
+  useLegajoStore: (selector) => selector({ guardarLegajo: guardarLegajoMock }),
 }))
 
 vi.mock('../../../lib/supabase', () => ({
@@ -60,5 +61,37 @@ describe('EditorDatosLegajo', () => {
     fireEvent.click(screen.getByLabelText('Fuera de convenio'))
     fireEvent.click(screen.getByLabelText('Fuera de convenio'))
     expect(screen.getByPlaceholderText('Sueldo convenido mensual')).toHaveValue(null)
+  })
+
+  it('sin baja registrada, muestra el boton "Dar de baja" que abre fecha + motivo', async () => {
+    render(<EditorDatosLegajo legajo={{}} personalId="p1" empresaId="emp-1" />)
+    fireEvent.click(screen.getByText('Editar'))
+    fireEvent.click(screen.getByText('Dar de baja'))
+    expect(screen.getByLabelText('Fecha de baja')).toBeInTheDocument()
+    expect(screen.getByLabelText('Motivo de baja')).toBeInTheDocument()
+    expect(screen.getByText('Confirmar baja')).toBeInTheDocument()
+  })
+
+  it('confirmar baja llama a guardarLegajo con fechaBaja y motivoBaja', async () => {
+    guardarLegajoMock.mockClear()
+    render(<EditorDatosLegajo legajo={{}} personalId="p1" empresaId="emp-1" />)
+    fireEvent.click(screen.getByText('Editar'))
+    fireEvent.click(screen.getByText('Dar de baja'))
+    fireEvent.change(screen.getByLabelText('Fecha de baja'), { target: { value: '2026-06-30' } })
+    fireEvent.change(screen.getByLabelText('Motivo de baja'), { target: { value: 'renuncia' } })
+    fireEvent.click(screen.getByText('Confirmar baja'))
+    await waitFor(() => {
+      expect(guardarLegajoMock).toHaveBeenCalledWith(
+        expect.objectContaining({ fechaBaja: '2026-06-30', motivoBaja: 'renuncia' }),
+        'emp-1'
+      )
+    })
+  })
+
+  it('con baja ya registrada, muestra la leyenda de solo lectura y no el boton', async () => {
+    render(<EditorDatosLegajo legajo={{ fechaBaja: '2026-06-30', motivoBaja: 'renuncia' }} personalId="p1" empresaId="emp-1" />)
+    fireEvent.click(screen.getByText('Editar'))
+    expect(screen.getByText('Baja: 2026-06-30 (renuncia)')).toBeInTheDocument()
+    expect(screen.queryByText('Dar de baja')).not.toBeInTheDocument()
   })
 })

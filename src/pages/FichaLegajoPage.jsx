@@ -98,8 +98,22 @@ export default function FichaLegajoPage() {
       <div className="page-header">
         <h1 className="page-title">{persona.nombre}</h1>
         <p className="page-subtitle">DNI {persona.dni || '—'} · {persona.puesto || '—'}</p>
-        <div style={{ marginTop: 8 }}><SemaforoLegajo legajo={legajo} /></div>
-        <button onClick={handleExportar} className="btn btn-primary btn-sm" style={{ marginTop: 8 }}>Exportar legajo (PDF)</button>
+        <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <SemaforoLegajo legajo={legajo} />
+          {legajo?.fechaBaja && <span className="badge badge-danger">Inactivo (baja: {legajo.fechaBaja})</span>}
+        </div>
+        <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+          <button onClick={handleExportar} className="btn btn-primary btn-sm">Exportar legajo (PDF)</button>
+          {legajo?.fechaBaja && !legajo?.liquidacionFinalId && (
+            <button
+              className="btn btn-ghost btn-sm"
+              disabled
+              title="Disponible al completar la Fase 5E (SAC, vacaciones y liquidación final)"
+            >
+              Generar liquidación final
+            </button>
+          )}
+        </div>
       </div>
 
       {errorLegajo && <div className="card" style={{ color: 'var(--danger)', marginBottom: '1rem' }}>Error al cargar legajo/familiares/sanciones: {errorLegajo}</div>}

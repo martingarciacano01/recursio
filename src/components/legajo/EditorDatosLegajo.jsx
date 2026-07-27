@@ -31,7 +31,25 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
     categoriaId: legajo?.categoriaId || '',
     fueraConvenio: legajo?.fueraConvenio || false,
     sueldoConvenido: legajo?.sueldoConvenido || '',
+    localidad: legajo?.localidad || '',
+    provincia: legajo?.provincia || '',
+    codigoPostal: legajo?.codigoPostal || '',
   })
+
+  const [dandoBaja, setDandoBaja] = useState(false)
+  const [fechaBaja, setFechaBaja] = useState('')
+  const [motivoBaja, setMotivoBaja] = useState('')
+  const [guardandoBaja, setGuardandoBaja] = useState(false)
+  const [errorBaja, setErrorBaja] = useState('')
+
+  const handleConfirmarBaja = async () => {
+    setErrorBaja('')
+    setGuardandoBaja(true)
+    const r = await guardarLegajo({ id: legajo?.id, personalId, fechaBaja, motivoBaja }, empresaId)
+    setGuardandoBaja(false)
+    if (!r.ok) { setErrorBaja(r.error); return }
+    setDandoBaja(false)
+  }
 
   useEffect(() => {
     // Se carga siempre (no solo al editar): la vista de solo lectura
@@ -79,6 +97,10 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
         <p>Jornada: {legajo?.jornada || '—'}</p>
         <p>Convenio: {todosConvenios.find((c) => c.id === legajo?.convenioId)?.nombre || (legajo?.convenioId ? legajo.convenioId : '—')}</p>
         <p>Categoría: {todasCategorias.find((c) => c.id === legajo?.categoriaId)?.nombre || (legajo?.categoriaId ? legajo.categoriaId : '—')}</p>
+        <p>Localidad: {legajo?.localidad || '—'}</p>
+        <p>Provincia: {legajo?.provincia || '—'}</p>
+        <p>Código postal: {legajo?.codigoPostal || '—'}</p>
+        {legajo?.fechaBaja && <p>Baja: {legajo.fechaBaja} ({legajo.motivoBaja})</p>}
         <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => setEditando(true)}>Editar</button>
       </div>
     )
@@ -168,8 +190,54 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
           />
         </div>
       )}
+      <div>
+        <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Localidad</label>
+        <input className="input" value={form.localidad} onChange={(e) => setForm((f) => ({ ...f, localidad: e.target.value }))} />
+      </div>
+      <div>
+        <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Provincia</label>
+        <input className="input" value={form.provincia} onChange={(e) => setForm((f) => ({ ...f, provincia: e.target.value }))} />
+      </div>
+      <div>
+        <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Código postal</label>
+        <input className="input" value={form.codigoPostal} onChange={(e) => setForm((f) => ({ ...f, codigoPostal: e.target.value }))} />
+      </div>
 
       {error && <div style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{error}</div>}
+
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+        {legajo?.fechaBaja ? (
+          <p>Baja: {legajo.fechaBaja} ({legajo.motivoBaja})</p>
+        ) : dandoBaja ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div>
+              <label htmlFor="fecha-baja-input" style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Fecha de baja</label>
+              <input id="fecha-baja-input" aria-label="Fecha de baja" className="input" type="date" value={fechaBaja} onChange={(e) => setFechaBaja(e.target.value)} />
+            </div>
+            <div>
+              <label htmlFor="motivo-baja-select" style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Motivo de baja</label>
+              <select id="motivo-baja-select" aria-label="Motivo de baja" className="input" value={motivoBaja} onChange={(e) => setMotivoBaja(e.target.value)}>
+                <option value="">Elegir motivo…</option>
+                <option value="renuncia">Renuncia</option>
+                <option value="despido_sin_causa">Despido sin causa</option>
+                <option value="despido_con_causa">Despido con causa</option>
+                <option value="fin_obra">Fin de obra</option>
+                <option value="mutuo_acuerdo">Mutuo acuerdo</option>
+                <option value="fallecimiento">Fallecimiento</option>
+              </select>
+            </div>
+            {errorBaja && <div style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{errorBaja}</div>}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-danger btn-sm" onClick={handleConfirmarBaja} disabled={guardandoBaja || !fechaBaja || !motivoBaja}>
+                {guardandoBaja ? 'Guardando…' : 'Confirmar baja'}
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setDandoBaja(false)} disabled={guardandoBaja}>Cancelar</button>
+            </div>
+          </div>
+        ) : (
+          <button className="btn btn-ghost btn-sm" onClick={() => setDandoBaja(true)}>Dar de baja</button>
+        )}
+      </div>
 
       <div style={{ display: 'flex', gap: 8 }}>
         <button className="btn btn-primary btn-sm" onClick={handleGuardar} disabled={guardando}>

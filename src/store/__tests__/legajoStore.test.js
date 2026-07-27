@@ -59,6 +59,28 @@ describe('mappers de legajo', () => {
   })
 })
 
+describe('legajoFromDB / legajoToDB — campos de baja (migracion 0018)', () => {
+  it('legajoFromDB mapea fecha_baja, motivo_baja, localidad, provincia, codigo_postal', () => {
+    const row = {
+      id: 'l1', empresa_id: 'e1', personal_id: 'p1',
+      fecha_baja: '2026-06-30', motivo_baja: 'renuncia',
+      localidad: 'Merlo', provincia: 'Buenos Aires', codigo_postal: '1722',
+    }
+    const l = legajoFromDB(row)
+    expect(l.fechaBaja).toBe('2026-06-30')
+    expect(l.motivoBaja).toBe('renuncia')
+    expect(l.localidad).toBe('Merlo')
+    expect(l.provincia).toBe('Buenos Aires')
+    expect(l.codigoPostal).toBe('1722')
+  })
+
+  it('legajoToDB mapea de vuelta esos mismos campos', () => {
+    const row = legajoToDB({ personalId: 'p1', fechaBaja: '2026-06-30', motivoBaja: 'renuncia' }, 'e1')
+    expect(row.fecha_baja).toBe('2026-06-30')
+    expect(row.motivo_baja).toBe('renuncia')
+  })
+})
+
 describe('useLegajoStore - familiares CRUD', () => {
   it('guardarFamiliar inserta un familiar nuevo (sin id)', async () => {
     const r = await useLegajoStore.getState().guardarFamiliar(

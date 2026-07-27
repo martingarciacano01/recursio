@@ -10,9 +10,10 @@ vi.mock('../../store/authStore', () => ({
   useAuthStore: (selector) => selector({ empresa: { id: 'e1' }, empresaVista: null }),
 }))
 
+const { legajosMock } = vi.hoisted(() => ({ legajosMock: { current: [] } }))
 vi.mock('../../store/legajoStore', () => {
   const useLegajoStoreMock = () => ({
-    legajos: [], familiares: [], sanciones: [], error: null,
+    legajos: legajosMock.current, familiares: [], sanciones: [], error: null,
     cargarLegajos: vi.fn(), cargarFamiliares: vi.fn(), cargarSanciones: vi.fn(),
   })
   useLegajoStoreMock.setState = vi.fn()
@@ -64,5 +65,24 @@ describe('FichaLegajoPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Liquidaciones' }))
     expect(screen.getByText('Sin liquidaciones registradas.')).toBeInTheDocument()
     expect(screen.queryByText('editor-datos')).not.toBeInTheDocument()
+  })
+
+  it('legajo con baja muestra badge Inactivo y boton deshabilitado de liquidacion final', async () => {
+    legajosMock.current = [{ personalId: 'p1', fechaBaja: '2026-06-30', motivoBaja: 'renuncia', liquidacionFinalId: null }]
+    render(<FichaLegajoPage />)
+    await screen.findByText('editor-datos')
+    expect(screen.getByText('Inactivo (baja: 2026-06-30)')).toBeInTheDocument()
+    const boton = screen.getByRole('button', { name: 'Generar liquidación final' })
+    expect(boton).toBeDisabled()
+    legajosMock.current = []
+  })
+
+  it('legajo activo no muestra badge ni boton de liquidacion final', async () => {
+    legajosMock.current = [{ personalId: 'p1', fechaBaja: null }]
+    render(<FichaLegajoPage />)
+    await screen.findByText('editor-datos')
+    expect(screen.queryByText(/Inactivo/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Generar liquidación final' })).not.toBeInTheDocument()
+    legajosMock.current = []
   })
 })
