@@ -596,10 +596,31 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
   // conceptos de convenio.
   const conceptosAportes = conceptosMotor.filter((c) => c.tipo === 'descuento' || c.tipo === 'aporte_patronal')
 
-  // Mismo patrón que conceptosLegajo en el flujo mensual (resolverBasicoYConceptos
-  // más arriba): fuera de convenio usa los conceptos "generales" de la
-  // empresa (convenio_id null); legajo normal usa los del convenio propio,
-  // filtrados por categoría con filtrarPorCategoria.
+  // tope_sipa vigente para el período (mismo patrón que en el flujo mensual,
+  // ver más arriba): las fórmulas seed de jubilación/ley_19032/INSSJP
+  // (migración 0029) usan `min(remunerativo_acumulado, tope_sipa) * 0.11` —
+  // sin este valor en variablesBase, evaluar() de interprete.ts revienta con
+  // "variable desconocida: tope_sipa" en el primer legajo con convenio
+  // estándar (no hay default a 0 para variables no definidas).
+  const { data: topeRowsEspecial, error: errTopeEspecial } = await supabase.from('nom_parametros').select('valor')
+    .eq('empresa_id', periodo.empresa_id).eq('codigo', 'tope_sipa')
+    .lte('vigencia_desde', periodo.fecha_hasta)
+    .or(`vigencia_hasta.is.null,vigencia_hasta.gte.${periodo.fecha_desde}`)
+    .order('vigencia_desde', { ascending: false }).limit(1)
+  if (errTopeEspecial) {
+    return new Response(JSON.stringify({ error: `error al leer parametros: ${errTopeEspecial.message}`, code: errTopeEspecial.code }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+  const topeSipa = Number(topeRowsEspecial?.[0]?.valor ?? 999999999) // sin parámetro cargado: sin tope efectivo
+
+  // Mismo patrón que conceptosAportesLegajo en el flujo mensual (ahí se llama
+  // conceptosLegajo, ver resolverBasicoYConceptos más arriba — acá se le da
+  // un nombre distinto porque este subconjunto es solo descuento/
+  // aporte_patronal, no la lista completa de conceptos del legajo): fuera de
+  // convenio usa los conceptos "generales" de la empresa (convenio_id null);
+  // legajo normal usa los del convenio propio, filtrados por categoría con
+  // filtrarPorCategoria.
   async function conceptosAportesDelLegajo(legajo: any): Promise<ConceptoConConvenio[]> {
     if (legajo.fuera_convenio) {
       return conceptosAportes.filter((c) => c.convenioId === null)
@@ -607,6 +628,18 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
     const cat = await categoriaCacheada(legajo.categoria_id)
     const nombreCategoria = cat?.nombre ?? ''
     return filtrarPorCategoria(conceptosAportes.filter((c) => c.convenioId === legajo.convenio_id), nombreCategoria)
+  }
+
+  // Wording de la advertencia de "sin aportes configurados": distingue el
+  // caso de un legajo fuera_convenio (nunca tuvo convenio propio, depende de
+  // los conceptos generales de la empresa) del de un legajo con convenio
+  // real al que le faltan conceptos de aportes/contribuciones — no son la
+  // misma situación y no hay que insinuar que a un fuera_convenio "le falta"
+  // un convenio que nunca debió tener.
+  function mensajeSinAportes(legajo: any, sufijoRubro: string): string {
+    return legajo.fuera_convenio
+      ? `sin conceptos de aportes/contribuciones generales (fuera de convenio) configurados para la empresa: ${sufijoRubro}`
+      : `convenio sin conceptos de aportes/contribuciones configurados: ${sufijoRubro}`
   }
 
   // Nota: a diferencia del flujo mensual (que solo trae personal
@@ -715,11 +748,11 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
   // remunerativo sintético. `orden: 0` para que corra primero y deje
   // remunerativo_acumulado seteado cuando evalúan los conceptos de
   // aportes/contribuciones (que suelen basarse en `base: 'remunerativo'`).
-  function liquidarBaseEspecial(codigo: string, nombre: string, monto: number, conceptosLegajo: ConceptoConConvenio[]) {
+  function liquidarBaseEspecial(codigo: string, nombre: string, monto: number, conceptosAportesLegajo: ConceptoConConvenio[]) {
     const conceptoBaseEspecial: Concepto = {
       codigo, nombre, tipo: 'remunerativo', orden: 0, formula: String(monto), imprimible: true, categorias: null,
     }
-    const resultado = liquidarConceptos([conceptoBaseEspecial, ...conceptosLegajo], {})
+    const resultado = liquidarConceptos([conceptoBaseEspecial, ...conceptosAportesLegajo], { tope_sipa: topeSipa })
     const items: ItemEspecial[] = resultado.items.map((i) => ({
       codigo: i.codigo, nombre: i.nombre, tipo: i.tipo, monto: i.monto,
       reglaAplicada: i.reglaAplicada, unidadTexto: i.unidadTexto, baseCalculo: i.baseCalculo,
@@ -757,15 +790,15 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
       const monto = insumos.regimen === '22250'
         ? calcularSACProporcionalUocra(brutos.length ? Math.max(...brutos) : 0, diasTrabajados, diasSemestre)
         : calcularSACLct({ mejoresBrutosPorMes: brutos, diasTrabajadosSemestre: diasTrabajados, diasSemestre })
-      const conceptosLegajo = await conceptosAportesDelLegajo(legajo)
-      if (conceptosLegajo.length === 0) {
-        // Sin aportes/descuentos configurados en el convenio: no es
-        // necesariamente un error (podría ser una configuración real), pero
-        // sí una brecha de configuración inusual — se surface como
-        // advertencia en vez de guardar $0 de aportes en silencio.
-        advertencias.push({ personal_id: persona.id, mensaje: 'convenio sin conceptos de aportes/contribuciones configurados: SAC liquidado sin deducciones' })
+      const conceptosAportesLegajo = await conceptosAportesDelLegajo(legajo)
+      if (conceptosAportesLegajo.length === 0) {
+        // Sin aportes/descuentos configurados: no es necesariamente un error
+        // (podría ser una configuración real), pero sí una brecha de
+        // configuración inusual — se surface como advertencia en vez de
+        // guardar $0 de aportes en silencio.
+        advertencias.push({ personal_id: persona.id, mensaje: mensajeSinAportes(legajo, 'SAC liquidado sin deducciones') })
       }
-      const r = liquidarBaseEspecial('sac', 'SAC', monto, conceptosLegajo)
+      const r = liquidarBaseEspecial('sac', 'SAC', monto, conceptosAportesLegajo)
       resultados.push({ personalId: persona.id, bruto: r.bruto, neto: r.neto, totalAportes: r.totalAportes, totalContribuciones: r.totalContribuciones, items: r.items })
       continue
     }
@@ -779,11 +812,11 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
             antiguedadAnios, diasTrabajadosAnio, modalidad: insumos.modalidad,
             sueldoMensual: insumos.sueldoMensual, valorHora: insumos.valorHora,
           }).total
-      const conceptosLegajo = await conceptosAportesDelLegajo(legajo)
-      if (conceptosLegajo.length === 0) {
-        advertencias.push({ personal_id: persona.id, mensaje: 'convenio sin conceptos de aportes/contribuciones configurados: vacaciones liquidadas sin deducciones' })
+      const conceptosAportesLegajo = await conceptosAportesDelLegajo(legajo)
+      if (conceptosAportesLegajo.length === 0) {
+        advertencias.push({ personal_id: persona.id, mensaje: mensajeSinAportes(legajo, 'vacaciones liquidadas sin deducciones') })
       }
-      const r = liquidarBaseEspecial('vacaciones', 'Vacaciones no gozadas', monto, conceptosLegajo)
+      const r = liquidarBaseEspecial('vacaciones', 'Vacaciones no gozadas', monto, conceptosAportesLegajo)
       resultados.push({ personalId: persona.id, bruto: r.bruto, neto: r.neto, totalAportes: r.totalAportes, totalContribuciones: r.totalContribuciones, items: r.items })
       continue
     }
@@ -861,11 +894,11 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
       if (r.preaviso > 0) itemsNoRemunerativos.push({ codigo: 'preaviso', nombre: 'Preaviso', tipo: 'no_remunerativo', monto: r.preaviso })
     }
 
-    const conceptosLegajo = await conceptosAportesDelLegajo(legajo)
-    if (conceptosLegajo.length === 0) {
-      advertencias.push({ personal_id: persona.id, mensaje: 'convenio sin conceptos de aportes/contribuciones configurados: liquidación final sin deducciones sobre la parte remunerativa' })
+    const conceptosAportesLegajo = await conceptosAportesDelLegajo(legajo)
+    if (conceptosAportesLegajo.length === 0) {
+      advertencias.push({ personal_id: persona.id, mensaje: mensajeSinAportes(legajo, 'liquidación final sin deducciones sobre la parte remunerativa') })
     }
-    const r = liquidarBaseEspecial('especial_final', 'Liquidación final (días trab. + SAC prop. + vacaciones no gozadas)', montoBaseEspecial, conceptosLegajo)
+    const r = liquidarBaseEspecial('especial_final', 'Liquidación final (días trab. + SAC prop. + vacaciones no gozadas)', montoBaseEspecial, conceptosAportesLegajo)
     const montoNoRemunerativo = itemsNoRemunerativos.reduce((s, i) => s + i.monto, 0)
     resultados.push({
       personalId: persona.id,
