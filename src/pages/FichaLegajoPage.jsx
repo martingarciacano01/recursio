@@ -121,7 +121,7 @@ export default function FichaLegajoPage() {
             <button
               className="btn btn-primary btn-sm"
               onClick={handleGenerarFinal}
-              disabled={generandoFinal}
+              disabled={generandoFinal || !empresaActiva?.id}
             >
               {generandoFinal ? 'Generando…' : 'Generar liquidación final'}
             </button>

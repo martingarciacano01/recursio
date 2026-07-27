@@ -64,6 +64,7 @@ export const useLiquidacionStore = create((set) => ({
     if (errPeriodo) return { ok: false, error: errPeriodo.message }
     const { data, error } = await invocarConReintento({ periodoId: periodo.id, personal_ids: [personalId] })
     if (error) return { ok: false, error: error.message }
+    if (data?.omitidos?.length > 0) return { ok: false, error: data.omitidos[0].motivo }
     return { ok: true, data }
   },
 

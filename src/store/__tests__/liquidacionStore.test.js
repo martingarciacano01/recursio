@@ -14,6 +14,11 @@ vi.mock('../../lib/supabase', () => ({
         error: null,
       }),
     },
+    from: vi.fn(() => ({
+      insert: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { id: 'periodo-final-1' }, error: null }),
+    })),
   },
 }))
 
@@ -54,5 +59,32 @@ describe('calcularPeriodo', () => {
     await useLiquidacionStore.getState().calcularPeriodo('periodo-1')
     expect(invoke).toHaveBeenCalledTimes(2)
     expect(invoke.mock.calls[1][1].body.reanudar).toBe(true)
+  })
+})
+
+describe('crearPeriodoFinal', () => {
+  it('devuelve ok:false con el motivo cuando la persona queda en omitidos aunque el invoke no reporte error', async () => {
+    supabase.functions.invoke = vi.fn().mockResolvedValue({
+      data: {
+        liquidadas: 0,
+        omitidos: [{ personal_id: 'p1', nombre: 'Juan Pérez', motivo: 'legajo incompleto: falta motivo_baja' }],
+        advertencias: [],
+      },
+      error: null,
+    })
+    const { useLiquidacionStore } = await import('../liquidacionStore')
+    const r = await useLiquidacionStore.getState().crearPeriodoFinal('p1', '2026-07-27', 'empresa-1')
+    expect(r.ok).toBe(false)
+    expect(r.error).toBe('legajo incompleto: falta motivo_baja')
+  })
+
+  it('devuelve ok:true cuando no hay omitidos', async () => {
+    supabase.functions.invoke = vi.fn().mockResolvedValue({
+      data: { liquidadas: 1, omitidos: [], advertencias: [] },
+      error: null,
+    })
+    const { useLiquidacionStore } = await import('../liquidacionStore')
+    const r = await useLiquidacionStore.getState().crearPeriodoFinal('p1', '2026-07-27', 'empresa-1')
+    expect(r.ok).toBe(true)
   })
 })
