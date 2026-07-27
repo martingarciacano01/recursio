@@ -25,6 +25,11 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// Concepto tal como lo devuelve nom_conceptos, con el convenio dueño y la
+// config cruda todavía adjuntos (se usa tanto en el flujo mensual/quincenal
+// como en el de períodos especiales — ver liquidarPeriodoEspecial).
+type ConceptoConConvenio = Concepto & { convenioId: string | null; config: any }
+
 // clave de escala: convenio + nombre de la categoría, vigente al cierre del
 // período. Se prueba primero contra el convenio del LEGAJO (si el legajo
 // quedó apuntando a la fila de categoría del convenio global tras
@@ -84,30 +89,37 @@ Deno.serve(async (req) => {
     })
   }
 
-  // ─── Períodos especiales (Fase 4, Task 32) ────────────────────────
-  // sac/sac_1/sac_2/vacaciones/final NO pasan por el flujo mensual/
-  // quincenal de básico+conceptos+asistencia de más abajo: son rubros
-  // puntuales calculados con las funciones puras de especiales.ts (LCT) o
-  // uocra.ts (régimen 22.250), según el convenio de cada legajo. Rama
-  // temprana y completamente separada del resto de la función — el
-  // código mensual/quincenal de aquí en más nunca se ejecuta para estos
-  // tipos de período.
-  const ESPECIALES = new Set(['sac', 'sac_1', 'sac_2', 'vacaciones', 'final'])
-  if (ESPECIALES.has(periodo.tipo)) {
-    return await liquidarPeriodoEspecial(supabase, periodo, personalIds)
-  }
-
   const { data: conceptos, error: errConceptos } = await supabase
     .from('nom_conceptos')
     .select('*, nom_concepto_reglas(*)')
     .or(`empresa_id.is.null,empresa_id.eq.${periodo.empresa_id}`)
+  if (errConceptos) {
+    return new Response(JSON.stringify({ error: `error al leer conceptos: ${errConceptos.message}`, code: errConceptos.code }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
 
-  type ConceptoConConvenio = Concepto & { convenioId: string | null; config: any }
   const conceptosMotor: ConceptoConConvenio[] = (conceptos || []).map((c: any) => ({
     codigo: c.codigo, nombre: c.nombre, tipo: c.tipo, orden: c.orden, formula: c.formula, imprimible: c.imprimible,
     categorias: c.categorias ?? null, convenioId: c.convenio_id ?? null, config: c.config ?? null,
     reglas: (c.nom_concepto_reglas || []).map((r: any) => ({ orden: r.orden, condicion: r.condicion, formula: r.formula })),
   }))
+
+  // ─── Períodos especiales (Fase 4, Task 32, extendido en Task 32b) ─────
+  // sac/sac_1/sac_2/vacaciones/final NO pasan por el flujo mensual/
+  // quincenal de básico+asistencia de más abajo (no hay básico ni
+  // asistencia que calcular para estos rubros puntuales), pero desde la
+  // Task 32b SÍ corren sus montos remunerativos por `liquidarConceptos`
+  // (jubilación/obra social/sindical/contribuciones patronales), igual que
+  // el flujo mensual — ver liquidarPeriodoEspecial más abajo. Se le pasa
+  // `conceptosMotor` ya resuelto para no repetir esta misma consulta
+  // adentro. Rama temprana y completamente separada del resto de la
+  // función — el código mensual/quincenal de aquí en más nunca se ejecuta
+  // para estos tipos de período.
+  const ESPECIALES = new Set(['sac', 'sac_1', 'sac_2', 'vacaciones', 'final'])
+  if (ESPECIALES.has(periodo.tipo)) {
+    return await liquidarPeriodoEspecial(supabase, periodo, personalIds, conceptosMotor)
+  }
 
   let queryPersonal = supabase.from('nom_v_personal').select('id, nombre').eq('empresa_id', periodo.empresa_id).eq('estado', 'activo')
   if (Array.isArray(personalIds) && personalIds.length > 0) queryPersonal = queryPersonal.in('id', personalIds)
@@ -118,7 +130,7 @@ Deno.serve(async (req) => {
   // {"liquidadas": 0} sin pista alguna — así se ocultó el "permission
   // denied for table personal" de las vistas security_invoker (ver
   // migración 0010). Cualquier error de lectura debe cortar y reportarse.
-  const errLectura = errConceptos || errPersonal || errLegajos
+  const errLectura = errPersonal || errLegajos
   if (errLectura) {
     return new Response(JSON.stringify({ error: `error al leer datos: ${errLectura.message}`, code: errLectura.code }), {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -483,15 +495,33 @@ Deno.serve(async (req) => {
 })
 
 // ─── Períodos especiales: sac / sac_1 / sac_2 / vacaciones / final ──────
-// (Fase 4, Task 32). A diferencia del flujo mensual/quincenal de arriba,
-// estos períodos no calculan asistencia ni conceptos vía el motor
-// (liquidarConceptos): son rubros puntuales resueltos directamente con las
-// funciones puras de packages/motor/src/especiales.ts (régimen LCT) o
-// packages/motor/src/uocra.ts (régimen 22.250, construcción), según a qué
-// convenio pertenece cada legajo. "Bajo volumen" (se corren para toda la
-// empresa un par de veces al año, o para una sola persona en el caso de
-// 'final') — no necesita la maquinaria de lotes/reanudar del flujo de
-// arriba: `completo: true` siempre.
+// (Fase 4, Task 32; aportes/contribuciones reales agregados en la Task 32b).
+// A diferencia del flujo mensual/quincenal de arriba, estos períodos no
+// calculan asistencia ni básico vía el motor: el monto remunerativo base
+// (SAC, vacaciones no gozadas, días trabajados del mes de la baja, SAC
+// proporcional) se resuelve directamente con las funciones puras de
+// packages/motor/src/especiales.ts (régimen LCT) o packages/motor/src/
+// uocra.ts (régimen 22.250, construcción), según a qué convenio pertenece
+// cada legajo. Ese monto SÍ se corre por `liquidarConceptos` (Task 32b) como
+// un único concepto remunerativo sintético junto con los conceptos reales de
+// descuento/aporte_patronal del convenio del legajo, para que jubilación,
+// obra social, ley 19032, retención sindical y contribuciones patronales se
+// calculen exactamente igual que en el flujo mensual — ver
+// conceptosAportesDelLegajo/liquidarBaseEspecial más abajo.
+//
+// La ÚNICA excepción, y a propósito: indemnización por antigüedad y preaviso
+// (rubros LCT-only del período 'final', motivo 'despido_sin_causa') NUNCA
+// pasan por el motor de conceptos. Son indemnizatorios, no remunerativos, y
+// están exentos de TODAS las deducciones — incluidas las que usan
+// `config.base: 'ambos'` (remunerativo + no_remunerativo, ver migración
+// 0029: obra_social, retención_sindical), que de otro modo los tomarían como
+// base imponible si se los pasara como concepto `no_remunerativo` al motor.
+// Se calculan aparte con aritmética simple y se suman directo a bruto/neto
+// fuera de `liquidarConceptos` (ver el branch 'final' abajo).
+//
+// "Bajo volumen" (se corren para toda la empresa un par de veces al año, o
+// para una sola persona en el caso de 'final') — no necesita la maquinaria
+// de lotes/reanudar del flujo de arriba: `completo: true` siempre.
 //
 // Simplificaciones documentadas (aceptadas explícitamente por el plan de
 // la Task 32, con comentario en el punto exacto donde se aplican):
@@ -511,11 +541,6 @@ Deno.serve(async (req) => {
 //     régimen 'lct' genérico para estos períodos especiales: no tienen
 //     convenio propio del cual leer `regimen`, y LCT es el régimen general
 //     por defecto fuera de un convenio colectivo sectorial.
-//  4. SAC/vacaciones/final acá NO pasan por liquidarConceptos (sin
-//     aportes/descuentos ni conceptos de convenio): se guarda bruto = neto.
-//     Si a futuro se necesita aplicar aportes sobre estos rubros, hay que
-//     sumarlos como conceptos y correr el motor — no está pedido en esta
-//     tarea.
 const TIPOS_PERIODO_SALARIAL = ['mensual', 'quincenal', 'quincena_1', 'quincena_2']
 
 function semestreDe(fechaHasta: string): { desde: string; hasta: string } {
@@ -558,9 +583,31 @@ type InsumosLegajo = {
   valorHora: number
 }
 
-async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds: string[] | undefined): Promise<Response> {
+async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds: string[] | undefined, conceptosMotor: ConceptoConConvenio[]): Promise<Response> {
   const omitidos: { personal_id: string; nombre: string; motivo: string }[] = []
   const advertencias: { personal_id: string; mensaje: string }[] = []
+
+  // Solo los conceptos de deducción/contribución (Task 32b): jubilación,
+  // obra social, ley 19032, retención sindical, contribuciones patronales,
+  // etc. Deliberadamente se excluyen 'remunerativo'/'no_remunerativo'/
+  // 'informativo' del convenio (básico, presentismo, asistencia...) — acá
+  // solo interesa aplicar las deducciones/contribuciones sobre el monto ya
+  // resuelto por especiales.ts/uocra.ts, no recalcular básico ni otros
+  // conceptos de convenio.
+  const conceptosAportes = conceptosMotor.filter((c) => c.tipo === 'descuento' || c.tipo === 'aporte_patronal')
+
+  // Mismo patrón que conceptosLegajo en el flujo mensual (resolverBasicoYConceptos
+  // más arriba): fuera de convenio usa los conceptos "generales" de la
+  // empresa (convenio_id null); legajo normal usa los del convenio propio,
+  // filtrados por categoría con filtrarPorCategoria.
+  async function conceptosAportesDelLegajo(legajo: any): Promise<ConceptoConConvenio[]> {
+    if (legajo.fuera_convenio) {
+      return conceptosAportes.filter((c) => c.convenioId === null)
+    }
+    const cat = await categoriaCacheada(legajo.categoria_id)
+    const nombreCategoria = cat?.nombre ?? ''
+    return filtrarPorCategoria(conceptosAportes.filter((c) => c.convenioId === legajo.convenio_id), nombreCategoria)
+  }
 
   // Nota: a diferencia del flujo mensual (que solo trae personal
   // "activo"), acá NO se filtra por estado — el período 'final' liquida
@@ -647,8 +694,40 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
     return (data || []).map((r: any) => Number(r.bruto))
   }
 
-  type ItemEspecial = { codigo: string; nombre: string; tipo: string; monto: number }
-  const resultados: { personalId: string; bruto: number; items: ItemEspecial[]; esFinal?: boolean }[] = []
+  // reglaAplicada/unidadTexto/baseCalculo/grupoRecibo/detalleRecibo quedan
+  // undefined para los ítems que NO pasan por liquidarConceptos
+  // (indemnización/preaviso, ver arriba) — se completan solo para los que sí.
+  type ItemEspecial = {
+    codigo: string; nombre: string; tipo: string; monto: number
+    reglaAplicada?: number | 'base'; unidadTexto?: string | null; baseCalculo?: number | null
+    grupoRecibo?: string | null; detalleRecibo?: string | null
+  }
+  const resultados: {
+    personalId: string; bruto: number; neto: number
+    totalAportes: number; totalContribuciones: number
+    items: ItemEspecial[]; esFinal?: boolean
+  }[] = []
+
+  // Corre el monto remunerativo base de un período especial (SAC,
+  // vacaciones, o el combinado de la liquidación final) por
+  // `liquidarConceptos` (Task 32b) junto a los conceptos reales de
+  // deducción/contribución del legajo, como si fuera un único concepto
+  // remunerativo sintético. `orden: 0` para que corra primero y deje
+  // remunerativo_acumulado seteado cuando evalúan los conceptos de
+  // aportes/contribuciones (que suelen basarse en `base: 'remunerativo'`).
+  function liquidarBaseEspecial(codigo: string, nombre: string, monto: number, conceptosLegajo: ConceptoConConvenio[]) {
+    const conceptoBaseEspecial: Concepto = {
+      codigo, nombre, tipo: 'remunerativo', orden: 0, formula: String(monto), imprimible: true, categorias: null,
+    }
+    const resultado = liquidarConceptos([conceptoBaseEspecial, ...conceptosLegajo], {})
+    const items: ItemEspecial[] = resultado.items.map((i) => ({
+      codigo: i.codigo, nombre: i.nombre, tipo: i.tipo, monto: i.monto,
+      reglaAplicada: i.reglaAplicada, unidadTexto: i.unidadTexto, baseCalculo: i.baseCalculo,
+      grupoRecibo: i.grupoRecibo, detalleRecibo: i.detalleRecibo,
+    }))
+    const totalContribuciones = resultado.items.filter((i) => i.tipo === 'aporte_patronal').reduce((s, i) => s + i.monto, 0)
+    return { bruto: resultado.bruto, neto: resultado.neto, totalAportes: resultado.totalDescuentos, totalContribuciones, items }
+  }
 
   for (const persona of personal || []) {
     const legajo = legajoPorPersonal.get(persona.id)
@@ -678,7 +757,16 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
       const monto = insumos.regimen === '22250'
         ? calcularSACProporcionalUocra(brutos.length ? Math.max(...brutos) : 0, diasTrabajados, diasSemestre)
         : calcularSACLct({ mejoresBrutosPorMes: brutos, diasTrabajadosSemestre: diasTrabajados, diasSemestre })
-      resultados.push({ personalId: persona.id, bruto: monto, items: [{ codigo: 'sac', nombre: 'SAC', tipo: 'remunerativo', monto }] })
+      const conceptosLegajo = await conceptosAportesDelLegajo(legajo)
+      if (conceptosLegajo.length === 0) {
+        // Sin aportes/descuentos configurados en el convenio: no es
+        // necesariamente un error (podría ser una configuración real), pero
+        // sí una brecha de configuración inusual — se surface como
+        // advertencia en vez de guardar $0 de aportes en silencio.
+        advertencias.push({ personal_id: persona.id, mensaje: 'convenio sin conceptos de aportes/contribuciones configurados: SAC liquidado sin deducciones' })
+      }
+      const r = liquidarBaseEspecial('sac', 'SAC', monto, conceptosLegajo)
+      resultados.push({ personalId: persona.id, bruto: r.bruto, neto: r.neto, totalAportes: r.totalAportes, totalContribuciones: r.totalContribuciones, items: r.items })
       continue
     }
 
@@ -691,7 +779,12 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
             antiguedadAnios, diasTrabajadosAnio, modalidad: insumos.modalidad,
             sueldoMensual: insumos.sueldoMensual, valorHora: insumos.valorHora,
           }).total
-      resultados.push({ personalId: persona.id, bruto: monto, items: [{ codigo: 'vacaciones', nombre: 'Vacaciones no gozadas', tipo: 'remunerativo', monto }] })
+      const conceptosLegajo = await conceptosAportesDelLegajo(legajo)
+      if (conceptosLegajo.length === 0) {
+        advertencias.push({ personal_id: persona.id, mensaje: 'convenio sin conceptos de aportes/contribuciones configurados: vacaciones liquidadas sin deducciones' })
+      }
+      const r = liquidarBaseEspecial('vacaciones', 'Vacaciones no gozadas', monto, conceptosLegajo)
+      resultados.push({ personalId: persona.id, bruto: r.bruto, neto: r.neto, totalAportes: r.totalAportes, totalContribuciones: r.totalContribuciones, items: r.items })
       continue
     }
 
@@ -721,8 +814,16 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
     // dentro de ese tramo del mes).
     const diasTrabajadosMes = Number(fechaBaja.slice(8, 10))
 
-    let items: ItemEspecial[]
-    let monto: number
+    // montoBaseEspecial: monto remunerativo combinado (días trabajados del
+    // mes + SAC proporcional + vacaciones no gozadas en LCT; vacaciones no
+    // gozadas + SAC proporcional en UOCRA — este régimen no tiene "días
+    // trabajados del mes" como concepto propio, ver calcularLiquidacionFinal
+    // de uocra.ts) que sí corre por liquidarConceptos más abajo, como un
+    // único concepto sintético (Task 32b). itemsNoRemunerativos
+    // (indemnización/preaviso) quedan afuera a propósito — ver el comentario
+    // grande sobre períodos especiales más arriba.
+    let montoBaseEspecial: number
+    const itemsNoRemunerativos: ItemEspecial[] = []
     if (insumos.regimen === '22250') {
       const diasVacNoGozados = diasVacacionesPorAntiguedadUocra(antiguedadAnios)
       const r = calcularLiquidacionFinalUocra({
@@ -732,11 +833,7 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
         mejorRemuneracionSemestre: mejorBruto,
         diasTrabajadosSemestre: diasTrabajadosSemestreFinal,
       })
-      monto = r.total
-      items = [
-        { codigo: 'vacaciones_no_gozadas', nombre: 'Vacaciones no gozadas', tipo: 'remunerativo', monto: r.vacacionesNoGozadas },
-        { codigo: 'sac_proporcional', nombre: 'SAC proporcional', tipo: 'remunerativo', monto: r.sacProporcional },
-      ]
+      montoBaseEspecial = r.vacacionesNoGozadas + r.sacProporcional
     } else {
       const sacProporcional = calcularSACLct({ mejoresBrutosPorMes: brutos, diasTrabajadosSemestre: diasTrabajadosSemestreFinal, diasSemestre: diasSemestreFinal })
       const vacacionesNoGozadas = calcularVacacionesLct({
@@ -754,17 +851,31 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
         antiguedadAnios,
         mejorRemuneracionMensualNormal: insumos.sueldoMensual,
       })
-      monto = r.total
-      items = [
-        { codigo: 'dias_trabajados_mes', nombre: 'Días trabajados del mes', tipo: 'remunerativo', monto: r.montoDiasTrabajadosMes },
-        { codigo: 'sac_proporcional', nombre: 'SAC proporcional', tipo: 'remunerativo', monto: r.sacProporcional },
-        { codigo: 'vacaciones_no_gozadas', nombre: 'Vacaciones no gozadas', tipo: 'remunerativo', monto: r.vacacionesNoGozadas },
-      ]
-      // indemnización y preaviso son no remunerativos (exentos de aportes) — art. 245/231 LCT
-      if (r.indemnizacionAntiguedad > 0) items.push({ codigo: 'indemnizacion_antiguedad', nombre: 'Indemnización por antigüedad', tipo: 'no_remunerativo', monto: r.indemnizacionAntiguedad })
-      if (r.preaviso > 0) items.push({ codigo: 'preaviso', nombre: 'Preaviso', tipo: 'no_remunerativo', monto: r.preaviso })
+      montoBaseEspecial = r.montoDiasTrabajadosMes + r.sacProporcional + r.vacacionesNoGozadas
+      // Indemnización y preaviso son NO remunerativos y NUNCA pasan por
+      // liquidarConceptos (exentos de toda deducción, incluidas las de
+      // base 'ambos' como obra_social/retención_sindical — ver el
+      // comentario grande sobre períodos especiales más arriba) — art.
+      // 245/231 LCT. Se suman aparte, directo a bruto/neto, más abajo.
+      if (r.indemnizacionAntiguedad > 0) itemsNoRemunerativos.push({ codigo: 'indemnizacion_antiguedad', nombre: 'Indemnización por antigüedad', tipo: 'no_remunerativo', monto: r.indemnizacionAntiguedad })
+      if (r.preaviso > 0) itemsNoRemunerativos.push({ codigo: 'preaviso', nombre: 'Preaviso', tipo: 'no_remunerativo', monto: r.preaviso })
     }
-    resultados.push({ personalId: persona.id, bruto: monto, items, esFinal: true })
+
+    const conceptosLegajo = await conceptosAportesDelLegajo(legajo)
+    if (conceptosLegajo.length === 0) {
+      advertencias.push({ personal_id: persona.id, mensaje: 'convenio sin conceptos de aportes/contribuciones configurados: liquidación final sin deducciones sobre la parte remunerativa' })
+    }
+    const r = liquidarBaseEspecial('especial_final', 'Liquidación final (días trab. + SAC prop. + vacaciones no gozadas)', montoBaseEspecial, conceptosLegajo)
+    const montoNoRemunerativo = itemsNoRemunerativos.reduce((s, i) => s + i.monto, 0)
+    resultados.push({
+      personalId: persona.id,
+      bruto: r.bruto + montoNoRemunerativo,
+      neto: r.neto + montoNoRemunerativo,
+      totalAportes: r.totalAportes,
+      totalContribuciones: r.totalContribuciones,
+      items: [...r.items, ...itemsNoRemunerativos],
+      esFinal: true,
+    })
   }
 
   if (resultados.length === 0) {
@@ -773,11 +884,9 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
     })
   }
 
-  // Ver simplificación #4: bruto = neto (sin aportes/descuentos en este
-  // flujo simplificado de períodos especiales).
   const filasLiquidacion = resultados.map((r) => ({
     empresa_id: periodo.empresa_id, periodo_id: periodo.id, personal_id: r.personalId,
-    bruto: r.bruto, neto: r.bruto, total_aportes: 0, total_contribuciones: 0,
+    bruto: r.bruto, neto: r.neto, total_aportes: r.totalAportes, total_contribuciones: r.totalContribuciones,
     detalle_horas: null, estado: 'preliminar',
   }))
   const { data: liqs, error: errUpsert } = await supabase.from('nom_liquidaciones')
@@ -798,8 +907,13 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
     if (!liqId) return []
     return r.items.map((i) => ({
       empresa_id: periodo.empresa_id, liquidacion_id: liqId, concepto_codigo: i.codigo,
-      concepto_nombre: i.nombre, tipo: i.tipo, monto: i.monto, regla_aplicada: 'periodo_especial',
-      unidad_texto: null, base_calculo: null, grupo_recibo: null, detalle_recibo: null,
+      concepto_nombre: i.nombre, tipo: i.tipo, monto: i.monto,
+      // Los ítems que pasaron por liquidarConceptos (Task 32b) traen su
+      // reglaAplicada real; indemnización/preaviso (que nunca pasan por el
+      // motor) no tienen una, y se documentan con el marcador de siempre.
+      regla_aplicada: i.reglaAplicada !== undefined ? String(i.reglaAplicada) : 'periodo_especial',
+      unidad_texto: i.unidadTexto ?? null, base_calculo: i.baseCalculo ?? null,
+      grupo_recibo: i.grupoRecibo ?? null, detalle_recibo: i.detalleRecibo ?? null,
     }))
   })
   if (itemsInsert.length > 0) {
