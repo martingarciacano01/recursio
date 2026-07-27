@@ -4,6 +4,17 @@ import { liquidarConceptos, filtrarPorCategoria, type Concepto } from '../../../
 import { calcularAsistencia, construirDiasPeriodo } from '../../../packages/motor/src/asistencia.ts'
 import { calcularBasicoPeriodo } from '../../../packages/motor/src/basico.ts'
 import { partirEnLotes, agruparPorPersonalId } from '../../../packages/motor/src/lotes.ts'
+import {
+  calcularSAC as calcularSACLct,
+  calcularVacaciones as calcularVacacionesLct,
+  calcularLiquidacionFinal as calcularLiquidacionFinalLct,
+} from '../../../packages/motor/src/especiales.ts'
+import {
+  calcularSACProporcional as calcularSACProporcionalUocra,
+  diasVacacionesPorAntiguedad as diasVacacionesPorAntiguedadUocra,
+  calcularVacacionesNoGozadas as calcularVacacionesNoGozadasUocra,
+  calcularLiquidacionFinal as calcularLiquidacionFinalUocra,
+} from '../../../packages/motor/src/uocra.ts'
 
 // Mismo patrón CORS que el resto de las Edge Functions de Presencio
 // (fichaobra/supabase/functions/invite-user/index.ts): sin esto, el
@@ -71,6 +82,19 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: 'período cerrado: no se puede recalcular' }), {
       status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
+  }
+
+  // ─── Períodos especiales (Fase 4, Task 32) ────────────────────────
+  // sac/sac_1/sac_2/vacaciones/final NO pasan por el flujo mensual/
+  // quincenal de básico+conceptos+asistencia de más abajo: son rubros
+  // puntuales calculados con las funciones puras de especiales.ts (LCT) o
+  // uocra.ts (régimen 22.250), según el convenio de cada legajo. Rama
+  // temprana y completamente separada del resto de la función — el
+  // código mensual/quincenal de aquí en más nunca se ejecuta para estos
+  // tipos de período.
+  const ESPECIALES = new Set(['sac', 'sac_1', 'sac_2', 'vacaciones', 'final'])
+  if (ESPECIALES.has(periodo.tipo)) {
+    return await liquidarPeriodoEspecial(supabase, periodo, personalIds)
   }
 
   const { data: conceptos, error: errConceptos } = await supabase
@@ -457,3 +481,345 @@ Deno.serve(async (req) => {
     })
   }
 })
+
+// ─── Períodos especiales: sac / sac_1 / sac_2 / vacaciones / final ──────
+// (Fase 4, Task 32). A diferencia del flujo mensual/quincenal de arriba,
+// estos períodos no calculan asistencia ni conceptos vía el motor
+// (liquidarConceptos): son rubros puntuales resueltos directamente con las
+// funciones puras de packages/motor/src/especiales.ts (régimen LCT) o
+// packages/motor/src/uocra.ts (régimen 22.250, construcción), según a qué
+// convenio pertenece cada legajo. "Bajo volumen" (se corren para toda la
+// empresa un par de veces al año, o para una sola persona en el caso de
+// 'final') — no necesita la maquinaria de lotes/reanudar del flujo de
+// arriba: `completo: true` siempre.
+//
+// Simplificaciones documentadas (aceptadas explícitamente por el plan de
+// la Task 32, con comentario en el punto exacto donde se aplican):
+//  1. diasTrabajadosSemestre / diasTrabajadosAnio se derivan solo de
+//     fecha_ingreso/fecha_baja del legajo, truncando el rango del
+//     semestre/año calendario — NO se restan ausencias injustificadas
+//     dentro de ese rango (a diferencia del flujo mensual, que sí calcula
+//     asistencia día a día). Aproximación razonable: estos rubros ya son
+//     "extraordinarios" de baja frecuencia, y un descuento por ausencias
+//     puntuales dentro de un semestre/año completo es un efecto de
+//     segundo orden frente a la proporción de antigüedad.
+//  2. mejorRemuneracionMensualNormal (base del art. 245 LCT en un
+//     despido sin causa) usa el sueldo mensual actual ya resuelto por
+//     escala, no "la mejor de los últimos meses" — normalmente coinciden
+//     salvo aumentos de escala muy recientes.
+//  3. Legajos fuera de convenio (sin convenio/categoría) se tratan como
+//     régimen 'lct' genérico para estos períodos especiales: no tienen
+//     convenio propio del cual leer `regimen`, y LCT es el régimen general
+//     por defecto fuera de un convenio colectivo sectorial.
+//  4. SAC/vacaciones/final acá NO pasan por liquidarConceptos (sin
+//     aportes/descuentos ni conceptos de convenio): se guarda bruto = neto.
+//     Si a futuro se necesita aplicar aportes sobre estos rubros, hay que
+//     sumarlos como conceptos y correr el motor — no está pedido en esta
+//     tarea.
+const TIPOS_PERIODO_SALARIAL = ['mensual', 'quincenal', 'quincena_1', 'quincena_2']
+
+function semestreDe(fechaHasta: string): { desde: string; hasta: string } {
+  const anio = Number(fechaHasta.slice(0, 4))
+  const mes = Number(fechaHasta.slice(5, 7))
+  return mes <= 6
+    ? { desde: `${anio}-01-01`, hasta: `${anio}-06-30` }
+    : { desde: `${anio}-07-01`, hasta: `${anio}-12-31` }
+}
+
+function diasEntre(desde: string, hasta: string): number {
+  const ms = new Date(hasta).getTime() - new Date(desde).getTime()
+  return Math.round(ms / 86400000) + 1
+}
+
+// Días trabajados dentro de [rangoDesde, rangoHasta], truncando por
+// fecha_ingreso/fecha_baja del legajo si caen dentro del rango (ver
+// simplificación #1 arriba: no descuenta ausencias).
+function diasTrabajadosEnRango(fechaIngreso: string | null, fechaBaja: string | null, rangoDesde: string, rangoHasta: string): number {
+  let desde = rangoDesde
+  let hasta = rangoHasta
+  if (fechaIngreso && fechaIngreso > desde) desde = fechaIngreso
+  if (fechaBaja && fechaBaja < hasta) hasta = fechaBaja
+  if (hasta < desde) return 0
+  return diasEntre(desde, hasta)
+}
+
+function calcularAntiguedadAnios(fechaIngreso: string | null, antiguedadReconocida: number | null, fechaReferencia: string): number {
+  const reconocida = Number(antiguedadReconocida ?? 0)
+  if (!fechaIngreso) return reconocida
+  const ms = new Date(fechaReferencia).getTime() - new Date(fechaIngreso).getTime()
+  const anios = ms / (365.25 * 24 * 3600 * 1000)
+  return Math.max(anios, 0) + reconocida
+}
+
+type InsumosLegajo = {
+  regimen: 'lct' | '22250'
+  modalidad: 'hora' | 'mensual' | 'quincenal'
+  sueldoMensual: number
+  valorHora: number
+}
+
+async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds: string[] | undefined): Promise<Response> {
+  const omitidos: { personal_id: string; nombre: string; motivo: string }[] = []
+  const advertencias: { personal_id: string; mensaje: string }[] = []
+
+  // Nota: a diferencia del flujo mensual (que solo trae personal
+  // "activo"), acá NO se filtra por estado — el período 'final' liquida
+  // exactamente a alguien que probablemente ya figure inactivo en
+  // Presencio (legajo.fecha_baja ya cargada), y filtrar por 'activo' lo
+  // excluiría silenciosamente de su propia liquidación final.
+  let queryPersonal = supabase.from('nom_v_personal').select('id, nombre, fecha_ingreso').eq('empresa_id', periodo.empresa_id)
+  if (Array.isArray(personalIds) && personalIds.length > 0) queryPersonal = queryPersonal.in('id', personalIds)
+  const { data: personal, error: errPersonal } = await queryPersonal
+  const { data: legajos, error: errLegajos } = await supabase.from('nom_legajo').select('*').eq('empresa_id', periodo.empresa_id)
+  const errLectura = errPersonal || errLegajos
+  if (errLectura) {
+    return new Response(JSON.stringify({ error: `error al leer datos: ${errLectura.message}`, code: errLectura.code }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+  const legajoPorPersonal = new Map((legajos || []).map((l: any) => [l.personal_id, l]))
+
+  // Caches para no repetir queries entre legajos que comparten categoría o
+  // convenio (mismo patrón que basicoCacheado/noRemCacheado del flujo
+  // mensual, ver arriba).
+  const cacheCategoria = new Map<string, { convenio_id: string; nombre: string } | null>()
+  async function categoriaCacheada(categoriaId: string) {
+    if (!cacheCategoria.has(categoriaId)) {
+      const { data } = await supabase.from('nom_categorias').select('convenio_id, nombre').eq('id', categoriaId).maybeSingle()
+      cacheCategoria.set(categoriaId, data ?? null)
+    }
+    return cacheCategoria.get(categoriaId) ?? null
+  }
+  const cacheRegimen = new Map<string, string | null>()
+  async function regimenCacheado(convenioId: string) {
+    if (!cacheRegimen.has(convenioId)) {
+      const { data } = await supabase.from('nom_convenios').select('regimen').eq('id', convenioId).maybeSingle()
+      cacheRegimen.set(convenioId, data?.regimen ?? null)
+    }
+    return cacheRegimen.get(convenioId) ?? null
+  }
+  const cacheBasico = new Map<string, { basico: number; modalidad: string } | null>()
+  async function basicoCacheadoEspecial(convenioId: string | null, nombre: string) {
+    const clave = `${convenioId}:${nombre}`
+    if (!cacheBasico.has(clave)) cacheBasico.set(clave, await resolverBasico(supabase, convenioId, nombre, periodo.fecha_hasta))
+    return cacheBasico.get(clave) ?? null
+  }
+
+  async function resolverInsumosLegajo(legajo: any): Promise<InsumosLegajo | { error: string }> {
+    if (legajo.fuera_convenio) {
+      // Ver simplificación #3: sin convenio propio, se trata como LCT.
+      if (!legajo.sueldo_convenido) return { error: 'sin sueldo convenido (legajo fuera de convenio)' }
+      return { regimen: 'lct', modalidad: 'mensual', sueldoMensual: Number(legajo.sueldo_convenido), valorHora: 0 }
+    }
+    if (!legajo.convenio_id || !legajo.categoria_id) return { error: 'legajo sin convenio o categoría' }
+    const cat = await categoriaCacheada(legajo.categoria_id)
+    if (!cat) return { error: 'categoría del legajo no encontrada' }
+    let basico = await basicoCacheadoEspecial(legajo.convenio_id, cat.nombre)
+    if (basico === null) basico = await basicoCacheadoEspecial(cat.convenio_id, cat.nombre)
+    if (basico === null || basico.basico === 0) return { error: `sin escala vigente para "${cat.nombre}" al ${periodo.fecha_hasta}` }
+    const regimen = await regimenCacheado(legajo.convenio_id)
+    if (regimen !== 'lct' && regimen !== '22250') return { error: 'convenio sin régimen configurado (nom_convenios.regimen)' }
+    const modalidad = basico.modalidad as 'hora' | 'mensual' | 'quincenal'
+    const sueldoMensual = modalidad === 'hora' ? 0 : modalidad === 'quincenal' ? basico.basico * 2 : basico.basico
+    const valorHora = modalidad === 'hora' ? basico.basico : 0
+    return { regimen: regimen as 'lct' | '22250', modalidad, sueldoMensual, valorHora }
+  }
+
+  // Períodos salariales del semestre que termina en periodo.fecha_hasta,
+  // para el cálculo de "mejor remuneración del semestre" del SAC (una sola
+  // consulta para toda la empresa, reusada por persona).
+  const semestre = semestreDe(periodo.fecha_hasta)
+  const diasSemestre = diasEntre(semestre.desde, semestre.hasta)
+  const { data: periodosSemestre, error: errPerSem } = await supabase.from('nom_periodos').select('id')
+    .eq('empresa_id', periodo.empresa_id).in('tipo', TIPOS_PERIODO_SALARIAL)
+    .gte('fecha_desde', semestre.desde).lte('fecha_desde', semestre.hasta)
+  if (errPerSem) {
+    return new Response(JSON.stringify({ error: `error al leer períodos del semestre: ${errPerSem.message}`, code: errPerSem.code }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+  const idsPeriodosSemestre = (periodosSemestre || []).map((p: any) => p.id)
+
+  async function brutosDelSemestre(personalId: string, idsPeriodos: string[]): Promise<number[]> {
+    if (idsPeriodos.length === 0) return []
+    const { data } = await supabase.from('nom_liquidaciones').select('bruto')
+      .eq('personal_id', personalId).in('periodo_id', idsPeriodos)
+    return (data || []).map((r: any) => Number(r.bruto))
+  }
+
+  type ItemEspecial = { codigo: string; nombre: string; tipo: string; monto: number }
+  const resultados: { personalId: string; bruto: number; items: ItemEspecial[]; esFinal?: boolean }[] = []
+
+  for (const persona of personal || []) {
+    const legajo = legajoPorPersonal.get(persona.id)
+    if (!legajo) {
+      omitidos.push({ personal_id: persona.id, nombre: persona.nombre, motivo: 'sin legajo cargado' })
+      continue
+    }
+    if (periodo.tipo === 'final' && (!legajo.fecha_baja || !legajo.motivo_baja)) {
+      omitidos.push({ personal_id: persona.id, nombre: persona.nombre, motivo: 'falta fecha_baja o motivo_baja: no se puede liquidar el final' })
+      continue
+    }
+
+    const insumos = await resolverInsumosLegajo(legajo)
+    if ('error' in insumos) {
+      omitidos.push({ personal_id: persona.id, nombre: persona.nombre, motivo: insumos.error })
+      continue
+    }
+
+    const antiguedadAnios = calcularAntiguedadAnios(persona.fecha_ingreso, legajo.antiguedad_reconocida, periodo.fecha_hasta)
+
+    if (periodo.tipo === 'sac' || periodo.tipo === 'sac_1' || periodo.tipo === 'sac_2') {
+      const brutos = await brutosDelSemestre(persona.id, idsPeriodosSemestre)
+      if (brutos.length === 0) {
+        advertencias.push({ personal_id: persona.id, mensaje: 'sin liquidaciones mensuales/quincenales en el semestre: SAC calculado en $0' })
+      }
+      const diasTrabajados = diasTrabajadosEnRango(persona.fecha_ingreso, legajo.fecha_baja, semestre.desde, semestre.hasta)
+      const monto = insumos.regimen === '22250'
+        ? calcularSACProporcionalUocra(brutos.length ? Math.max(...brutos) : 0, diasTrabajados, diasSemestre)
+        : calcularSACLct({ mejoresBrutosPorMes: brutos, diasTrabajadosSemestre: diasTrabajados, diasSemestre })
+      resultados.push({ personalId: persona.id, bruto: monto, items: [{ codigo: 'sac', nombre: 'SAC', tipo: 'remunerativo', monto }] })
+      continue
+    }
+
+    if (periodo.tipo === 'vacaciones') {
+      const anio = Number(periodo.fecha_hasta.slice(0, 4))
+      const diasTrabajadosAnio = diasTrabajadosEnRango(persona.fecha_ingreso, legajo.fecha_baja, `${anio}-01-01`, `${anio}-12-31`)
+      const monto = insumos.regimen === '22250'
+        ? calcularVacacionesNoGozadasUocra(insumos.sueldoMensual, diasVacacionesPorAntiguedadUocra(antiguedadAnios))
+        : calcularVacacionesLct({
+            antiguedadAnios, diasTrabajadosAnio, modalidad: insumos.modalidad,
+            sueldoMensual: insumos.sueldoMensual, valorHora: insumos.valorHora,
+          }).total
+      resultados.push({ personalId: persona.id, bruto: monto, items: [{ codigo: 'vacaciones', nombre: 'Vacaciones no gozadas', tipo: 'remunerativo', monto }] })
+      continue
+    }
+
+    // periodo.tipo === 'final' (único caso restante; siempre 1 solo legajo,
+    // el llamador pasa personalIds: [id]). El semestre relevante para el
+    // SAC proporcional es el que contiene fecha_baja, no periodo.fecha_hasta
+    // (en la práctica suelen coincidir, pero se calcula explícito).
+    const fechaBaja = legajo.fecha_baja as string
+    const semestreFinal = semestreDe(fechaBaja)
+    const diasSemestreFinal = diasEntre(semestreFinal.desde, semestreFinal.hasta)
+    const { data: periodosSemestreFinal, error: errPerSemFinal } = await supabase.from('nom_periodos').select('id')
+      .eq('empresa_id', periodo.empresa_id).in('tipo', TIPOS_PERIODO_SALARIAL)
+      .gte('fecha_desde', semestreFinal.desde).lte('fecha_desde', semestreFinal.hasta)
+    if (errPerSemFinal) {
+      return new Response(JSON.stringify({ error: `error al leer períodos del semestre de la baja: ${errPerSemFinal.message}`, code: errPerSemFinal.code }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+    const idsSemestreFinal = (periodosSemestreFinal || []).map((p: any) => p.id)
+    const brutos = await brutosDelSemestre(persona.id, idsSemestreFinal)
+    const mejorBruto = brutos.length ? Math.max(...brutos) : 0
+    const diasTrabajadosSemestreFinal = diasTrabajadosEnRango(persona.fecha_ingreso, fechaBaja, semestreFinal.desde, semestreFinal.hasta)
+    const anioBaja = Number(fechaBaja.slice(0, 4))
+    const diasTrabajadosAnioFinal = diasTrabajadosEnRango(persona.fecha_ingreso, fechaBaja, `${anioBaja}-01-01`, `${anioBaja}-12-31`)
+    // Días trabajados del mes de la baja: del día 1 al día de fecha_baja
+    // inclusive (ver simplificación #1: no descuenta ausencias sin goce
+    // dentro de ese tramo del mes).
+    const diasTrabajadosMes = Number(fechaBaja.slice(8, 10))
+
+    let items: ItemEspecial[]
+    let monto: number
+    if (insumos.regimen === '22250') {
+      const diasVacNoGozados = diasVacacionesPorAntiguedadUocra(antiguedadAnios)
+      const r = calcularLiquidacionFinalUocra({
+        remuneracionMensual: insumos.sueldoMensual,
+        antiguedadAnios,
+        diasVacacionesNoGozados: diasVacNoGozados,
+        mejorRemuneracionSemestre: mejorBruto,
+        diasTrabajadosSemestre: diasTrabajadosSemestreFinal,
+      })
+      monto = r.total
+      items = [
+        { codigo: 'vacaciones_no_gozadas', nombre: 'Vacaciones no gozadas', tipo: 'remunerativo', monto: r.vacacionesNoGozadas },
+        { codigo: 'sac_proporcional', nombre: 'SAC proporcional', tipo: 'remunerativo', monto: r.sacProporcional },
+      ]
+    } else {
+      const sacProporcional = calcularSACLct({ mejoresBrutosPorMes: brutos, diasTrabajadosSemestre: diasTrabajadosSemestreFinal, diasSemestre: diasSemestreFinal })
+      const vacacionesNoGozadas = calcularVacacionesLct({
+        antiguedadAnios, diasTrabajadosAnio: diasTrabajadosAnioFinal, modalidad: insumos.modalidad,
+        sueldoMensual: insumos.sueldoMensual, valorHora: insumos.valorHora,
+      }).total
+      // mejorRemuneracionMensualNormal: ver simplificación #2 (sueldo
+      // mensual actual, no "mejor de los últimos meses").
+      const r = calcularLiquidacionFinalLct({
+        motivoBaja: legajo.motivo_baja,
+        diasTrabajadosMes,
+        sueldoMensual: insumos.sueldoMensual,
+        sacProporcional,
+        vacacionesNoGozadas,
+        antiguedadAnios,
+        mejorRemuneracionMensualNormal: insumos.sueldoMensual,
+      })
+      monto = r.total
+      items = [
+        { codigo: 'dias_trabajados_mes', nombre: 'Días trabajados del mes', tipo: 'remunerativo', monto: r.montoDiasTrabajadosMes },
+        { codigo: 'sac_proporcional', nombre: 'SAC proporcional', tipo: 'remunerativo', monto: r.sacProporcional },
+        { codigo: 'vacaciones_no_gozadas', nombre: 'Vacaciones no gozadas', tipo: 'remunerativo', monto: r.vacacionesNoGozadas },
+      ]
+      if (r.indemnizacionAntiguedad > 0) items.push({ codigo: 'indemnizacion_antiguedad', nombre: 'Indemnización por antigüedad', tipo: 'remunerativo', monto: r.indemnizacionAntiguedad })
+      if (r.preaviso > 0) items.push({ codigo: 'preaviso', nombre: 'Preaviso', tipo: 'remunerativo', monto: r.preaviso })
+    }
+    resultados.push({ personalId: persona.id, bruto: monto, items, esFinal: true })
+  }
+
+  if (resultados.length === 0) {
+    return new Response(JSON.stringify({ liquidadas: 0, omitidos, advertencias, completo: true }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+
+  // Ver simplificación #4: bruto = neto (sin aportes/descuentos en este
+  // flujo simplificado de períodos especiales).
+  const filasLiquidacion = resultados.map((r) => ({
+    empresa_id: periodo.empresa_id, periodo_id: periodo.id, personal_id: r.personalId,
+    bruto: r.bruto, neto: r.bruto, total_aportes: 0, total_contribuciones: 0,
+    detalle_horas: null, estado: 'preliminar',
+  }))
+  const { data: liqs, error: errUpsert } = await supabase.from('nom_liquidaciones')
+    .upsert(filasLiquidacion, { onConflict: 'periodo_id,personal_id' })
+    .select('id, personal_id')
+  if (errUpsert) {
+    return new Response(JSON.stringify({ error: `error al guardar liquidaciones: ${errUpsert.message}`, code: errUpsert.code }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+  const liqIdPorPersonal = new Map((liqs || []).map((l: any) => [l.personal_id, l.id]))
+  const idsLiq = [...liqIdPorPersonal.values()]
+  if (idsLiq.length > 0) {
+    await supabase.from('nom_liquidacion_items').delete().in('liquidacion_id', idsLiq)
+  }
+  const itemsInsert = resultados.flatMap((r) => {
+    const liqId = liqIdPorPersonal.get(r.personalId)
+    if (!liqId) return []
+    return r.items.map((i) => ({
+      empresa_id: periodo.empresa_id, liquidacion_id: liqId, concepto_codigo: i.codigo,
+      concepto_nombre: i.nombre, tipo: i.tipo, monto: i.monto, regla_aplicada: 'periodo_especial',
+      unidad_texto: null, base_calculo: null, grupo_recibo: null, detalle_recibo: null,
+    }))
+  })
+  if (itemsInsert.length > 0) {
+    await supabase.from('nom_liquidacion_items').insert(itemsInsert)
+  }
+
+  // 'final': además de la liquidación en sí, el legajo queda apuntando a
+  // ella vía liquidacion_final_id (migración 0018) — así el resto de la
+  // app sabe que esta persona ya tiene su liquidación final generada.
+  if (periodo.tipo === 'final') {
+    for (const r of resultados) {
+      if (!r.esFinal) continue
+      const liqId = liqIdPorPersonal.get(r.personalId)
+      if (!liqId) continue
+      await supabase.from('nom_legajo').update({ liquidacion_final_id: liqId }).eq('personal_id', r.personalId).eq('empresa_id', periodo.empresa_id)
+    }
+  }
+
+  await supabase.from('nom_periodos').update({ calculo_estado: 'completo', calculo_procesados: resultados.length }).eq('id', periodo.id)
+
+  return new Response(JSON.stringify({ liquidadas: resultados.length, omitidos, advertencias, completo: true }), {
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  })
+}
