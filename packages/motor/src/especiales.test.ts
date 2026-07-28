@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calcularSAC, calcularVacaciones, calcularLiquidacionFinal } from './especiales.ts'
+import { calcularSAC, calcularVacaciones, calcularLiquidacionFinal, valorDiaVacaciones, montoVacacionesGozadas, diasEnRango } from './especiales.ts'
 
 describe('calcularSAC (LCT, art. 121)', () => {
   it('semestre completo: mejor bruto / 2', () => {
@@ -77,5 +77,38 @@ describe('calcularLiquidacionFinal (LCT)', () => {
     const r = calcularLiquidacionFinal({ ...base, motivoBaja: 'despido_con_causa' })
     expect(r.indemnizacionAntiguedad).toBe(0)
     expect(r.preaviso).toBe(0)
+  })
+})
+
+describe('valorDiaVacaciones (vacaciones gozadas — dia x valor dia, sin antiguedad)', () => {
+  it('modalidad mensual: sueldoMensual / 25', () => {
+    expect(valorDiaVacaciones({ modalidad: 'mensual', sueldoMensual: 500000 })).toBe(20000)
+  })
+  it('modalidad hora: valorHora * 8', () => {
+    expect(valorDiaVacaciones({ modalidad: 'hora', valorHora: 2500 })).toBe(20000)
+  })
+  it('sin el dato requerido para la modalidad da 0', () => {
+    expect(valorDiaVacaciones({ modalidad: 'mensual' })).toBe(0)
+    expect(valorDiaVacaciones({ modalidad: 'hora' })).toBe(0)
+  })
+})
+
+describe('diasEnRango', () => {
+  it('cuenta los dias inclusive de ambos extremos', () => {
+    expect(diasEnRango('2026-07-01', '2026-07-15')).toBe(15)
+  })
+  it('un solo dia da 1', () => {
+    expect(diasEnRango('2026-07-01', '2026-07-01')).toBe(1)
+  })
+})
+
+describe('montoVacacionesGozadas', () => {
+  it('multiplica los dias de la ausencia por el valor dia (modalidad mensual)', () => {
+    const monto = montoVacacionesGozadas({ fechaDesde: '2026-07-01', fechaHasta: '2026-07-10', modalidad: 'mensual', sueldoMensual: 500000 })
+    expect(monto).toBe(200000) // 10 dias * 20000
+  })
+  it('multiplica los dias de la ausencia por el valor dia (modalidad hora)', () => {
+    const monto = montoVacacionesGozadas({ fechaDesde: '2026-07-01', fechaHasta: '2026-07-05', modalidad: 'hora', valorHora: 2500 })
+    expect(monto).toBe(100000) // 5 dias * 20000
   })
 })

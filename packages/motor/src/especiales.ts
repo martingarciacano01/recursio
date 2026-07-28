@@ -39,16 +39,53 @@ export interface VacacionesResultado {
   total: number
 }
 
+export interface ValorDiaVacacionesInput {
+  modalidad: 'mensual' | 'quincenal' | 'hora'
+  sueldoMensual?: number // requerido si modalidad !== 'hora'
+  valorHora?: number // requerido si modalidad === 'hora'
+}
+
+// Valor de un día de vacaciones, sin antigüedad — se usa tanto para el
+// total "no gozadas" (calcularVacaciones, multiplicado por los días que
+// corresponden por antigüedad) como para "gozadas" (montoVacacionesGozadas,
+// multiplicado por los días reales de la ausencia — Liquidaciones
+// individuales, Fase 6b).
+export function valorDiaVacaciones(input: ValorDiaVacacionesInput): number {
+  return input.modalidad === 'hora'
+    ? (input.valorHora ?? 0) * 8
+    : (input.sueldoMensual ?? 0) / 25
+}
+
 export function calcularVacaciones(input: VacacionesInput): VacacionesResultado {
   // Art. 153 LCT: con menos de 6 meses de antigüedad, 1 día de descanso
   // cada 20 trabajados, en vez de la escala fija del art. 150.
   const dias = input.antiguedadAnios < 0.5
     ? Math.floor(input.diasTrabajadosAnio / 20)
     : diasVacacionesPorAntiguedad(input.antiguedadAnios)
-  const montoDia = input.modalidad === 'hora'
-    ? (input.valorHora ?? 0) * 8
-    : (input.sueldoMensual ?? 0) / 25
+  const montoDia = valorDiaVacaciones(input)
   return { dias, montoDia, total: dias * montoDia }
+}
+
+// Días inclusive de ambos extremos — mismo criterio que agruparAusencias.js
+// (src/utils/agruparAusencias.js) del lado del cliente.
+export function diasEnRango(fechaDesde: string, fechaHasta: string): number {
+  return Math.round((new Date(fechaHasta).getTime() - new Date(fechaDesde).getTime()) / 86400000) + 1
+}
+
+export interface VacacionesGozadasInput extends ValorDiaVacacionesInput {
+  fechaDesde: string
+  fechaHasta: string
+}
+
+// Vacaciones GOZADAS (Liquidaciones individuales, Fase 6b): a diferencia de
+// calcularVacaciones (que paga el total de días que corresponden por
+// antigüedad, para "no gozadas" en la liquidación final), acá el monto sale
+// de los días REALES de la ausencia tipo 'vacaciones' aprobada en Presencio
+// (o de un rango cargado a mano si no hay ausencia) — no de una fórmula de
+// antigüedad. La liquidación final no usa esta función.
+export function montoVacacionesGozadas(input: VacacionesGozadasInput): number {
+  const dias = diasEnRango(input.fechaDesde, input.fechaHasta)
+  return dias * valorDiaVacaciones(input)
 }
 
 export type MotivoBaja = 'renuncia' | 'despido_sin_causa' | 'despido_con_causa' | 'fin_obra' | 'mutuo_acuerdo' | 'fallecimiento'

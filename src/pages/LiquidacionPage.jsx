@@ -9,8 +9,14 @@ import SelectorPeriodo from '../components/SelectorPeriodo'
 import { etiquetaConcepto } from '../utils/etiquetaConcepto'
 import { etiquetaPeriodo } from '../utils/etiquetaPeriodo'
 import { generarYDescargarRecibo } from '../utils/emitirReciboLegajo'
+import LiquidacionesIndividuales from '../components/LiquidacionesIndividuales'
+import { useConveniosStore } from '../store/conveniosStore'
+import { calcularFechasPeriodo } from '../utils/calcularFechasPeriodo'
+
+const PESTANAS = ['Períodos generales', 'Liquidaciones individuales']
 
 export default function LiquidacionPage() {
+  const [pestana, setPestana] = useState(PESTANAS[0])
   const empresa = useAuthStore((s) => s.empresa)
   const empresaVista = useAuthStore((s) => s.empresaVista)
   // Un usuario Superadmin no tiene `empresa` fija: opera sobre la que haya
@@ -33,10 +39,14 @@ export default function LiquidacionPage() {
 
   const [mostrarFormNuevo, setMostrarFormNuevo] = useState(false)
   const [nuevoTipo, setNuevoTipo] = useState('quincena_1')
+  const [nuevoAnio, setNuevoAnio] = useState(new Date().getFullYear())
+  const [nuevoMes, setNuevoMes] = useState(new Date().getMonth() + 1)
+  const [nuevoConvenioId, setNuevoConvenioId] = useState('')
   const [nuevoDesde, setNuevoDesde] = useState('')
   const [nuevoHasta, setNuevoHasta] = useState('')
   const [creandoPeriodo, setCreandoPeriodo] = useState(false)
   const [errorCrearPeriodo, setErrorCrearPeriodo] = useState('')
+  const { convenios, cargarConvenios } = useConveniosStore()
 
   const [liqExpandida, setLiqExpandida] = useState(null)
   const [itemsPorLiq, setItemsPorLiq] = useState({})
@@ -69,6 +79,8 @@ export default function LiquidacionPage() {
       .then(({ data }) => setPersonalPorId(new Map((data || []).map((p) => [p.id, p.nombre]))))
     cargarFlujos(empresaId)
   }, [empresaId])
+
+  useEffect(() => { if (empresaId) cargarConvenios(empresaId) }, [empresaId])
 
   const handleEnviarAFlujo = async () => {
     if (!periodoSeleccionado || !flujoElegido) return
@@ -136,27 +148,56 @@ export default function LiquidacionPage() {
     ], liquidacionesFiltradas)
   }
 
+  const REQUIERE_CONVENIO = new Set(['quincena_1', 'quincena_2', 'mensual'])
+  const ES_MANUAL = new Set(['sac_1', 'sac_2'])
+  const conveniosDeLaModalidad = (modalidad) => convenios.filter((c) => c.empresaId === empresaId && c.modalidad === modalidad)
+  const conveniosDisponibles = nuevoTipo === 'mensual' ? conveniosDeLaModalidad('mensual')
+    : (nuevoTipo === 'quincena_1' || nuevoTipo === 'quincena_2') ? conveniosDeLaModalidad('quincenal')
+    : []
+  const convenioElegido = conveniosDisponibles.find((c) => c.id === nuevoConvenioId) || null
+  let fechasCalculadas = null
+  if (REQUIERE_CONVENIO.has(nuevoTipo) || nuevoTipo === 'mensual_fc') {
+    if (convenioElegido || nuevoTipo === 'mensual_fc') {
+      try {
+        fechasCalculadas = calcularFechasPeriodo({ anio: Number(nuevoAnio), mes: Number(nuevoMes), tipo: nuevoTipo, convenio: convenioElegido })
+      } catch {
+        fechasCalculadas = null
+      }
+    }
+  }
+
   const handleCrearPeriodo = async () => {
     setErrorCrearPeriodo('')
     if (!empresaId) {
       setErrorCrearPeriodo('Elegí primero una empresa en Superadmin.')
       return
     }
-    if (!nuevoDesde || !nuevoHasta) {
-      setErrorCrearPeriodo('Completá fecha desde y hasta.')
-      return
-    }
-    if (nuevoHasta < nuevoDesde) {
-      setErrorCrearPeriodo('La fecha hasta no puede ser anterior a la fecha desde.')
-      return
+    let fechaDesde, fechaHasta
+    if (ES_MANUAL.has(nuevoTipo)) {
+      if (!nuevoDesde || !nuevoHasta) { setErrorCrearPeriodo('Completá fecha desde y hasta.'); return }
+      if (nuevoHasta < nuevoDesde) { setErrorCrearPeriodo('La fecha hasta no puede ser anterior a la fecha desde.'); return }
+      fechaDesde = nuevoDesde; fechaHasta = nuevoHasta
+    } else {
+      if (REQUIERE_CONVENIO.has(nuevoTipo) && !convenioElegido) {
+        setErrorCrearPeriodo(`No hay ningún convenio con modalidad "${nuevoTipo === 'mensual' ? 'mensual' : 'quincenal'}" configurado.`)
+        return
+      }
+      try {
+        const f = calcularFechasPeriodo({ anio: Number(nuevoAnio), mes: Number(nuevoMes), tipo: nuevoTipo, convenio: convenioElegido })
+        fechaDesde = f.fechaDesde; fechaHasta = f.fechaHasta
+      } catch (e) {
+        setErrorCrearPeriodo(e instanceof Error ? e.message : String(e))
+        return
+      }
     }
     setCreandoPeriodo(true)
     const { data, error } = await supabase.from('nom_periodos').insert({
       empresa_id: empresaId,
       tipo: nuevoTipo,
-      fecha_desde: nuevoDesde,
-      fecha_hasta: nuevoHasta,
+      fecha_desde: fechaDesde,
+      fecha_hasta: fechaHasta,
       estado: 'abierto',
+      ...(convenioElegido && { convenio_id: convenioElegido.id }),
     }).select().single()
     setCreandoPeriodo(false)
     if (error) { setErrorCrearPeriodo(error.message); return }
@@ -165,6 +206,7 @@ export default function LiquidacionPage() {
     setMostrarFormNuevo(false)
     setNuevoDesde('')
     setNuevoHasta('')
+    setNuevoConvenioId('')
   }
 
   return (
@@ -180,6 +222,20 @@ export default function LiquidacionPage() {
         </div>
       )}
 
+      {empresaActiva && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+          {PESTANAS.map((p) => (
+            <button key={p} className={`btn btn-sm ${pestana === p ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setPestana(p)}>{p}</button>
+          ))}
+        </div>
+      )}
+
+      {empresaActiva && pestana === 'Liquidaciones individuales' && (
+        <LiquidacionesIndividuales empresaId={empresaId} />
+      )}
+
+      {pestana === 'Períodos generales' && (
+      <>
       <div className="card" style={{ marginBottom: '1rem', display: 'flex', gap: 12, alignItems: 'center' }}>
         <SelectorPeriodo periodos={periodos} value={periodoSeleccionado} onChange={setPeriodoSeleccionado} />
         <button
@@ -213,26 +269,61 @@ export default function LiquidacionPage() {
       {mostrarFormNuevo && (
         <div className="card" style={{ marginBottom: '1rem', display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>Tipo</label>
-            <select className="input" value={nuevoTipo} onChange={(e) => setNuevoTipo(e.target.value)}>
+            <label htmlFor="np-tipo" style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>Tipo</label>
+            <select id="np-tipo" className="input" value={nuevoTipo} onChange={(e) => { setNuevoTipo(e.target.value); setNuevoConvenioId('') }}>
               <option value="quincena_1">1ra quincena</option>
               <option value="quincena_2">2da quincena</option>
-              <option value="mensual_fc">Fuera de convenio (mensual)</option>
               <option value="mensual">Mensual</option>
+              <option value="mensual_fc">Fuera de convenio (mensual)</option>
               <option value="sac_1">1er SAC</option>
               <option value="sac_2">2do SAC</option>
-              <option value="vacaciones">Vacaciones</option>
-              <option value="final">Liquidación final</option>
             </select>
           </div>
-          <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>Desde</label>
-            <input type="date" className="input" value={nuevoDesde} onChange={(e) => setNuevoDesde(e.target.value)} />
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>Hasta</label>
-            <input type="date" className="input" value={nuevoHasta} onChange={(e) => setNuevoHasta(e.target.value)} />
-          </div>
+
+          {!ES_MANUAL.has(nuevoTipo) && (
+            <>
+              <div>
+                <label htmlFor="np-anio" style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>Año</label>
+                <input id="np-anio" className="input" type="number" style={{ width: 90 }} value={nuevoAnio} onChange={(e) => setNuevoAnio(e.target.value)} />
+              </div>
+              <div>
+                <label htmlFor="np-mes" style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>Mes</label>
+                <select id="np-mes" className="input" value={nuevoMes} onChange={(e) => setNuevoMes(e.target.value)}>
+                  {['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'].map((m, i) => (
+                    <option key={m} value={i + 1}>{m}</option>
+                  ))}
+                </select>
+              </div>
+              {REQUIERE_CONVENIO.has(nuevoTipo) && (
+                <div>
+                  <label htmlFor="np-convenio" style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>Convenio</label>
+                  <select id="np-convenio" className="input" value={nuevoConvenioId} onChange={(e) => setNuevoConvenioId(e.target.value)}>
+                    <option value="">Elegir convenio…</option>
+                    {conveniosDisponibles.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                  </select>
+                </div>
+              )}
+              {fechasCalculadas && (
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                  {fechasCalculadas.fechaDesde} a {fechasCalculadas.fechaHasta}
+                </div>
+              )}
+            </>
+          )}
+
+          {ES_MANUAL.has(nuevoTipo) && (
+            <>
+              <div>
+                <label htmlFor="np-desde" style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>Desde</label>
+                <input id="np-desde" type="date" className="input" value={nuevoDesde} onChange={(e) => setNuevoDesde(e.target.value)} />
+              </div>
+              <div>
+                <label htmlFor="np-hasta" style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>Hasta</label>
+                <input id="np-hasta" type="date" className="input" value={nuevoHasta} onChange={(e) => setNuevoHasta(e.target.value)} />
+              </div>
+            </>
+          )}
+
           <button className="btn btn-primary btn-sm" onClick={handleCrearPeriodo} disabled={creandoPeriodo}>
             {creandoPeriodo ? 'Creando…' : 'Crear período'}
           </button>
@@ -367,6 +458,8 @@ export default function LiquidacionPage() {
             </tbody>
           </table>
         </div>
+      )}
+      </>
       )}
     </div>
   )

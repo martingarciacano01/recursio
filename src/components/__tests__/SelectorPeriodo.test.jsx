@@ -9,18 +9,19 @@ const periodos = [
 ]
 
 describe('SelectorPeriodo', () => {
-  it('agrupa por año y mes, y muestra el badge de estado de cada periodo', () => {
+  it('agrupa las opciones por año en optgroups', () => {
     render(<SelectorPeriodo periodos={periodos} value="" onChange={vi.fn()} />)
-    expect(screen.getByText('2026')).toBeInTheDocument()
-    expect(screen.getByText('Julio')).toBeInTheDocument()
-    expect(screen.getByText('Junio')).toBeInTheDocument()
-    expect(screen.getAllByText(/cerrado|abierto|en_flujo/)).toHaveLength(3)
+    const select = screen.getByLabelText('Período')
+    const grupos = select.querySelectorAll('optgroup')
+    expect(grupos).toHaveLength(1)
+    expect(grupos[0].label).toBe('2026')
+    expect(select.querySelectorAll('option')).toHaveLength(4) // "Elegir período…" + 3
   })
 
   it('llama a onChange con el id del periodo elegido', () => {
     const onChange = vi.fn()
     render(<SelectorPeriodo periodos={periodos} value="" onChange={onChange} />)
-    fireEvent.click(screen.getByText(/1ra quincena/i))
+    fireEvent.change(screen.getByLabelText('Período'), { target: { value: 'p2' } })
     expect(onChange).toHaveBeenCalledWith('p2')
   })
 })

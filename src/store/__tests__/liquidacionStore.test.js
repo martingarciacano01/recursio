@@ -123,6 +123,88 @@ describe('crearPeriodoFinal', () => {
   })
 })
 
+describe('crearPeriodoVacaciones', () => {
+  function mockFrom({ liqId = 'liq-vac-1' } = {}) {
+    return vi.fn((tabla) => {
+      if (tabla === 'nom_periodos') {
+        return {
+          insert: vi.fn().mockReturnThis(),
+          select: vi.fn().mockReturnThis(),
+          single: vi.fn().mockResolvedValue({ data: { id: 'periodo-vac-1' }, error: null }),
+          delete: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockResolvedValue({ data: null, error: null }),
+        }
+      }
+      if (tabla === 'nom_liquidaciones') {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          single: vi.fn().mockResolvedValue({ data: { id: liqId }, error: null }),
+        }
+      }
+      if (tabla === 'nom_vacaciones_liquidadas') {
+        return { insert: vi.fn().mockResolvedValue({ data: null, error: null }) }
+      }
+      return { insert: vi.fn().mockReturnThis(), select: vi.fn().mockReturnThis(), eq: vi.fn().mockResolvedValue({ data: null, error: null }) }
+    })
+  }
+
+  it('crea el periodo, invoca con personalIds y registra la traza con origen presencio cuando hay ausenciaId', async () => {
+    const invoke = vi.fn().mockResolvedValue({ data: { liquidadas: 1, omitidos: [], advertencias: [] }, error: null })
+    supabase.functions.invoke = invoke
+    const fromMock = mockFrom()
+    supabase.from = fromMock
+    const { useLiquidacionStore } = await import('../liquidacionStore')
+    const r = await useLiquidacionStore.getState().crearPeriodoVacaciones('p1', '2026-07-01', '2026-07-10', 'empresa-1', 'ausencia-1')
+    expect(r.ok).toBe(true)
+    expect(invoke).toHaveBeenCalledTimes(1)
+    const body = invoke.mock.calls[0][1].body
+    expect(body.personalIds).toEqual(['p1'])
+    expect(fromMock.mock.calls.some((c) => c[0] === 'nom_vacaciones_liquidadas')).toBe(true)
+  })
+
+  it('registra origen manual cuando no se pasa ausenciaId', async () => {
+    supabase.functions.invoke = vi.fn().mockResolvedValue({ data: { liquidadas: 1, omitidos: [], advertencias: [] }, error: null })
+    const insertVacaciones = vi.fn().mockResolvedValue({ data: null, error: null })
+    supabase.from = vi.fn((tabla) => {
+      if (tabla === 'nom_periodos') {
+        return {
+          insert: vi.fn().mockReturnThis(), select: vi.fn().mockReturnThis(),
+          single: vi.fn().mockResolvedValue({ data: { id: 'periodo-vac-1' }, error: null }),
+          delete: vi.fn().mockReturnThis(), eq: vi.fn().mockResolvedValue({ data: null, error: null }),
+        }
+      }
+      if (tabla === 'nom_liquidaciones') {
+        return { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: vi.fn().mockResolvedValue({ data: { id: 'liq-1' }, error: null }) }
+      }
+      if (tabla === 'nom_vacaciones_liquidadas') return { insert: insertVacaciones }
+      return {}
+    })
+    const { useLiquidacionStore } = await import('../liquidacionStore')
+    const r = await useLiquidacionStore.getState().crearPeriodoVacaciones('p1', '2026-07-01', '2026-07-10', 'empresa-1', null)
+    expect(r.ok).toBe(true)
+    expect(insertVacaciones).toHaveBeenCalledWith(expect.objectContaining({
+      ausencia_id: null, origen: 'manual', dias: 10, liquidacion_id: 'liq-1',
+    }))
+  })
+
+  it('borra el periodo huerfano si la Edge Function devuelve error', async () => {
+    supabase.functions.invoke = vi.fn().mockResolvedValue({ data: null, error: { message: 'timeout' } })
+    const deleteFn = vi.fn().mockReturnThis()
+    const eqFn = vi.fn().mockResolvedValue({ data: null, error: null })
+    supabase.from = vi.fn(() => ({
+      insert: vi.fn().mockReturnThis(), select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { id: 'periodo-vac-1' }, error: null }),
+      delete: deleteFn, eq: eqFn,
+    }))
+    const { useLiquidacionStore } = await import('../liquidacionStore')
+    const r = await useLiquidacionStore.getState().crearPeriodoVacaciones('p1', '2026-07-01', '2026-07-10', 'empresa-1', null)
+    expect(r.ok).toBe(false)
+    expect(deleteFn).toHaveBeenCalled()
+    expect(eqFn).toHaveBeenCalledWith('id', 'periodo-vac-1')
+  })
+})
+
 describe('invocarConReintento — corte por falta de progreso', () => {
   it('no reinvoca mas de 2 veces si procesados no avanza entre intentos', async () => {
     const invoke = vi.fn().mockResolvedValue({

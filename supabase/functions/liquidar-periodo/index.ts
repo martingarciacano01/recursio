@@ -8,6 +8,7 @@ import {
   calcularSAC as calcularSACLct,
   calcularVacaciones as calcularVacacionesLct,
   calcularLiquidacionFinal as calcularLiquidacionFinalLct,
+  montoVacacionesGozadas,
 } from '../../../packages/motor/src/especiales.ts'
 import {
   calcularSACProporcional as calcularSACProporcionalUocra,
@@ -139,17 +140,19 @@ Deno.serve(async (req) => {
   const legajoPorPersonal = new Map((legajos || []).map((l: any) => [l.personal_id, l]))
 
   // Un período 'mensual_fc' liquida SOLO al personal fuera de convenio
-  // (cobra mensual); los períodos de quincena liquidan solo al resto (si
-  // no, el fuera de convenio cobraría medio sueldo dos veces al mes ADEMÁS
-  // de su mensual). El resto de los tipos no discrimina — migración 0033.
+  // (cobra mensual mientras su convenio real, si tuviera, cobraría por
+  // quincena — nunca lo hace porque fuera_convenio no tiene convenio_id).
+  // Un período mensual/quincena_1/quincena_2 pertenece a UN convenio
+  // puntual (migración 0035, "períodos por convenio"): liquida solo al
+  // personal de ESE convenio, nunca al fuera de convenio. Períodos legado
+  // sin convenio_id (sac_1/sac_2, datos previos a la 0035) no discriminan
+  // — comportamiento idéntico al de antes de esta migración.
   const esPeriodoFueraConvenio = periodo.tipo === 'mensual_fc'
-  const esPeriodoQuincenal =
-    periodo.tipo === 'quincenal' || periodo.tipo === 'quincena_1' || periodo.tipo === 'quincena_2'
   let personalAProcesar = (personal || []).filter((p: any) => {
     const l = legajoPorPersonal.get(p.id)
     if (esPeriodoFueraConvenio) return l?.fuera_convenio === true
-    if (esPeriodoQuincenal) return l?.fuera_convenio !== true
-    return true
+    if (periodo.convenio_id) return l?.convenio_id === periodo.convenio_id && l?.fuera_convenio !== true
+    return l?.fuera_convenio !== true
   })
 
   // Universo del período: la nómina que ESTE tipo de período debe liquidar
@@ -826,19 +829,22 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
     }
 
     if (periodo.tipo === 'vacaciones') {
-      const anio = Number(periodo.fecha_hasta.slice(0, 4))
-      const diasTrabajadosAnio = diasTrabajadosEnRango(persona.fecha_ingreso, legajo.fecha_baja, `${anio}-01-01`, `${anio}-12-31`)
-      const monto = insumos.regimen === '22250'
-        ? calcularVacacionesNoGozadasUocra(insumos.sueldoMensual, diasVacacionesPorAntiguedadUocra(antiguedadAnios))
-        : calcularVacacionesLct({
-            antiguedadAnios, diasTrabajadosAnio, modalidad: insumos.modalidad,
-            sueldoMensual: insumos.sueldoMensual, valorHora: insumos.valorHora,
-          }).total
+      // Vacaciones GOZADAS (Liquidaciones individuales): el monto sale de
+      // los días REALES del período (que vienen de una ausencia tipo
+      // 'vacaciones' aprobada en Presencio, o de un rango cargado a mano —
+      // ver liquidacionStore.crearPeriodoVacaciones), no de una fórmula por
+      // antigüedad. "Vacaciones no gozadas" (antigüedad) sigue existiendo,
+      // pero solo como parte de la liquidación final (periodo.tipo ===
+      // 'final', más abajo) — no se toca acá.
+      const monto = montoVacacionesGozadas({
+        fechaDesde: periodo.fecha_desde, fechaHasta: periodo.fecha_hasta,
+        modalidad: insumos.modalidad, sueldoMensual: insumos.sueldoMensual, valorHora: insumos.valorHora,
+      })
       const conceptosAportesLegajo = await conceptosAportesDelLegajo(legajo)
       if (conceptosAportesLegajo.length === 0) {
         advertencias.push({ personal_id: persona.id, mensaje: mensajeSinAportes(legajo, 'vacaciones liquidadas sin deducciones') })
       }
-      const r = liquidarBaseEspecial('vacaciones', 'Vacaciones no gozadas', monto, conceptosAportesLegajo)
+      const r = liquidarBaseEspecial('vacaciones', 'Vacaciones gozadas', monto, conceptosAportesLegajo)
       resultados.push({ personalId: persona.id, bruto: r.bruto, neto: r.neto, totalAportes: r.totalAportes, totalContribuciones: r.totalContribuciones, items: r.items })
       continue
     }

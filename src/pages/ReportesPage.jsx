@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import { exportarCsv } from '../utils/exportCsv'
+import SelectorPeriodo from '../components/SelectorPeriodo'
 
 // Reportes de cierre de período (Fase 4, Task 30-32): reporte de pago
 // (CBU/banco/neto), reporte de aportes/contribuciones por organismo,
@@ -151,12 +152,7 @@ export default function ReportesPage() {
       {empresaActiva && (
         <>
           <div className="card" style={{ marginBottom: '1rem', display: 'flex', gap: 12, alignItems: 'center' }}>
-            <select className="input" style={{ maxWidth: 320 }} value={periodoId} onChange={(e) => { setPeriodoId(e.target.value); setAlertaEscala(null) }}>
-              <option value="">Elegir período…</option>
-              {periodos.map((p) => (
-                <option key={p.id} value={p.id}>{p.tipo} — {p.fecha_desde} a {p.fecha_hasta} ({p.estado})</option>
-              ))}
-            </select>
+            <SelectorPeriodo periodos={periodos} value={periodoId} onChange={(v) => { setPeriodoId(v); setAlertaEscala(null) }} />
           </div>
 
           {periodoId && cargando && <div className="card">Cargando…</div>}

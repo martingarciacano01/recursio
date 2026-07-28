@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
+import { diasEnRango } from '../utils/agruparAusencias'
 
 export const liquidacionFromDB = (r) => ({
   id: r.id, empresaId: r.empresa_id, periodoId: r.periodo_id, personalId: r.personal_id,
@@ -81,6 +82,42 @@ export const useLiquidacionStore = create((set) => ({
       return { ok: false, error: error.message }
     }
     if (data?.omitidos?.length > 0) return { ok: false, error: data.omitidos[0].motivo }
+    return { ok: true, data }
+  },
+
+  // Crea un período tipo 'vacaciones' acotado a una sola persona (vacaciones
+  // GOZADAS — Liquidaciones individuales, no confundir con "no gozadas" de
+  // la liquidación final) e invoca liquidar-periodo con personalIds:
+  // [personalId], simétrico a crearPeriodoFinal. `ausenciaId` viene de una
+  // ausencia tipo 'vacaciones' aprobada en Presencio elegida por el usuario;
+  // si es null, las fechas se cargaron a mano (sin ausencia registrada).
+  // Al terminar, registra la liquidación en nom_vacaciones_liquidadas —
+  // tabla propia de Recursio que trackea qué ausencia ya se pagó, porque
+  // Recursio no puede escribir en `ausencias` (tabla de Presencio).
+  crearPeriodoVacaciones: async (personalId, fechaDesde, fechaHasta, empresaId, ausenciaId) => {
+    const { data: periodo, error: errPeriodo } = await supabase.from('nom_periodos').insert({
+      empresa_id: empresaId, tipo: 'vacaciones', fecha_desde: fechaDesde, fecha_hasta: fechaHasta, estado: 'abierto',
+    }).select().single()
+    if (errPeriodo) return { ok: false, error: errPeriodo.message }
+    const { data, error } = await invocarConReintento({ periodoId: periodo.id, personalIds: [personalId] })
+    if (error) {
+      // Evita dejar un nom_periodos huérfano en estado 'abierto' sin
+      // liquidaciones cuando la Edge Function falla (mismo patrón que
+      // crearPeriodoFinal).
+      await supabase.from('nom_periodos').delete().eq('id', periodo.id)
+      return { ok: false, error: error.message }
+    }
+    if (data?.omitidos?.length > 0) return { ok: false, error: data.omitidos[0].motivo }
+    const { data: liq, error: errLiq } = await supabase.from('nom_liquidaciones').select('id')
+      .eq('periodo_id', periodo.id).eq('personal_id', personalId).single()
+    if (errLiq) return { ok: false, error: errLiq.message }
+    const { error: errTraza } = await supabase.from('nom_vacaciones_liquidadas').insert({
+      empresa_id: empresaId, personal_id: personalId, ausencia_id: ausenciaId || null,
+      liquidacion_id: liq.id, fecha_desde: fechaDesde, fecha_hasta: fechaHasta,
+      dias: diasEnRango(fechaDesde, fechaHasta),
+      origen: ausenciaId ? 'presencio' : 'manual',
+    })
+    if (errTraza) return { ok: false, error: errTraza.message }
     return { ok: true, data }
   },
 

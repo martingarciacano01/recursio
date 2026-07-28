@@ -1,4 +1,7 @@
-function diasEnRango(desde, hasta) {
+// Exportada para reutilizar el mismo criterio (inclusive de ambos extremos)
+// al calcular los días de una liquidación de vacaciones gozadas
+// (liquidacionStore.crearPeriodoVacaciones, Liquidaciones individuales).
+export function diasEnRango(desde, hasta) {
   return Math.round((new Date(hasta) - new Date(desde)) / 86400000) + 1
 }
 
