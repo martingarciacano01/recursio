@@ -160,6 +160,17 @@ describe('unidad y base en ítems (recibo costo laboral)', () => {
     expect(r.items[0].detalleRecibo).toBeNull()
   })
 
+  it('grupoRecibo no puede contradecir tipo para remunerativo/no_remunerativo/descuento (bug real: Jubilación tipo=descuento pero mal configurada con grupo=remunerativo inflaba el bruto y el neto del PDF)', () => {
+    const jubMalConfigurada: Concepto = {
+      codigo: 'JUB', nombre: 'Jubilación', tipo: 'descuento', orden: 10,
+      formula: '1917', imprimible: true,
+      config: { modo: 'porcentaje', porcentaje: 5, base: 'remunerativo', recibo: { grupo: 'remunerativo', detalle: 'seguridad_social' } },
+    }
+    const r = liquidarConceptos([jubMalConfigurada], {})
+    const item = r.items[0]
+    expect(item.grupoRecibo).toBe('descuento')
+  })
+
   it('override: config.recibo.baseFormula/unidadFormula tienen prioridad', () => {
     const bas: Concepto = {
       codigo: 'BAS', nombre: 'Básico', tipo: 'remunerativo', orden: 1, formula: '36541.60 * 30', imprimible: true,

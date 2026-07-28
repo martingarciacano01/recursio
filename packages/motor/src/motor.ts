@@ -128,6 +128,24 @@ export function liquidarConceptos(
       unidadTexto = '1'
     }
 
+    // `tipo` es la única fuente de verdad para bruto/neto (switch de abajo);
+    // `config.recibo.grupo` es un campo editable aparte, pensado solo para
+    // separar 'contribucion' vs 'cct' dentro de aporte_patronal. Si alguien
+    // configura mal un concepto remunerativo/no_remunerativo/descuento con un
+    // grupo de recibo que no coincide con su tipo, el PDF terminaba sumando o
+    // restando de más sin que el bruto/neto en pantalla se moviera un peso
+    // (bug real: Jubilación tipo=descuento configurada con grupo=remunerativo
+    // inflaba el bruto y el neto del recibo). Se corrige forzando el grupo a
+    // coincidir con el tipo para esos tres casos; aporte_patronal/informativo
+    // siguen respetando la configuración libre.
+    let grupoRecibo = recibo?.grupo ?? null
+    if (
+      grupoRecibo != null &&
+      (concepto.tipo === 'remunerativo' || concepto.tipo === 'no_remunerativo' || concepto.tipo === 'descuento')
+    ) {
+      grupoRecibo = concepto.tipo
+    }
+
     items.push({
       codigo: concepto.codigo,
       nombre: concepto.nombre,
@@ -136,7 +154,7 @@ export function liquidarConceptos(
       reglaAplicada,
       unidadTexto,
       baseCalculo,
-      grupoRecibo: recibo?.grupo ?? null,
+      grupoRecibo,
       detalleRecibo: recibo?.detalle ?? null,
     })
 
