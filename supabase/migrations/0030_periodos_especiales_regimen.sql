@@ -10,11 +10,16 @@ ALTER TABLE nom_periodos DROP CONSTRAINT IF EXISTS nom_periodos_tipo_check;
 ALTER TABLE nom_periodos ADD CONSTRAINT nom_periodos_tipo_check
   CHECK (tipo IN ('mensual','quincenal','quincena_1','quincena_2','sac','sac_1','sac_2','vacaciones','final'));
 
--- Migra datos existentes ANTES de aplicar el nuevo CHECK constraint
+-- Normaliza nom_convenios.regimen: migra 'ley_22250' a '22250' (más legible,
+-- alinea con norma). El constraint ORIGINAL (0002_nomina_core.sql) solo
+-- permite ('lct','ley_22250'): hay que soltarlo ANTES del UPDATE, porque
+-- si no, el propio UPDATE viola ese constraint viejo al intentar escribir
+-- '22250' (valor que el constraint viejo nunca permitió). Recién después
+-- de migrar los datos se aplica el constraint nuevo y más estricto.
+ALTER TABLE nom_convenios DROP CONSTRAINT IF EXISTS nom_convenios_regimen_check;
+
 UPDATE nom_convenios SET regimen = '22250' WHERE regimen = 'ley_22250';
 
--- Normaliza nom_convenios.regimen: migra 'ley_22250' a '22250' (más legible, alinea con norma)
-ALTER TABLE nom_convenios DROP CONSTRAINT IF EXISTS nom_convenios_regimen_check;
 ALTER TABLE nom_convenios ADD CONSTRAINT nom_convenios_regimen_check
   CHECK (regimen IN ('lct','22250'));
 
