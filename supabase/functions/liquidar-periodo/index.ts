@@ -138,7 +138,24 @@ Deno.serve(async (req) => {
   }
   const legajoPorPersonal = new Map((legajos || []).map((l: any) => [l.personal_id, l]))
 
-  let personalAProcesar = personal || []
+  // Un período 'mensual_fc' liquida SOLO al personal fuera de convenio
+  // (cobra mensual); los períodos de quincena liquidan solo al resto (si
+  // no, el fuera de convenio cobraría medio sueldo dos veces al mes ADEMÁS
+  // de su mensual). El resto de los tipos no discrimina — migración 0033.
+  const esPeriodoFueraConvenio = periodo.tipo === 'mensual_fc'
+  const esPeriodoQuincenal =
+    periodo.tipo === 'quincenal' || periodo.tipo === 'quincena_1' || periodo.tipo === 'quincena_2'
+  let personalAProcesar = (personal || []).filter((p: any) => {
+    const l = legajoPorPersonal.get(p.id)
+    if (esPeriodoFueraConvenio) return l?.fuera_convenio === true
+    if (esPeriodoQuincenal) return l?.fuera_convenio !== true
+    return true
+  })
+
+  // Universo del período: la nómina que ESTE tipo de período debe liquidar
+  // (ya filtrada por fuera de convenio arriba). Se guarda antes de aplicar
+  // el filtro de `reanudar` porque es el denominador de calculo_total.
+  const totalPeriodo = personalAProcesar.length
   if (reanudar) {
     const { data: yaLiquidados } = await supabase.from('nom_liquidaciones')
       .select('personal_id').eq('periodo_id', periodoId)
@@ -148,8 +165,8 @@ Deno.serve(async (req) => {
 
   await supabase.from('nom_periodos').update({
     calculo_estado: 'calculando',
-    calculo_total: (personal || []).length,
-    calculo_procesados: (personal || []).length - personalAProcesar.length,
+    calculo_total: totalPeriodo,
+    calculo_procesados: totalPeriodo - personalAProcesar.length,
   }).eq('id', periodoId)
 
   // ─── Consolidación quincenal (Fase 4, Task 28) ────────────────────
@@ -425,7 +442,7 @@ Deno.serve(async (req) => {
   // reemplaza sin duplicar filas, sin necesidad de borrar-todo-y-reinsertar
   // primero (evita el bug de la Task 7 donde ese borrado podía alcanzar
   // liquidaciones fuera del scope de `personalIds`).
-  let procesadosAcumulados = personal.length - personalAProcesar.length
+  let procesadosAcumulados = totalPeriodo - personalAProcesar.length
   for (const loteResultados of partirEnLotes(resultados, 50)) {
     const filasLiquidacion = loteResultados.map((r) => ({
       empresa_id: periodo.empresa_id, periodo_id: periodoId, personal_id: r.personalId,
@@ -473,8 +490,13 @@ Deno.serve(async (req) => {
     }).eq('id', periodoId)
   }
 
-  const totalFinal = (personal || []).length
-  const procesadosFinal = (personal.length - personalAProcesar.length) + resultados.length
+  const totalFinal = totalPeriodo
+  // Los omitidos (legajo incompleto) ESTÁN procesados: se los evaluó y se
+  // decidió no liquidarlos. Si no se los cuenta acá, `completo` queda en
+  // false para siempre y el cliente reinvoca hasta agotar sus reintentos
+  // sin que nada cambie nunca (bug de performance del 28/07/2026).
+  const procesadosFinal =
+    (totalPeriodo - personalAProcesar.length) + resultados.length + omitidos.length
   const completo = procesadosFinal >= totalFinal
   await supabase.from('nom_periodos').update({
     calculo_estado: completo ? 'completo' : 'calculando',

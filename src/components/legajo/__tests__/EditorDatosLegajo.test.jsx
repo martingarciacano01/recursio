@@ -23,6 +23,16 @@ vi.mock('../../../lib/supabase', () => ({
           }),
         }
       }
+      if (tabla === 'nom_categorias') {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          order: vi.fn().mockResolvedValue({
+            data: [{ id: 'cat-1', nombre: 'Ayudante', vigencia_desde: '2026-06-01' }],
+            error: null,
+          }),
+        }
+      }
       return {
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
@@ -93,5 +103,24 @@ describe('EditorDatosLegajo', () => {
     fireEvent.click(screen.getByText('Editar'))
     expect(screen.getByText('Baja: 2026-06-30 (renuncia)')).toBeInTheDocument()
     expect(screen.queryByText('Dar de baja')).not.toBeInTheDocument()
+  })
+
+  it('muestra el NOMBRE de la categoria cuando el legajo llega despues del primer render', async () => {
+    const { rerender } = render(<EditorDatosLegajo legajo={null} personalId="p1" empresaId="emp-1" />)
+    // segundo render: ya llegó el legajo desde cargarLegajos()
+    rerender(<EditorDatosLegajo legajo={{ id: 'l1', convenioId: 'e1', categoriaId: 'cat-1' }} personalId="p1" empresaId="emp-1" />)
+    await waitFor(() => {
+      expect(screen.getByText('Categoría: Ayudante')).toBeInTheDocument()
+    })
+    expect(screen.queryByText(/cat-1/)).not.toBeInTheDocument()
+  })
+
+  it('la vista de solo lectura muestra el sueldo convenido de un legajo fuera de convenio', async () => {
+    render(<EditorDatosLegajo legajo={{ id: 'l1', fueraConvenio: true, sueldoConvenido: 1250000 }} personalId="p1" empresaId="emp-1" />)
+    await waitFor(() => {
+      expect(screen.getByText('Convenio: Fuera de convenio')).toBeInTheDocument()
+    })
+    expect(screen.getByText('Sueldo convenido: $ 1.250.000')).toBeInTheDocument()
+    expect(screen.queryByText(/^Categoría:/)).not.toBeInTheDocument()
   })
 })

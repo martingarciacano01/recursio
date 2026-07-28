@@ -122,3 +122,36 @@ describe('crearPeriodoFinal', () => {
     expect(eqFn).toHaveBeenCalledWith('id', 'periodo-final-1')
   })
 })
+
+describe('invocarConReintento — corte por falta de progreso', () => {
+  it('no reinvoca mas de 2 veces si procesados no avanza entre intentos', async () => {
+    const invoke = vi.fn().mockResolvedValue({
+      data: { completo: false, procesados: 1, total: 16, omitidos: [], advertencias: [] },
+      error: null,
+    })
+    supabase.functions.invoke = invoke
+
+    const { useLiquidacionStore } = await import('../liquidacionStore')
+    await useLiquidacionStore.getState().calcularPeriodo('per-1')
+
+    // 1ª invocación + 1 reanudar que no avanza → corta. Antes: 20.
+    expect(invoke).toHaveBeenCalledTimes(2)
+  })
+
+  it('sigue reinvocando mientras procesados avanza', async () => {
+    let procesados = 0
+    const invoke = vi.fn().mockImplementation(() => {
+      procesados += 5
+      return Promise.resolve({
+        data: { completo: procesados >= 15, procesados, total: 15, omitidos: [], advertencias: [] },
+        error: null,
+      })
+    })
+    supabase.functions.invoke = invoke
+
+    const { useLiquidacionStore } = await import('../liquidacionStore')
+    await useLiquidacionStore.getState().calcularPeriodo('per-2')
+
+    expect(invoke).toHaveBeenCalledTimes(3)
+  })
+})

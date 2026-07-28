@@ -4,11 +4,11 @@ import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import { useLiquidacionStore } from '../store/liquidacionStore'
 import { useFlujosStore } from '../store/flujosStore'
-import { generarReciboPdf } from '../utils/reciboPdf'
-import { calcularHashPdf } from '../utils/reciboHash'
 import { exportarCsv } from '../utils/exportCsv'
 import SelectorPeriodo from '../components/SelectorPeriodo'
 import { etiquetaConcepto } from '../utils/etiquetaConcepto'
+import { etiquetaPeriodo } from '../utils/etiquetaPeriodo'
+import { generarYDescargarRecibo } from '../utils/emitirReciboLegajo'
 
 export default function LiquidacionPage() {
   const empresa = useAuthStore((s) => s.empresa)
@@ -32,7 +32,7 @@ export default function LiquidacionPage() {
   const [personalPorId, setPersonalPorId] = useState(new Map())
 
   const [mostrarFormNuevo, setMostrarFormNuevo] = useState(false)
-  const [nuevoTipo, setNuevoTipo] = useState('mensual')
+  const [nuevoTipo, setNuevoTipo] = useState('quincena_1')
   const [nuevoDesde, setNuevoDesde] = useState('')
   const [nuevoHasta, setNuevoHasta] = useState('')
   const [creandoPeriodo, setCreandoPeriodo] = useState(false)
@@ -93,74 +93,17 @@ export default function LiquidacionPage() {
   const handleEmitirRecibo = async (l) => {
     setErrorRecibo(''); setEmitiendoRecibo(l.id)
     try {
-      const [{ data: empresaRow }, { data: configRow }, { data: legajoRow }] = await Promise.all([
-        // `empresas` es compartida con Presencio: solo tiene `nombre` y
-        // `logo_url` (no `cuit`/`domicilio`, que viven en la tabla satélite
-        // `nom_empresa_config`, migración 0021 — pedirlas acá tiraba error).
-        supabase.from('empresas').select('nombre, logo_url').eq('id', empresaId).single(),
-        supabase.from('nom_empresa_config').select('cuit, domicilio').eq('empresa_id', empresaId).maybeSingle(),
-        supabase.from('nom_legajo').select('cuil, categoria_id, fecha_ingreso, banco, antiguedad_reconocida').eq('personal_id', l.personalId).eq('empresa_id', empresaId).single(),
-      ])
-      let categoriaNombre = '—'
-      if (legajoRow?.categoria_id) {
-        const { data: cat } = await supabase.from('nom_categorias').select('nombre').eq('id', legajoRow.categoria_id).single()
-        categoriaNombre = cat?.nombre || '—'
-      }
-      // Logo opcional en base64: si falla la descarga (URL vencida, CORS,
-      // red), el recibo se emite igual sin logo — nunca bloquea la emisión.
-      let logoBase64 = null
-      if (empresaRow?.logo_url) {
-        try {
-          const resp = await fetch(empresaRow.logo_url)
-          const blob = await resp.blob()
-          logoBase64 = await new Promise((resolve, reject) => {
-            const reader = new FileReader()
-            reader.onload = () => resolve(reader.result)
-            reader.onerror = reject
-            reader.readAsDataURL(blob)
-          })
-        } catch {
-          logoBase64 = null
-        }
-      }
-      // `nom_liquidacion_items` no persiste `codigo_recibo` (limitación
-      // conocida de la Fase 5B Task 9) — se usa `concepto_codigo`, que sí
-      // está disponible, como columna "Cod" de la tabla del recibo.
-      const items = (itemsPorLiq[l.id] || []).map((i) => ({
-        codigo: i.concepto_codigo, nombre: i.concepto_nombre, tipo: i.tipo, monto: Number(i.monto),
-        unidadTexto: i.unidad_texto ?? null,
-        baseCalculo: i.base_calculo != null ? Number(i.base_calculo) : null,
-        grupoRecibo: i.grupo_recibo ?? null,
-        detalleRecibo: i.detalle_recibo ?? null,
-      }))
-      const doc = generarReciboPdf({
-        empresa: {
-          nombre: empresaRow?.nombre || empresaActiva?.nombre || '—',
-          cuit: configRow?.cuit || '—',
-          domicilio: configRow?.domicilio || '—',
-        },
-        persona: {
-          nombre: personalPorId.get(l.personalId) || l.personalId,
-          cuil: legajoRow?.cuil || '—',
-          legajo: l.personalId.slice(0, 8),
-          categoria: categoriaNombre,
-          fechaIngreso: legajoRow?.fecha_ingreso || '—',
-          antiguedadReconocida: legajoRow?.antiguedad_reconocida ?? 0,
-          banco: legajoRow?.banco || '—',
-        },
-        periodo: {
-          mes: periodoActivo ? String(periodoActivo.fecha_desde).slice(5, 7) : '—',
-          anio: periodoActivo ? String(periodoActivo.fecha_desde).slice(0, 4) : '—',
-          descripcion: periodoActivo ? `${periodoActivo.tipo} — ${periodoActivo.fecha_desde} a ${periodoActivo.fecha_hasta}` : '—',
-          fechaPago: periodoActivo?.fecha_pago || '—',
-        },
-        items,
-        codigoRecibo: l.numeroRecibo || null,
+      const { doc, hash, nombreArchivo } = await generarYDescargarRecibo({
+        empresaId,
+        personalId: l.personalId,
+        nombrePersona: personalPorId.get(l.personalId) || l.personalId,
+        periodo: periodoActivo,
+        filasItems: itemsPorLiq[l.id] || [],
+        numeroRecibo: l.numeroRecibo,
       })
-      const hash = await calcularHashPdf(doc)
       const r = await emitirRecibo(l.id, hash)
       if (!r.ok) { setErrorRecibo(r.error); setEmitiendoRecibo(null); return }
-      doc.save(`recibo-${personalPorId.get(l.personalId) || l.personalId}-${r.numeroRecibo}.pdf`)
+      doc.save(`${nombreArchivo}-${r.numeroRecibo}.pdf`)
       await cargarLiquidaciones(periodoSeleccionado)
     } catch (e) {
       setErrorRecibo(e instanceof Error ? e.message : String(e))
@@ -272,11 +215,12 @@ export default function LiquidacionPage() {
           <div>
             <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>Tipo</label>
             <select className="input" value={nuevoTipo} onChange={(e) => setNuevoTipo(e.target.value)}>
+              <option value="quincena_1">1ra quincena</option>
+              <option value="quincena_2">2da quincena</option>
+              <option value="mensual_fc">Fuera de convenio (mensual)</option>
               <option value="mensual">Mensual</option>
-              <option value="quincenal">Quincenal</option>
-              <option value="sac">SAC</option>
-              <option value="sac_1">SAC 1º semestre</option>
-              <option value="sac_2">SAC 2º semestre</option>
+              <option value="sac_1">1er SAC</option>
+              <option value="sac_2">2do SAC</option>
               <option value="vacaciones">Vacaciones</option>
               <option value="final">Liquidación final</option>
             </select>
@@ -324,7 +268,7 @@ export default function LiquidacionPage() {
       {liquidaciones.length > 0 && periodoActivo && (
         <div className="card" style={{ marginBottom: '1rem', display: 'flex', gap: 16, alignItems: 'baseline', flexWrap: 'wrap' }}>
           <strong>Período calculado:</strong>
-          <span>{periodoActivo.tipo} — {periodoActivo.fecha_desde} a {periodoActivo.fecha_hasta}</span>
+          <span>{etiquetaPeriodo(periodoActivo)}</span>
           <span className="badge badge-neutral">{periodoActivo.estado}</span>
           <span style={{ opacity: 0.7, fontSize: '0.85rem' }}>{liquidaciones.length} liquidación(es)</span>
         </div>

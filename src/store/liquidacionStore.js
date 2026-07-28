@@ -21,15 +21,25 @@ export const itemFromDB = (r) => ({
 
 // Reintenta la Edge Function liquidar-periodo con reanudar:true mientras
 // la respuesta indique completo:false (corte por timeout de la Edge
-// Function con muchos empleados). Tope de 20 intentos: con lotes de ~50
-// personas por invocación cubre 1000 personas, más que el objetivo de
-// 500-1000 de la Decisión 10 del plan maestro (Fase 5i Task 38).
+// Function con muchos empleados). Dos cortes:
+//   - tope de 20 intentos (con lotes de ~50 personas por invocación cubre
+//     1000 personas, el objetivo de la Decisión 10 del plan maestro);
+//   - **falta de progreso**: si `procesados` no avanzó respecto del
+//     intento anterior, reinvocar es tirar tiempo a la basura — la
+//     función va a saltear exactamente a la misma gente. Sin este corte,
+//     un período con personas omitidas (legajo incompleto) disparaba las
+//     20 invocaciones completas, cada una releyendo toda la nómina: eso
+//     era el "calcular tarda muchísimo" reportado el 28/07/2026.
 async function invocarConReintento(body) {
   let respuesta = await supabase.functions.invoke('liquidar-periodo', { body })
   let intentos = 1
+  let procesadosPrevios = respuesta.data?.procesados ?? -1
   while (!respuesta.error && respuesta.data?.completo === false && intentos < 20) {
     respuesta = await supabase.functions.invoke('liquidar-periodo', { body: { ...body, reanudar: true } })
     intentos += 1
+    const procesados = respuesta.data?.procesados ?? -1
+    if (procesados <= procesadosPrevios) break
+    procesadosPrevios = procesados
   }
   return respuesta
 }
@@ -75,9 +85,16 @@ export const useLiquidacionStore = create((set) => ({
   },
 
   cargarLiquidaciones: async (periodoId) => {
+    // Guarda contra periodoId vacío: Postgres lo rechaza con "invalid input
+    // syntax for type uuid" y el mensaje quedaba visible en la pantalla de
+    // Liquidación como si el cálculo hubiera fallado.
+    if (!periodoId) { set({ liquidaciones: [] }); return }
     const { data, error } = await supabase.from('nom_liquidaciones').select('*').eq('periodo_id', periodoId)
     if (error) { set({ error: error.message }); return }
-    set({ liquidaciones: (data || []).map(liquidacionFromDB) })
+    // Limpia el error previo: sin esto un error viejo (ej. un periodoId
+    // vacío) quedaba pegado en pantalla para siempre, incluso sobre
+    // resultados correctos de una corrida posterior.
+    set({ liquidaciones: (data || []).map(liquidacionFromDB), error: null })
   },
 
   cargarItems: async (liquidacionId) => {

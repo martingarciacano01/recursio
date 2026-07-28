@@ -20,7 +20,7 @@ describe('SelectorPeriodo', () => {
   it('llama a onChange con el id del periodo elegido', () => {
     const onChange = vi.fn()
     render(<SelectorPeriodo periodos={periodos} value="" onChange={onChange} />)
-    fireEvent.click(screen.getByText(/1ª quincena/i))
+    fireEvent.click(screen.getByText(/1ra quincena/i))
     expect(onChange).toHaveBeenCalledWith('p2')
   })
 })

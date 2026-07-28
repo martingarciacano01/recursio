@@ -36,6 +36,31 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
     codigoPostal: legajo?.codigoPostal || '',
   })
 
+  // `form` se inicializa en el primer render, cuando `legajo` todavía es
+  // null (FichaLegajoPage lo resuelve contra `legajos`, que carga async).
+  // Sin este resync, form.convenioId quedaba '' para siempre y el effect
+  // de categorías nunca se disparaba: la vista de solo lectura imprimía
+  // el UUID crudo de la categoría en vez de su nombre (bug del 28/07/2026).
+  // No se resincroniza mientras `editando` es true para no pisar lo que el
+  // usuario está tipeando si otra carga refresca el legajo.
+  useEffect(() => {
+    if (!legajo || editando) return
+    setForm({
+      cuil: legajo.cuil || '',
+      cbu: legajo.cbu || '',
+      banco: legajo.banco || '',
+      obraSocial: legajo.obraSocial || '',
+      jornada: legajo.jornada || 'completa',
+      convenioId: legajo.convenioId || '',
+      categoriaId: legajo.categoriaId || '',
+      fueraConvenio: legajo.fueraConvenio || false,
+      sueldoConvenido: legajo.sueldoConvenido || '',
+      localidad: legajo.localidad || '',
+      provincia: legajo.provincia || '',
+      codigoPostal: legajo.codigoPostal || '',
+    })
+  }, [legajo?.id, legajo?.convenioId, legajo?.categoriaId, legajo?.fueraConvenio, legajo?.sueldoConvenido, editando])
+
   const [dandoBaja, setDandoBaja] = useState(false)
   const [fechaBaja, setFechaBaja] = useState('')
   const [motivoBaja, setMotivoBaja] = useState('')
@@ -66,11 +91,15 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
       .then(({ data }) => setTodosConvenios(data || []))
   }, [])
 
+  // Se prueba primero el convenio del formulario y, si está vacío (primer
+  // render, antes de que llegue el legajo), el del legajo — así la vista de
+  // solo lectura resuelve el nombre de la categoría sin depender del resync.
+  const convenioParaCategorias = form.convenioId || legajo?.convenioId || ''
   useEffect(() => {
-    if (!form.convenioId) { setTodasCategorias([]); return }
-    supabase.from('nom_categorias').select('id, nombre, vigencia_desde').eq('convenio_id', form.convenioId).order('nombre')
+    if (!convenioParaCategorias) { setTodasCategorias([]); return }
+    supabase.from('nom_categorias').select('id, nombre, vigencia_desde').eq('convenio_id', convenioParaCategorias).order('nombre')
       .then(({ data }) => setTodasCategorias(data || []))
-  }, [form.convenioId])
+  }, [convenioParaCategorias])
 
   const convenios = filtrarConveniosVisibles(todosConvenios)
   const categorias = categoriasVigentes(todasCategorias)
@@ -95,8 +124,19 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
         <p>Banco: {legajo?.banco || '—'}</p>
         <p>Obra social: {legajo?.obraSocial || '—'}</p>
         <p>Jornada: {legajo?.jornada || '—'}</p>
-        <p>Convenio: {todosConvenios.find((c) => c.id === legajo?.convenioId)?.nombre || (legajo?.convenioId ? legajo.convenioId : '—')}</p>
-        <p>Categoría: {todasCategorias.find((c) => c.id === legajo?.categoriaId)?.nombre || (legajo?.categoriaId ? legajo.categoriaId : '—')}</p>
+        {legajo?.fueraConvenio ? (
+          <>
+            <p>Convenio: Fuera de convenio</p>
+            <p>Sueldo convenido: {legajo?.sueldoConvenido != null
+              ? `$ ${Number(legajo.sueldoConvenido).toLocaleString('es-AR')}`
+              : '— (falta cargarlo: la liquidación va a saltear a esta persona)'}</p>
+          </>
+        ) : (
+          <>
+            <p>Convenio: {todosConvenios.find((c) => c.id === legajo?.convenioId)?.nombre || (legajo?.convenioId ? legajo.convenioId : '—')}</p>
+            <p>Categoría: {todasCategorias.find((c) => c.id === legajo?.categoriaId)?.nombre || (legajo?.categoriaId ? legajo.categoriaId : '—')}</p>
+          </>
+        )}
         <p>Localidad: {legajo?.localidad || '—'}</p>
         <p>Provincia: {legajo?.provincia || '—'}</p>
         <p>Código postal: {legajo?.codigoPostal || '—'}</p>

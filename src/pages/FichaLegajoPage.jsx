@@ -11,6 +11,8 @@ import TabFamiliares from '../components/legajo/TabFamiliares'
 import TabSanciones from '../components/legajo/TabSanciones'
 import TabAusencias from '../components/legajo/TabAusencias'
 import { generarLegajoPdf } from '../utils/legajoPdf'
+import { etiquetaPeriodo } from '../utils/etiquetaPeriodo'
+import { generarYDescargarRecibo } from '../utils/emitirReciboLegajo'
 
 const PESTANAS = ['Datos', 'Familiares', 'Documentación', 'Sanciones', 'Ausencias', 'Liquidaciones']
 
@@ -23,7 +25,7 @@ export default function FichaLegajoPage() {
   // filtrar nom_legajo por empresa_id igual que un usuario normal.
   const empresaActiva = empresa || empresaVista
   const { legajos, familiares, sanciones, error: errorLegajo, cargarLegajos, cargarFamiliares, cargarSanciones } = useLegajoStore()
-  const { crearPeriodoFinal } = useLiquidacionStore()
+  const { crearPeriodoFinal, emitirRecibo } = useLiquidacionStore()
   const [persona, setPersona] = useState(null)
   const [ausencias, setAusencias] = useState([])
   const [liquidaciones, setLiquidaciones] = useState([])
@@ -35,6 +37,7 @@ export default function FichaLegajoPage() {
   const [generandoFinal, setGenerandoFinal] = useState(false)
   const [errorFinal, setErrorFinal] = useState('')
   const [pestana, setPestana] = useState(PESTANAS[0])
+  const [descargandoRecibo, setDescargandoRecibo] = useState(null)
 
   useEffect(() => {
     // Reset explícito: sin esto, al navegar de una ficha a otra la página
@@ -80,6 +83,7 @@ export default function FichaLegajoPage() {
   }, [personalId, empresaActiva?.id])
 
   const legajo = legajos.find((l) => l.personalId === personalId) || null
+  const fmtMonto = (n) => (Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
   // No se pasan `documentos`: DocumentosLegajo carga su lista internamente y no la expone al padre (evitar refactor grande).
   const handleExportar = () => {
@@ -91,6 +95,31 @@ export default function FichaLegajoPage() {
     } catch (e) {
       setErrorExport('No se pudo generar el PDF: ' + e.message)
     }
+  }
+
+  // Descarga el recibo de una liquidación ya calculada. Si la liquidación
+  // todavía no tiene numero_recibo, se lo asigna con la RPC emitir_recibo
+  // (misma semántica que la pantalla de Liquidación) y se guarda el hash.
+  const handleDescargarRecibo = async (l) => {
+    setErrorLiquidaciones('')
+    setDescargandoRecibo(l.id)
+    try {
+      const { data: filasItems } = await supabase.from('nom_liquidacion_items').select('*').eq('liquidacion_id', l.id)
+      const { doc, hash, nombreArchivo } = await generarYDescargarRecibo({
+        empresaId: empresaActiva?.id,
+        personalId,
+        nombrePersona: persona.nombre,
+        periodo: l.nom_periodos,
+        filasItems,
+        numeroRecibo: l.numero_recibo,
+      })
+      const r = await emitirRecibo(l.id, hash)
+      if (!r.ok) { setErrorLiquidaciones(r.error); setDescargandoRecibo(null); return }
+      doc.save(`${nombreArchivo}-${r.numeroRecibo}.pdf`)
+    } catch (e) {
+      setErrorLiquidaciones(e instanceof Error ? e.message : String(e))
+    }
+    setDescargandoRecibo(null)
   }
 
   const handleGenerarFinal = async () => {
@@ -151,7 +180,7 @@ export default function FichaLegajoPage() {
       )}
 
       {pestana === 'Documentación' && (
-        <DocumentosLegajo personalId={personalId} />
+        <DocumentosLegajo personalId={personalId} empresaId={empresaActiva?.id} />
       )}
 
       {pestana === 'Sanciones' && (
@@ -164,25 +193,38 @@ export default function FichaLegajoPage() {
 
       {pestana === 'Liquidaciones' && (
         <div className="card">
-          {errorLiquidaciones && <p style={{ color: 'var(--danger)' }}>Error al cargar liquidaciones: {errorLiquidaciones}</p>}
+          {errorLiquidaciones && <p style={{ color: 'var(--danger)' }}>Error: {errorLiquidaciones}</p>}
           {liquidaciones.length === 0 && !errorLiquidaciones && <p style={{ color: 'var(--text-secondary)' }}>Sin liquidaciones registradas.</p>}
           {liquidaciones.length > 0 && (
             <table className="table">
               <thead>
                 <tr>
-                  <th>Período</th>
-                  <th>Bruto</th>
-                  <th>Neto</th>
-                  <th>Estado</th>
+                  <th>Período</th><th>Bruto</th><th>Aportes</th><th>Neto</th><th>Estado</th><th>Recibo</th><th></th>
                 </tr>
               </thead>
               <tbody>
                 {liquidaciones.map((l) => (
                   <tr key={l.id}>
-                    <td>{l.nom_periodos ? `${l.nom_periodos.tipo} ${l.nom_periodos.fecha_desde} a ${l.nom_periodos.fecha_hasta}` : '—'}</td>
-                    <td>{l.bruto}</td>
-                    <td>{l.neto}</td>
-                    <td>{l.estado}</td>
+                    <td>{etiquetaPeriodo(l.nom_periodos)}</td>
+                    <td>${fmtMonto(l.bruto)}</td>
+                    <td>${fmtMonto(l.total_aportes)}</td>
+                    <td><strong>${fmtMonto(l.neto)}</strong></td>
+                    <td>
+                      <span className="badge badge-neutral">{l.estado}</span>
+                      {l.anulado && <span className="badge badge-warning" style={{ marginLeft: 4 }}>anulado</span>}
+                    </td>
+                    <td>{l.numero_recibo ? `#${l.numero_recibo}${l.version > 1 ? ` v${l.version}` : ''}` : '—'}</td>
+                    <td>
+                      {!l.anulado && (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => handleDescargarRecibo(l)}
+                          disabled={descargandoRecibo === l.id || !empresaActiva?.id}
+                        >
+                          {descargandoRecibo === l.id ? 'Generando…' : l.numero_recibo ? 'Descargar recibo' : 'Emitir recibo'}
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

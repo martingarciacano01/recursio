@@ -8,10 +8,10 @@ const TIPOS = [
   { value: 'otra', label: 'Otra' },
 ]
 
-const FORM_VACIO = { tipo: 'apercibimiento', fecha: '', motivo: '', diasSuspension: '' }
+const FORM_VACIO = { id: null, tipo: 'apercibimiento', fecha: '', motivo: '', diasSuspension: '' }
 
-// CRUD de sanciones del legajo (Task 47). Sigue el mismo patrón que
-// TabFamiliares: acciones del store, manejo local de errores/loading.
+// CRUD de sanciones del legajo (Task 47; edición agregada en Fase 6 Task 5).
+// guardarSancion del store ya hacía UPDATE cuando el objeto trae `id`.
 export default function TabSanciones({ personalId, empresaId }) {
   const sanciones = useLegajoStore((s) => s.sanciones)
   const guardarSancion = useLegajoStore((s) => s.guardarSancion)
@@ -22,17 +22,23 @@ export default function TabSanciones({ personalId, empresaId }) {
   const [eliminandoId, setEliminandoId] = useState(null)
   const [error, setError] = useState('')
 
-  const handleAgregar = async () => {
+  const editando = form.id !== null
+
+  const handleGuardar = async () => {
     setError('')
     if (!form.fecha) { setError('La fecha es obligatoria.'); return }
     if (!form.motivo.trim()) { setError('El motivo es obligatorio.'); return }
     setGuardando(true)
     const r = await guardarSancion(
       {
+        ...(form.id ? { id: form.id } : {}),
         tipo: form.tipo,
         fecha: form.fecha,
         motivo: form.motivo,
-        diasSuspension: form.tipo === 'suspension' ? (form.diasSuspension || undefined) : undefined,
+        // En una edición hay que mandar SIEMPRE el campo (aunque sea null)
+        // para poder borrar los días si la sanción deja de ser suspensión:
+        // sancionToDB omite la columna cuando el valor es `undefined`.
+        diasSuspension: form.tipo === 'suspension' ? (form.diasSuspension || null) : null,
       },
       personalId, empresaId
     )
@@ -41,12 +47,21 @@ export default function TabSanciones({ personalId, empresaId }) {
     setForm(FORM_VACIO)
   }
 
+  const handleEditar = (s) => {
+    setError('')
+    setForm({
+      id: s.id, tipo: s.tipo, fecha: s.fecha, motivo: s.motivo,
+      diasSuspension: s.diasSuspension ?? '',
+    })
+  }
+
   const handleEliminar = async (id) => {
     setError('')
     setEliminandoId(id)
     const r = await eliminarSancion(id)
     setEliminandoId(null)
-    if (!r.ok) setError(r.error)
+    if (!r.ok) { setError(r.error); return }
+    if (form.id === id) setForm(FORM_VACIO)
   }
 
   return (
@@ -64,13 +79,16 @@ export default function TabSanciones({ personalId, empresaId }) {
                   {s.fecha} — {tipoLabel}: {s.motivo}
                   {s.diasSuspension ? ` (${s.diasSuspension} días)` : ''}
                 </span>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => handleEliminar(s.id)}
-                  disabled={eliminandoId === s.id}
-                >
-                  {eliminandoId === s.id ? 'Eliminando…' : 'Eliminar'}
-                </button>
+                <span style={{ display: 'flex', gap: 4 }}>
+                  <button className="btn btn-ghost btn-sm" onClick={() => handleEditar(s)}>Editar</button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => handleEliminar(s.id)}
+                    disabled={eliminandoId === s.id}
+                  >
+                    {eliminandoId === s.id ? 'Eliminando…' : 'Eliminar'}
+                  </button>
+                </span>
               </div>
             )
           })}
@@ -78,24 +96,26 @@ export default function TabSanciones({ personalId, empresaId }) {
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 420 }}>
+        <strong style={{ fontSize: '0.9rem' }}>{editando ? 'Editar sanción' : 'Registrar sanción'}</strong>
         <div>
-          <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Tipo</label>
-          <select className="input" value={form.tipo} onChange={(e) => setForm((f) => ({ ...f, tipo: e.target.value }))}>
+          <label htmlFor="san-tipo" style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Tipo</label>
+          <select id="san-tipo" className="input" value={form.tipo} onChange={(e) => setForm((f) => ({ ...f, tipo: e.target.value }))}>
             {TIPOS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
           </select>
         </div>
         <div>
-          <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Fecha</label>
-          <input className="input" type="date" value={form.fecha} onChange={(e) => setForm((f) => ({ ...f, fecha: e.target.value }))} />
+          <label htmlFor="san-fecha" style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Fecha</label>
+          <input id="san-fecha" className="input" type="date" value={form.fecha} onChange={(e) => setForm((f) => ({ ...f, fecha: e.target.value }))} />
         </div>
         <div>
-          <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Motivo / descripción</label>
-          <textarea className="input" value={form.motivo} onChange={(e) => setForm((f) => ({ ...f, motivo: e.target.value }))} />
+          <label htmlFor="san-motivo" style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Motivo / descripción</label>
+          <textarea id="san-motivo" className="input" value={form.motivo} onChange={(e) => setForm((f) => ({ ...f, motivo: e.target.value }))} />
         </div>
         {form.tipo === 'suspension' && (
           <div>
-            <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Días de suspensión</label>
+            <label htmlFor="san-dias" style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Días de suspensión</label>
             <input
+              id="san-dias"
               className="input"
               type="number"
               min="1"
@@ -107,10 +127,15 @@ export default function TabSanciones({ personalId, empresaId }) {
 
         {error && <div style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{error}</div>}
 
-        <div>
-          <button className="btn btn-primary btn-sm" onClick={handleAgregar} disabled={guardando}>
-            {guardando ? 'Agregando…' : 'Agregar'}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-primary btn-sm" onClick={handleGuardar} disabled={guardando}>
+            {guardando ? 'Guardando…' : editando ? 'Guardar cambios' : 'Agregar'}
           </button>
+          {editando && (
+            <button className="btn btn-ghost btn-sm" onClick={() => { setForm(FORM_VACIO); setError('') }} disabled={guardando}>
+              Cancelar
+            </button>
+          )}
         </div>
       </div>
     </div>
