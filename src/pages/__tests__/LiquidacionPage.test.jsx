@@ -16,7 +16,7 @@ vi.mock('../../store/authStore', () => ({
 }))
 vi.mock('../../store/liquidacionStore', () => ({
   useLiquidacionStore: () => ({
-    liquidaciones: [], calculando: false, error: null, omitidos: [], advertencias: [],
+    liquidaciones: [], calculando: false, error: null, omitidos: [], advertencias: [], sinHoras: [],
     calcularPeriodo: vi.fn(), cargarLiquidaciones: vi.fn(), emitirRecibo: vi.fn(),
   }),
 }))
@@ -49,16 +49,22 @@ vi.mock('../../lib/supabase', () => ({
   },
 }))
 
+// El alta de período va convenio → tipo: primero se elige el convenio y su
+// modalidad filtra los tipos posibles (src/utils/tiposPeriodo.js).
 describe('LiquidacionPage — Nuevo período', () => {
   beforeEach(() => { insertPayload = null })
 
-  it('crear un período mensual/quincenal calcula las fechas y las manda con convenio_id', async () => {
+  const abrirFormulario = () => {
     render(<LiquidacionPage />)
     fireEvent.click(screen.getByRole('button', { name: 'Nuevo período' }))
-    fireEvent.change(screen.getByLabelText('Tipo'), { target: { value: 'quincena_1' } })
+  }
+
+  it('crear un período de un convenio quincenal calcula las fechas y manda convenio_id', async () => {
+    abrirFormulario()
+    fireEvent.change(screen.getByLabelText('Convenio'), { target: { value: 'conv-uocra' } })
+    fireEvent.change(screen.getByLabelText('Tipo de período'), { target: { value: 'quincena_1' } })
     fireEvent.change(screen.getByLabelText('Año'), { target: { value: '2026' } })
     fireEvent.change(screen.getByLabelText('Mes'), { target: { value: '7' } })
-    fireEvent.change(screen.getByLabelText('Convenio'), { target: { value: 'conv-uocra' } })
     fireEvent.click(screen.getByRole('button', { name: 'Crear período' }))
     await waitFor(() => {
       expect(insertPayload).toMatchObject({
@@ -67,10 +73,34 @@ describe('LiquidacionPage — Nuevo período', () => {
     })
   })
 
+  it('un convenio quincenal no ofrece el tipo mensual', () => {
+    abrirFormulario()
+    fireEvent.change(screen.getByLabelText('Convenio'), { target: { value: 'conv-uocra' } })
+    const opciones = [...screen.getByLabelText('Tipo de período').options].map((o) => o.value)
+    expect(opciones).toContain('quincena_1')
+    expect(opciones).toContain('quincena_2')
+    expect(opciones).not.toContain('mensual')
+  })
+
+  it('fuera de convenio ofrece el mensual y no manda convenio_id', async () => {
+    abrirFormulario()
+    fireEvent.change(screen.getByLabelText('Convenio'), { target: { value: '__fuera_de_convenio__' } })
+    const opciones = [...screen.getByLabelText('Tipo de período').options].map((o) => o.value)
+    expect(opciones).toContain('mensual_fc')
+
+    fireEvent.change(screen.getByLabelText('Año'), { target: { value: '2026' } })
+    fireEvent.change(screen.getByLabelText('Mes'), { target: { value: '7' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Crear período' }))
+    await waitFor(() => {
+      expect(insertPayload).toMatchObject({ tipo: 'mensual_fc', fecha_desde: '2026-07-01', fecha_hasta: '2026-07-31' })
+      expect(insertPayload.convenio_id).toBeUndefined()
+    })
+  })
+
   it('crear un SAC sigue usando fechas manuales (sin convenio)', async () => {
-    render(<LiquidacionPage />)
-    fireEvent.click(screen.getByRole('button', { name: 'Nuevo período' }))
-    fireEvent.change(screen.getByLabelText('Tipo'), { target: { value: 'sac_1' } })
+    abrirFormulario()
+    fireEvent.change(screen.getByLabelText('Convenio'), { target: { value: 'conv-uocra' } })
+    fireEvent.change(screen.getByLabelText('Tipo de período'), { target: { value: 'sac_1' } })
     fireEvent.change(screen.getByLabelText('Desde'), { target: { value: '2026-01-01' } })
     fireEvent.change(screen.getByLabelText('Hasta'), { target: { value: '2026-06-30' } })
     fireEvent.click(screen.getByRole('button', { name: 'Crear período' }))
@@ -80,25 +110,10 @@ describe('LiquidacionPage — Nuevo período', () => {
     })
   })
 
-  it('cambiar de tipo resetea el convenio elegido', () => {
-    render(<LiquidacionPage />)
-    fireEvent.click(screen.getByRole('button', { name: 'Nuevo período' }))
-    fireEvent.change(screen.getByLabelText('Tipo'), { target: { value: 'quincena_1' } })
-    fireEvent.change(screen.getByLabelText('Convenio'), { target: { value: 'conv-uocra' } })
-    expect(screen.getByLabelText('Convenio').value).toBe('conv-uocra')
-    fireEvent.change(screen.getByLabelText('Tipo'), { target: { value: 'mensual' } })
-    fireEvent.change(screen.getByLabelText('Tipo'), { target: { value: 'quincena_1' } })
-    expect(screen.getByLabelText('Convenio').value).toBe('')
-  })
-
-  it('sin convenio disponible para la modalidad, Crear período muestra el error y no llama a insert', async () => {
-    render(<LiquidacionPage />)
-    fireEvent.click(screen.getByRole('button', { name: 'Nuevo período' }))
-    fireEvent.change(screen.getByLabelText('Tipo'), { target: { value: 'mensual' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Crear período' }))
-    await waitFor(() => {
-      expect(screen.getByText('No hay ningún convenio con modalidad "mensual" configurado.')).toBeInTheDocument()
-    })
+  it('sin convenio elegido no se puede crear el período', () => {
+    abrirFormulario()
+    expect(screen.getByLabelText('Tipo de período')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Crear período' })).toBeDisabled()
     expect(insertPayload).toBeNull()
   })
 })

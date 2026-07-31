@@ -128,6 +128,18 @@ describe('construirDiasPeriodo', () => {
     expect(dias.map((d) => d.ausenciaAprobada)).toEqual([false, true, false])
   })
 
+  it('ausencia parcial: cubre solo algunos días del rango de días consultado', () => {
+    // rango de días 15 al 19, ausencia solo el 16 y 17 (parcial dentro del período)
+    const dias = construirDiasPeriodo([], [{ fecha_desde: '2026-06-16', fecha_hasta: '2026-06-17' }], '2026-06-15', '2026-06-19')
+    expect(dias.map((d) => d.ausenciaAprobada)).toEqual([false, true, true, false, false])
+  })
+
+  it('ausencia que empieza antes del período y termina adentro sigue contando los días dentro del rango', () => {
+    // la ausencia arrancó el 06-10 (antes del período) y termina el 06-16 (adentro)
+    const dias = construirDiasPeriodo([], [{ fecha_desde: '2026-06-10', fecha_hasta: '2026-06-16' }], '2026-06-15', '2026-06-17')
+    expect(dias.map((d) => d.ausenciaAprobada)).toEqual([true, true, false])
+  })
+
   it('integración: faltas y extras del período con calcularAsistencia', () => {
     const dias = construirDiasPeriodo(fichajes, [{ fecha_desde: '2026-06-16', fecha_hasta: '2026-06-16' }], '2026-06-15', '2026-06-19')
     const r = calcularAsistencia(dias, 15)
@@ -136,5 +148,42 @@ describe('construirDiasPeriodo', () => {
     expect(r.faltasJustificadas).toBe(1) // 16/06
     expect(r.faltasInjustificadas).toBe(2) // 18 y 19/06 (el 17 tiene entrada)
     expect(r.tardanzas).toBe(2) // 08:33 y 09:00
+  })
+
+  it('persona sin ningún fichaje ni ausencia aprobada: 0 horas y 0 días con ausencia aprobada', () => {
+    const dias = construirDiasPeriodo([], [], '2026-06-01', '2026-06-05')
+    const r = calcularAsistencia(dias, 15)
+    const diasConAusenciaAprobada = dias.filter((d) => d.ausenciaAprobada).length
+    expect(r.horasTrabajadas).toBe(0)
+    expect(diasConAusenciaAprobada).toBe(0)
+  })
+
+  it('persona de vacaciones todo el período: 0 horas pero SÍ tiene días con ausencia aprobada', () => {
+    const dias = construirDiasPeriodo([], [{ fecha_desde: '2026-06-01', fecha_hasta: '2026-06-05' }], '2026-06-01', '2026-06-05')
+    const r = calcularAsistencia(dias, 15)
+    const diasConAusenciaAprobada = dias.filter((d) => d.ausenciaAprobada).length
+    expect(r.horasTrabajadas).toBe(0)
+    expect(diasConAusenciaAprobada).toBeGreaterThan(0)
+  })
+
+  it('días anteriores a fechaIngreso no son laborables (no cuentan como falta)', () => {
+    const dias = construirDiasPeriodo([], [], '2026-06-01', '2026-06-10', { fechaIngreso: '2026-06-05' })
+    const antesDeIngresar = dias.filter((d) => d.fecha < '2026-06-05')
+    const desdeIngreso = dias.filter((d) => d.fecha >= '2026-06-05')
+    expect(antesDeIngresar.every((d) => d.horaEntradaEsperada === null)).toBe(true)
+    // Desde el ingreso, los días de semana siguen siendo laborables (esto no cambia).
+    expect(desdeIngreso.some((d) => d.horaEntradaEsperada !== null)).toBe(true)
+  })
+
+  it('días posteriores a fechaBaja no son laborables', () => {
+    const dias = construirDiasPeriodo([], [], '2026-06-01', '2026-06-10', { fechaBaja: '2026-06-05' })
+    const despuesDeBaja = dias.filter((d) => d.fecha > '2026-06-05')
+    expect(despuesDeBaja.every((d) => d.horaEntradaEsperada === null)).toBe(true)
+  })
+
+  it('sin fechaIngreso/fechaBaja, se comporta exactamente igual que antes', () => {
+    const dias = construirDiasPeriodo([], [], '2026-06-01', '2026-06-05')
+    expect(dias.every((d) => d.fecha < '2026-06-06')).toBe(true)
+    expect(dias.filter((d) => d.horaEntradaEsperada !== null).length).toBeGreaterThan(0)
   })
 })

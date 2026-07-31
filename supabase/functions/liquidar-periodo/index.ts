@@ -1,9 +1,10 @@
 // supabase/functions/liquidar-periodo/index.ts
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { liquidarConceptos, filtrarPorCategoria, type Concepto } from '../../../packages/motor/src/motor.ts'
+import { liquidarConceptos, filtrarPorCategoria, filtrarAsignados, type Concepto } from '../../../packages/motor/src/motor.ts'
 import { calcularAsistencia, construirDiasPeriodo } from '../../../packages/motor/src/asistencia.ts'
 import { calcularBasicoPeriodo } from '../../../packages/motor/src/basico.ts'
 import { partirEnLotes, agruparPorPersonalId } from '../../../packages/motor/src/lotes.ts'
+import { generarFormula } from '../../../packages/motor/src/formulas.ts'
 import {
   calcularSAC as calcularSACLct,
   calcularVacaciones as calcularVacacionesLct,
@@ -103,8 +104,10 @@ Deno.serve(async (req) => {
   const conceptosMotor: ConceptoConConvenio[] = (conceptos || []).map((c: any) => ({
     codigo: c.codigo, nombre: c.nombre, tipo: c.tipo, orden: c.orden, formula: c.formula, imprimible: c.imprimible,
     categorias: c.categorias ?? null, convenioId: c.convenio_id ?? null, config: c.config ?? null,
+    asignacion: c.asignacion ?? 'categoria',
     reglas: (c.nom_concepto_reglas || []).map((r: any) => ({ orden: r.orden, condicion: r.condicion, formula: r.formula })),
   }))
+  const conceptoIdPorCodigo = new Map((conceptos || []).map((c: any) => [c.codigo, c.id]))
 
   // ─── Períodos especiales (Fase 4, Task 32, extendido en Task 32b) ─────
   // sac/sac_1/sac_2/vacaciones/final NO pasan por el flujo mensual/
@@ -122,7 +125,7 @@ Deno.serve(async (req) => {
     return await liquidarPeriodoEspecial(supabase, periodo, personalIds, conceptosMotor)
   }
 
-  let queryPersonal = supabase.from('nom_v_personal').select('id, nombre').eq('empresa_id', periodo.empresa_id).eq('estado', 'activo')
+  let queryPersonal = supabase.from('nom_v_personal').select('id, nombre, fecha_ingreso').eq('empresa_id', periodo.empresa_id).eq('estado', 'activo')
   if (Array.isArray(personalIds) && personalIds.length > 0) queryPersonal = queryPersonal.in('id', personalIds)
   const { data: personal, error: errPersonal } = await queryPersonal
   const { data: legajos, error: errLegajos } = await supabase.from('nom_legajo').select('*').eq('empresa_id', periodo.empresa_id)
@@ -138,6 +141,34 @@ Deno.serve(async (req) => {
     })
   }
   const legajoPorPersonal = new Map((legajos || []).map((l: any) => [l.personal_id, l]))
+
+  // Adicionales asignados por legajo (migración 0040, plan 2026-07-29 §3):
+  // una consulta para toda la empresa (mismo patrón que fichajes/ausencias
+  // de más abajo, pero acá no hace falta partirEnLotes — es una tabla chica
+  // por empresa). Filtrado por vigencia contra el CIERRE del período: una
+  // asignación vale si empezó on/antes de fecha_hasta y (no tiene fin, o su
+  // fin es on/después de fecha_hasta) — mismo criterio que resolverBasico.
+  const { data: adicionalesLegajo, error: errAdicionalesLegajo } = await supabase
+    .from('nom_legajo_adicionales').select('legajo_id, concepto_id, modo, porcentaje, monto')
+    .eq('empresa_id', periodo.empresa_id)
+    .lte('vigencia_desde', periodo.fecha_hasta)
+    .or(`vigencia_hasta.is.null,vigencia_hasta.gte.${periodo.fecha_hasta}`)
+  if (errAdicionalesLegajo) {
+    return new Response(JSON.stringify({ error: `error al leer adicionales por legajo: ${errAdicionalesLegajo.message}`, code: errAdicionalesLegajo.code }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+  const codigoPorConceptoId = new Map((conceptos || []).map((c: any) => [c.id, c.codigo]))
+  // legajo_id → Map<codigoConcepto, override>. 'heredado' = usar el % ya
+  // configurado en el concepto del convenio (solo la asignación cambia; el
+  // valor no se pisa) — se resuelve más abajo, al generar la fórmula.
+  const adicionalesPorLegajo = new Map<string, Map<string, { modo: string; porcentaje: number | null; monto: number | null }>>()
+  for (const a of adicionalesLegajo || []) {
+    const codigo = codigoPorConceptoId.get(a.concepto_id)
+    if (!codigo) continue
+    if (!adicionalesPorLegajo.has(a.legajo_id)) adicionalesPorLegajo.set(a.legajo_id, new Map())
+    adicionalesPorLegajo.get(a.legajo_id)!.set(codigo, { modo: a.modo, porcentaje: a.porcentaje != null ? Number(a.porcentaje) : null, monto: a.monto != null ? Number(a.monto) : null })
+  }
 
   // Un período 'mensual_fc' liquida SOLO al personal fuera de convenio
   // (cobra mensual mientras su convenio real, si tuviera, cobraría por
@@ -278,16 +309,86 @@ Deno.serve(async (req) => {
   // por persona — nunca más un $0 silencioso sin explicación.
   const omitidos: { personal_id: string; nombre: string; motivo: string }[] = []
   const advertencias: { personal_id: string; mensaje: string }[] = []
+  // Personal SIN fichajes y SIN ausencias aprobadas en todo el período: no
+  // es "legajo incompleto" (el legajo puede estar perfecto), es que no hay
+  // ningún dato de asistencia cargado. Antes esto liquidaba en $0 con todos
+  // los días como falta injustificada, sin avisar. Se separa en su propia
+  // lista para que quien liquida sepa que faltan cargar fichajes/licencias,
+  // no que la persona faltó todo el período.
+  const sinHoras: { personal_id: string; nombre: string }[] = []
 
   // Único punto de branching fuera_convenio vs. normal (antes duplicado en
   // dos bloques separados del loop): resuelve básico, no-remunerativo y la
   // lista de conceptos aplicables según corresponda, en un solo lugar.
+  // unidad_basico / base_basico: variables GENÉRICAS (independientes de la
+  // modalidad) que el concepto "básico" usa como recibo.unidadFormula /
+  // recibo.baseFormula (ver migración 0039 y packages/motor/src/motor.ts,
+  // que ya sabía evaluar esas dos fórmulas — solo faltaban las variables).
+  // Elegidas así, en TODOS los casos BASE × UNIDAD = MONTO (verificable en
+  // el PDF):
+  //  - modalidad 'hora': unidad = horas liquidadas (ceil), base = valor hora.
+  //  - modalidad 'mensual'/'quincenal': unidad = "días liquidados" del
+  //    período (días nominales del tipo de período menos faltas
+  //    injustificadas), base = básico / divisor de la modalidad (30 o 15 —
+  //    el mismo divisor que ya usa calcularBasicoPeriodo para descontar
+  //    faltas). Álgebra: diasLiquidados × (basico/divisor) reproduce
+  //    exactamente `base - faltas*(basico/divisor)` de basico.ts, para
+  //    cualquier combinación modalidad × tipoPeriodo.
+  //  - fuera de convenio: sin faltas (sueldo fijo pactado), unidad = días
+  //    nominales completos, base = sueldo_convenido / 30 (siempre en base
+  //    mensual, igual que el resto de la empresa).
+  // Pisa la fórmula de un concepto asignado por legajo con el override
+  // configurado en nom_legajo_adicionales (% del básico o monto fijo).
+  // 'heredado' no pisa nada: se usa la fórmula que ya trae el concepto del
+  // convenio (solo cambia la ASIGNACIÓN, no el valor). generarFormula() es
+  // la misma función que usa el formulario de conceptos en el cliente
+  // (packages/motor/src/formulas.ts) — una sola fuente de verdad para cómo
+  // se arma una fórmula porcentual/nominal.
+  function aplicarOverridesAdicionales(
+    conceptos: ConceptoConConvenio[],
+    asignados: Map<string, { modo: string; porcentaje: number | null; monto: number | null }>
+  ): ConceptoConConvenio[] {
+    return conceptos.map((c) => {
+      if (c.asignacion !== 'legajo') return c
+      const ov = asignados.get(c.codigo)
+      if (!ov || ov.modo === 'heredado') return c
+      const formula = ov.modo === 'nominal'
+        ? generarFormula({ modo: 'nominal', monto: ov.monto ?? 0 })
+        : generarFormula({ modo: 'porcentaje', porcentaje: ov.porcentaje ?? 0, base: 'basico' })
+      return { ...c, formula }
+    })
+  }
+
+  function unidadYBaseBasico(
+    modalidad: 'hora' | 'mensual' | 'quincenal' | null,
+    basicoBase: number,
+    tipoPeriodo: 'mensual' | 'quincenal',
+    horasLiquidadas: number,
+    valorHora: number,
+    faltasInjustificadas: number,
+    sinDescuento: boolean
+  ): { unidadBasico: number; baseBasico: number } {
+    if (modalidad === 'hora') {
+      return { unidadBasico: horasLiquidadas, baseBasico: valorHora }
+    }
+    const divisorModalidad = modalidad === 'quincenal' ? 15 : 30
+    const diasNominales = tipoPeriodo === 'mensual' ? 30 : 15
+    const diasLiquidados = sinDescuento ? diasNominales : diasNominales - faltasInjustificadas
+    return { unidadBasico: diasLiquidados, baseBasico: basicoBase / divisorModalidad }
+  }
+
   async function resolverBasicoYConceptos(
     legajo: any,
     asistencia: { horasTrabajadas: number; faltasInjustificadas: number },
     personaId: string
-  ): Promise<{ basicoPeriodo: number; basicoConvenio: number; noRem: number; conceptosLegajo: ConceptoConConvenio[] }> {
+  ): Promise<{
+    basicoPeriodo: number; basicoConvenio: number; noRem: number; conceptosLegajo: ConceptoConConvenio[]
+    horasLiquidadas: number; unidadBasico: number; baseBasico: number
+  }> {
     const tipoPeriodo = periodo.tipo === 'mensual' ? 'mensual' : 'quincenal'
+    // horas_liquidadas es informativo (CSV/grilla) independientemente de la
+    // modalidad — ver plan 2026-07-29 §2.
+    const horasLiquidadas = Math.ceil(asistencia.horasTrabajadas)
     if (legajo.fuera_convenio) {
       // Sin convenio/categoría: el básico sale directo de sueldo_convenido,
       // un monto FIJO mensual pactado individualmente con el empleado — no
@@ -302,11 +403,21 @@ Deno.serve(async (req) => {
       // resolver para un legajo fuera de convenio.
       const basicoConvenio = Number(legajo.sueldo_convenido)
       const basicoPeriodo = tipoPeriodo === 'mensual' ? basicoConvenio : basicoConvenio / 2
+      const { unidadBasico, baseBasico } = unidadYBaseBasico(
+        'mensual', basicoConvenio, tipoPeriodo, horasLiquidadas, 0, 0, true
+      )
+      // fuera de convenio no tiene categoría propia (categoriaNombre '') —
+      // filtrarAsignados igual respeta los adicionales asignados por legajo.
+      const conceptosLegajoFC = filtrarAsignados(
+        conceptosMotor.filter((c) => c.convenioId === null),
+        '', new Set(adicionalesPorLegajo.get(legajo.id)?.keys() ?? [])
+      )
       return {
         basicoPeriodo,
         basicoConvenio,
         noRem: 0,
-        conceptosLegajo: conceptosMotor.filter((c) => c.convenioId === null),
+        conceptosLegajo: aplicarOverridesAdicionales(conceptosLegajoFC, adicionalesPorLegajo.get(legajo.id) ?? new Map()),
+        horasLiquidadas, unidadBasico, baseBasico,
       }
     }
 
@@ -329,7 +440,7 @@ Deno.serve(async (req) => {
     // basico_periodo: la base del concepto "básico" ya resuelta según la
     // modalidad pactada en la escala (hora/mensual/quincenal) vs. el tipo
     // de período liquidado — ver packages/motor/src/basico.ts.
-    const basicoPeriodo = basico
+    const resultadoBasico = basico
       ? calcularBasicoPeriodo({
           modalidad: basico.modalidad as 'hora' | 'mensual' | 'quincenal',
           basico: basico.basico,
@@ -337,15 +448,31 @@ Deno.serve(async (req) => {
           horasTrabajadas: asistencia.horasTrabajadas,
           faltasInjustificadas: asistencia.faltasInjustificadas,
         })
-      : 0
+      : { monto: 0, horasLiquidadas: 0, valorHora: 0 }
+    const { unidadBasico, baseBasico } = basico
+      ? unidadYBaseBasico(
+          basico.modalidad as 'hora' | 'mensual' | 'quincenal', basico.basico, tipoPeriodo,
+          resultadoBasico.horasLiquidadas, resultadoBasico.valorHora, asistencia.faltasInjustificadas, false
+        )
+      : { unidadBasico: 0, baseBasico: 0 }
     // Solo conceptos del convenio del legajo (evita duplicar plantilla
-    // global + copia de empresa tras clonar_convenio) y de su categoría.
-    const conceptosLegajo = filtrarPorCategoria(
-      conceptosMotor.filter((c) => c.convenioId === legajo.convenio_id),
-      nombreCategoria
+    // global + copia de empresa tras clonar_convenio) y de su categoría —
+    // salvo los `asignacion: 'legajo'` (adicionales por empleado, migración
+    // 0040), que ignoran la categoría y solo entran si este legajo puntual
+    // los tiene asignados vigentes (filtrarAsignados).
+    const asignadosDeLegajo = new Set(adicionalesPorLegajo.get(legajo.id)?.keys() ?? [])
+    const conceptosLegajo = aplicarOverridesAdicionales(
+      filtrarAsignados(
+        conceptosMotor.filter((c) => c.convenioId === legajo.convenio_id),
+        nombreCategoria, asignadosDeLegajo
+      ),
+      adicionalesPorLegajo.get(legajo.id) ?? new Map()
     )
 
-    return { basicoPeriodo, basicoConvenio: basico?.basico ?? 0, noRem: noRem ?? 0, conceptosLegajo }
+    return {
+      basicoPeriodo: resultadoBasico.monto, basicoConvenio: basico?.basico ?? 0, noRem: noRem ?? 0, conceptosLegajo,
+      horasLiquidadas, unidadBasico, baseBasico,
+    }
   }
 
   const idsAProcesar = personalAProcesar.map((p: any) => p.id)
@@ -355,7 +482,23 @@ Deno.serve(async (req) => {
     const [{ data: f, error: eF }, { data: a, error: eA }] = await Promise.all([
       supabase.from('nom_v_horas_dia').select('*').in('personal_id', lote)
         .gte('timestamp', periodo.fecha_desde).lte('timestamp', periodo.fecha_hasta),
-      supabase.from('nom_v_ausencias').select('*').in('personal_id', lote).eq('estado', 'aprobada'),
+      // OJO: no filtrar con .eq('estado', 'aprobada') a secas. Del lado de
+      // Presencio (fichaobra/src/store/appStore.js), el alta normal de una
+      // ausencia históricamente podía guardar la fila sin `estado` (el
+      // cliente compensaba mostrándola como "aprobada" via
+      // ausenciaFromDB, pero en la base quedaba en NULL o en lo que sea
+      // que tuviera la columna en ese momento) — un .eq estricto las
+      // descartaba en silencio y esos días caían todos en
+      // faltasInjustificadas. Se admite explícitamente NULL como
+      // "aprobada" (comportamiento histórico) y se excluye
+      // expresamente pendiente/rechazada. Se acota además por rango de
+      // fechas y por empresa (antes traía TODO el historial de la
+      // persona, de cualquier empresa).
+      supabase.from('nom_v_ausencias').select('*').in('personal_id', lote)
+        .eq('empresa_id', periodo.empresa_id)
+        .or('estado.is.null,estado.eq.aprobada')
+        .lte('fecha_desde', periodo.fecha_hasta)
+        .gte('fecha_hasta', periodo.fecha_desde),
     ])
     if (eF || eA) {
       const e = eF || eA
@@ -387,6 +530,11 @@ Deno.serve(async (req) => {
       continue
     }
 
+    // Override de Recursio: si el legajo tiene su propia fecha_ingreso
+    // cargada, prevalece sobre la de Presencio (persona.fecha_ingreso) —
+    // ver docs/superpowers/plans/2026-07-31-correcciones-legajos-liquidacion.md.
+    const fechaIngresoEfectiva = legajo?.fecha_ingreso || persona.fecha_ingreso || null
+
     const fichajes = fichajesPorPersona.get(persona.id) ?? []
     const ausencias = ausenciasPorPersona.get(persona.id) ?? []
 
@@ -394,19 +542,35 @@ Deno.serve(async (req) => {
       (fichajes || []).map((f: any) => ({ tipo: f.tipo, timestamp: f.timestamp })),
       (ausencias || []).map((a: any) => ({ fecha_desde: a.fecha_desde, fecha_hasta: a.fecha_hasta })),
       periodo.fecha_desde,
-      periodo.fecha_hasta
+      periodo.fecha_hasta,
+      { fechaIngreso: fechaIngresoEfectiva, fechaBaja: legajo?.fecha_baja }
     )
     const asistencia = calcularAsistencia(dias, 15, legajo.jornada === 'parcial' ? 4 : 8)
 
+    // Sin ningún fichaje y sin ningún día cubierto por ausencia aprobada:
+    // no liquidar en $0 silenciosamente, listar aparte.
+    const diasConAusenciaAprobada = dias.filter((d) => d.ausenciaAprobada).length
+    if (asistencia.horasTrabajadas === 0 && diasConAusenciaAprobada === 0) {
+      sinHoras.push({ personal_id: persona.id, nombre: persona.nombre })
+      continue
+    }
+
     // basico_convenio se mantiene por compatibilidad con fórmulas viejas
-    // que aún lo referencien directamente.
-    const { basicoPeriodo, basicoConvenio, noRem, conceptosLegajo } =
+    // que aún lo referencien directamente. unidad_basico/base_basico son las
+    // variables genéricas que el concepto "básico" usa en recibo.
+    // unidadFormula/baseFormula (migración 0039) para que BASE × UNIDAD =
+    // MONTO sea verificable en el PDF, para cualquier modalidad — ver
+    // unidadYBaseBasico más arriba.
+    const { basicoPeriodo, basicoConvenio, noRem, conceptosLegajo, horasLiquidadas, unidadBasico, baseBasico } =
       await resolverBasicoYConceptos(legajo, asistencia, persona.id)
 
     const variablesBase = {
       basico_convenio: basicoConvenio,
       basico_periodo: basicoPeriodo,
+      unidad_basico: unidadBasico,
+      base_basico: baseBasico,
       horas_trabajadas: asistencia.horasTrabajadas,
+      horas_liquidadas: horasLiquidadas,
       tardanzas: asistencia.tardanzas,
       faltas_injustificadas: asistencia.faltasInjustificadas,
       faltas_justificadas: asistencia.faltasJustificadas,
@@ -438,7 +602,10 @@ Deno.serve(async (req) => {
       resultado.neto = resultado.bruto - resultado.totalDescuentos
     }
 
-    resultados.push({ personalId: persona.id, resultado, asistencia })
+    // horasLiquidadas se guarda junto a la asistencia (dentro de
+    // detalle_horas) para que el CSV y la grilla de LiquidacionPage.jsx
+    // puedan mostrarla — ver plan 2026-07-29 §2.
+    resultados.push({ personalId: persona.id, resultado, asistencia: { ...asistencia, horasLiquidadas } })
   }
 
   // Idempotencia: el `upsert` con `onConflict: 'periodo_id,personal_id'`
@@ -499,14 +666,14 @@ Deno.serve(async (req) => {
   // false para siempre y el cliente reinvoca hasta agotar sus reintentos
   // sin que nada cambie nunca (bug de performance del 28/07/2026).
   const procesadosFinal =
-    (totalPeriodo - personalAProcesar.length) + resultados.length + omitidos.length
+    (totalPeriodo - personalAProcesar.length) + resultados.length + omitidos.length + sinHoras.length
   const completo = procesadosFinal >= totalFinal
   await supabase.from('nom_periodos').update({
     calculo_estado: completo ? 'completo' : 'calculando',
     calculo_procesados: procesadosFinal,
   }).eq('id', periodoId)
 
-  return new Response(JSON.stringify({ liquidadas: resultados.length, omitidos, advertencias, completo, procesados: procesadosFinal, total: totalFinal }), {
+  return new Response(JSON.stringify({ liquidadas: resultados.length, omitidos, sinHoras, advertencias, completo, procesados: procesadosFinal, total: totalFinal }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
   } catch (err) {
@@ -804,14 +971,17 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
       continue
     }
 
-    const antiguedadAnios = calcularAntiguedadAnios(persona.fecha_ingreso, legajo.antiguedad_reconocida, periodo.fecha_hasta)
+    // Mismo override que en el flujo mensual: legajo.fecha_ingreso (Recursio)
+    // prevalece sobre persona.fecha_ingreso (Presencio).
+    const fechaIngresoEfectiva = legajo?.fecha_ingreso || persona.fecha_ingreso || null
+    const antiguedadAnios = calcularAntiguedadAnios(fechaIngresoEfectiva, legajo.antiguedad_reconocida, periodo.fecha_hasta)
 
     if (periodo.tipo === 'sac' || periodo.tipo === 'sac_1' || periodo.tipo === 'sac_2') {
       const brutos = await brutosDelSemestre(persona.id, idsPeriodosSemestre)
       if (brutos.length === 0) {
         advertencias.push({ personal_id: persona.id, mensaje: 'sin liquidaciones mensuales/quincenales en el semestre: SAC calculado en $0' })
       }
-      const diasTrabajados = diasTrabajadosEnRango(persona.fecha_ingreso, legajo.fecha_baja, semestre.desde, semestre.hasta)
+      const diasTrabajados = diasTrabajadosEnRango(fechaIngresoEfectiva, legajo.fecha_baja, semestre.desde, semestre.hasta)
       const monto = insumos.regimen === '22250'
         ? calcularSACProporcionalUocra(brutos.length ? Math.max(...brutos) : 0, diasTrabajados, diasSemestre)
         : calcularSACLct({ mejoresBrutosPorMes: brutos, diasTrabajadosSemestre: diasTrabajados, diasSemestre })
@@ -867,9 +1037,9 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
     const idsSemestreFinal = (periodosSemestreFinal || []).map((p: any) => p.id)
     const brutos = await brutosDelSemestre(persona.id, idsSemestreFinal)
     const mejorBruto = brutos.length ? Math.max(...brutos) : 0
-    const diasTrabajadosSemestreFinal = diasTrabajadosEnRango(persona.fecha_ingreso, fechaBaja, semestreFinal.desde, semestreFinal.hasta)
+    const diasTrabajadosSemestreFinal = diasTrabajadosEnRango(fechaIngresoEfectiva, fechaBaja, semestreFinal.desde, semestreFinal.hasta)
     const anioBaja = Number(fechaBaja.slice(0, 4))
-    const diasTrabajadosAnioFinal = diasTrabajadosEnRango(persona.fecha_ingreso, fechaBaja, `${anioBaja}-01-01`, `${anioBaja}-12-31`)
+    const diasTrabajadosAnioFinal = diasTrabajadosEnRango(fechaIngresoEfectiva, fechaBaja, `${anioBaja}-01-01`, `${anioBaja}-12-31`)
     // Días trabajados del mes de la baja: del día 1 al día de fecha_baja
     // inclusive (ver simplificación #1: no descuenta ausencias sin goce
     // dentro de ese tramo del mes).

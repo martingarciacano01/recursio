@@ -52,15 +52,18 @@ export const useLiquidacionStore = create((set) => ({
   // Legajos que la Edge Function saltea (incompletos) y advertencias de
   // escala faltante por persona — nada de $0 silenciosos (Fase 5A Task 2).
   omitidos: [], advertencias: [],
+  // Personal sin fichajes ni ausencias aprobadas en el período: no se
+  // liquida en $0 silenciosamente, se lista aparte (Fase 5A Task 2).
+  sinHoras: [],
 
   calcularPeriodo: async (periodoId) => {
     set({ calculando: true, error: null })
     const { data, error } = await invocarConReintento({ periodoId })
     if (error) {
-      set({ error: error.message, calculando: false, omitidos: [], advertencias: [] })
+      set({ error: error.message, calculando: false, omitidos: [], advertencias: [], sinHoras: [] })
       return { ok: false, error: error.message }
     }
-    set({ calculando: false, omitidos: data?.omitidos ?? [], advertencias: data?.advertencias ?? [] })
+    set({ calculando: false, omitidos: data?.omitidos ?? [], advertencias: data?.advertencias ?? [], sinHoras: data?.sinHoras ?? [] })
     return { ok: true, data }
   },
 
