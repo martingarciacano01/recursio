@@ -9,12 +9,17 @@ import DocumentosLegajo from '../components/legajo/DocumentosLegajo'
 import EditorDatosLegajo from '../components/legajo/EditorDatosLegajo'
 import TabFamiliares from '../components/legajo/TabFamiliares'
 import TabSanciones from '../components/legajo/TabSanciones'
+import TabAdicionalesLegajo from '../components/legajo/TabAdicionalesLegajo'
 import TabAusencias from '../components/legajo/TabAusencias'
+import ChecklistAlta from '../components/legajo/ChecklistAlta'
+import AsistenteAlta from '../components/legajo/AsistenteAlta'
+import { useDocumentosStore } from '../store/documentosStore'
+import { pasosGuiaAlta, resumenGuia } from '../utils/guiaAlta'
 import { generarLegajoPdf } from '../utils/legajoPdf'
 import { etiquetaPeriodo } from '../utils/etiquetaPeriodo'
-import { generarYDescargarRecibo } from '../utils/emitirReciboLegajo'
+import { generarYDescargarRecibo, cargarDatosEmpresa } from '../utils/emitirReciboLegajo'
 
-const PESTANAS = ['Datos', 'Familiares', 'Documentación', 'Sanciones', 'Ausencias', 'Liquidaciones']
+const PESTANAS = ['Datos', 'Familiares', 'Documentación', 'Sanciones', 'Adicionales', 'Ausencias', 'Liquidaciones']
 
 export default function FichaLegajoPage() {
   const { personalId } = useParams()
@@ -38,6 +43,15 @@ export default function FichaLegajoPage() {
   const [errorFinal, setErrorFinal] = useState('')
   const [pestana, setPestana] = useState(PESTANAS[0])
   const [descargandoRecibo, setDescargandoRecibo] = useState(null)
+  const [asistenteAbierto, setAsistenteAbierto] = useState(false)
+
+  // La guía de alta necesita saber qué documentación exige la empresa y cuál
+  // ya está cargada. Se lee del mismo store que usa la pestaña Documentación,
+  // así que no agrega consultas cuando esa pestaña ya se visitó.
+  const requeridos = useDocumentosStore((s) => s.requeridos)
+  const documentos = useDocumentosStore((s) => s.documentos)
+  const cargarRequeridos = useDocumentosStore((s) => s.cargarRequeridos)
+  const cargarDocumentos = useDocumentosStore((s) => s.cargarDocumentos)
 
   useEffect(() => {
     // Reset explícito: sin esto, al navegar de una ficha a otra la página
@@ -63,6 +77,8 @@ export default function FichaLegajoPage() {
     if (empresaActiva?.id) cargarLegajos(empresaActiva.id)
     cargarFamiliares(personalId)
     cargarSanciones(personalId)
+    cargarDocumentos(personalId)
+    if (empresaActiva?.id) cargarRequeridos(empresaActiva.id)
     supabase.from('nom_v_personal').select('*').eq('id', personalId).single().then(({ data, error }) => {
       if (cancelado) return
       if (error) setErrorPersona(error.message)
@@ -85,11 +101,18 @@ export default function FichaLegajoPage() {
   const legajo = legajos.find((l) => l.personalId === personalId) || null
   const fmtMonto = (n) => (Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-  // No se pasan `documentos`: DocumentosLegajo carga su lista internamente y no la expone al padre (evitar refactor grande).
-  const handleExportar = () => {
+  // Bug arreglado (plan 2026-07-29 §6): antes no se pasaban `documentos` (la
+  // sección "2. Documentación" del PDF decía siempre "sin documentos
+  // cargados" aunque la persona tuviera todo subido — `documentos` ya está
+  // disponible en este componente vía useDocumentosStore, solo faltaba
+  // pasarlo) ni `empresa` (el legajo nunca tuvo logo ni datos fiscales;
+  // se reusa cargarDatosEmpresa, la misma función que ya resuelve esos
+  // datos para el recibo, para no duplicar el fetching).
+  const handleExportar = async () => {
     setErrorExport('')
     try {
-      const doc = generarLegajoPdf({ persona, legajo, familiares, sanciones, ausencias })
+      const empresaDatos = empresaActiva?.id ? await cargarDatosEmpresa(empresaActiva.id) : null
+      const doc = await generarLegajoPdf({ empresa: empresaDatos, persona, legajo, familiares, sanciones, ausencias, documentos })
       const idArchivo = String(persona.dni || persona.id).replace(/[^\w.-]/g, '_')
       doc.save(`legajo-${idArchivo}.pdf`)
     } catch (e) {
@@ -131,6 +154,9 @@ export default function FichaLegajoPage() {
     if (empresaActiva?.id) cargarLegajos(empresaActiva.id)
   }
 
+  const pasosGuia = pasosGuiaAlta({ legajo, requeridos, documentos, familiares })
+  const resumen = resumenGuia(pasosGuia)
+
   if (cargandoPersona) return <div className="page">Cargando…</div>
   if (errorPersona) return <div className="page"><div className="card" style={{ color: 'var(--danger)' }}>Error al cargar la persona: {errorPersona}</div></div>
   if (!persona) return <div className="page"><div className="card">No se encontró el legajo solicitado.</div></div>
@@ -159,20 +185,65 @@ export default function FichaLegajoPage() {
         </div>
       </div>
 
+      {/* Aviso de alta en curso: no abre el asistente solo — se ofrece, para
+          no interrumpir a quien entró a ver otra cosa. */}
+      {!resumen.completo && !legajo?.fechaBaja && (
+        <div className="card card-compacta aviso-alta" style={{ marginBottom: '1rem' }}>
+          <div>
+            <strong style={{ fontSize: '0.92rem' }}>Alta sin terminar</strong>
+            <p className="texto-secundario" style={{ fontSize: '0.85rem' }}>
+              Faltan {resumen.pendientesObligatorios} dato(s) obligatorio(s): {resumen.nombresPendientes.slice(0, 3).join(', ')}
+              {resumen.nombresPendientes.length > 3 ? ` y ${resumen.nombresPendientes.length - 3} más` : ''}.
+            </p>
+          </div>
+          <button className="btn btn-primary btn-sm" onClick={() => setAsistenteAbierto(true)}>
+            Completar paso a paso
+          </button>
+        </div>
+      )}
+
+      {asistenteAbierto && (
+        <AsistenteAlta
+          pasos={pasosGuia}
+          legajo={legajo}
+          personalId={personalId}
+          empresaId={empresaActiva?.id}
+          onCerrar={() => setAsistenteAbierto(false)}
+        />
+      )}
+
       {errorLegajo && <div className="card" style={{ color: 'var(--danger)', marginBottom: '1rem' }}>Error al cargar legajo/familiares/sanciones: {errorLegajo}</div>}
       {errorAusencias && <div className="card" style={{ color: 'var(--danger)', marginBottom: '1rem' }}>Error al cargar ausencias: {errorAusencias}</div>}
       {errorExport && <div className="card" style={{ color: 'var(--danger)', marginBottom: '1rem' }}>{errorExport}</div>}
 
-      <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+      <div className="tabs" role="tablist" aria-label="Secciones del legajo">
         {PESTANAS.map((p) => (
-          <button key={p} className={`btn btn-sm ${pestana === p ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setPestana(p)}>
+          <button
+            key={p}
+            role="tab"
+            aria-selected={pestana === p}
+            className={`tab${pestana === p ? ' tab-activa' : ''}`}
+            onClick={() => setPestana(p)}
+          >
             {p === 'Sanciones' ? `Sanciones (${sanciones.length})` : p}
           </button>
         ))}
       </div>
 
+      {/* En "Datos" el checklist queda al costado como control permanente:
+          la documentación vence y los datos cambian, así que sirve más allá
+          del alta inicial. */}
       {pestana === 'Datos' && (
-        <EditorDatosLegajo legajo={legajo} personalId={personalId} empresaId={empresaActiva?.id} />
+        <div className="ficha-columnas">
+          <div className="card">
+            <EditorDatosLegajo legajo={legajo} personalId={personalId} empresaId={empresaActiva?.id} />
+          </div>
+          <ChecklistAlta
+            pasos={pasosGuia}
+            onIrA={(destino) => PESTANAS.includes(destino) && setPestana(destino)}
+            onAbrirAsistente={() => setAsistenteAbierto(true)}
+          />
+        </div>
       )}
 
       {pestana === 'Familiares' && (
@@ -187,8 +258,12 @@ export default function FichaLegajoPage() {
         <TabSanciones personalId={personalId} empresaId={empresaActiva?.id} />
       )}
 
+      {pestana === 'Adicionales' && (
+        <TabAdicionalesLegajo legajo={legajo} empresaId={empresaActiva?.id} />
+      )}
+
       {pestana === 'Ausencias' && (
-        <TabAusencias ausencias={ausencias} />
+        <TabAusencias ausencias={ausencias} personalId={personalId} legajo={legajo} />
       )}
 
       {pestana === 'Liquidaciones' && (

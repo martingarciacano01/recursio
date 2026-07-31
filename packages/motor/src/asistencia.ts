@@ -86,7 +86,8 @@ export function construirDiasPeriodo(
   fichajes: FichajeCrudo[],
   ausencias: AusenciaRango[],
   fechaDesde: string,
-  fechaHasta: string
+  fechaHasta: string,
+  opciones: { fechaIngreso?: string | null; fechaBaja?: string | null } = {}
 ): DiaAsistencia[] {
   const porFecha = new Map<string, { entrada: string | null; salida: string | null }>()
   for (const f of fichajes) {
@@ -103,8 +104,15 @@ export function construirDiasPeriodo(
   const fin = new Date(fechaHasta + 'T00:00:00Z')
   while (d <= fin) {
     const fecha = d.toISOString().slice(0, 10)
+    // Fuera de la relación laboral (antes de ingresar o después de la
+    // baja): no es "falta", es que la persona todavía no era/ya no era
+    // personal de la empresa — sin esto, un alta a mitad de mes computaba
+    // faltas injustificadas por los días previos al ingreso.
+    const dentroDeRelacionLaboral =
+      (!opciones.fechaIngreso || fecha >= opciones.fechaIngreso) &&
+      (!opciones.fechaBaja || fecha <= opciones.fechaBaja)
     const dow = d.getUTCDay() // 0 = domingo, 6 = sábado
-    const laborable = dow >= 1 && dow <= 5
+    const laborable = dentroDeRelacionLaboral && dow >= 1 && dow <= 5
     const reg = porFecha.get(fecha)
     const horas = reg?.entrada && reg?.salida
       ? Math.max(0, (aMinutos(reg.salida) - aMinutos(reg.entrada)) / 60)
