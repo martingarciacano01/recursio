@@ -18,7 +18,7 @@ export default function LegajosPage() {
   const [error, setError] = useState('')
   const [total, setTotal] = useState(0)
   const [busqueda, setBusqueda] = useState('')
-  const [filtroEstado, setFiltroEstado] = useState('todos')
+  const [filtroEstado, setFiltroEstado] = useState('activo')
   const { rango, siguientePagina, reset, hayMasPaginas } = usePaginado(100)
 
   // Al cambiar de empresa hay que volver a la página 0: si no, se
