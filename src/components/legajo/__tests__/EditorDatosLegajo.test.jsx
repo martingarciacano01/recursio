@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import EditorDatosLegajo from '../EditorDatosLegajo'
+import { supabase } from '../../../lib/supabase'
 
 const guardarLegajoMock = vi.fn().mockResolvedValue({ ok: true })
 vi.mock('../../../store/legajoStore', () => ({
@@ -113,6 +114,31 @@ describe('EditorDatosLegajo', () => {
       expect(screen.getByText('Categoría: Ayudante')).toBeInTheDocument()
     })
     expect(screen.queryByText(/cat-1/)).not.toBeInTheDocument()
+  })
+
+  it('muestra "Cargando…" en vez del UUID crudo mientras resuelve el nombre del convenio', async () => {
+    let resolverConvenios
+    supabase.from.mockImplementation((tabla) => {
+      if (tabla === 'nom_convenios') {
+        return {
+          select: vi.fn().mockReturnThis(),
+          order: vi.fn(() => new Promise((resolve) => { resolverConvenios = resolve })),
+        }
+      }
+      return {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        order: vi.fn().mockResolvedValue({ data: [], error: null }),
+      }
+    })
+
+    render(<EditorDatosLegajo legajo={{ id: 'l1', convenioId: 'e1', categoriaId: null }} personalId="p1" empresaId="emp-1" />)
+
+    expect(screen.getByText(/Convenio: Cargando…/)).toBeInTheDocument()
+    expect(screen.queryByText(/Convenio: e1/)).not.toBeInTheDocument()
+
+    resolverConvenios({ data: [{ id: 'e1', nombre: 'UOCRA', empresa_id: 'emp-1' }], error: null })
+    await waitFor(() => expect(screen.getByText(/Convenio: UOCRA/)).toBeInTheDocument())
   })
 
   it('la vista de solo lectura muestra el sueldo convenido de un legajo fuera de convenio', async () => {

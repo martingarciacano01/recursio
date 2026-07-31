@@ -7,9 +7,12 @@ import { filtrarConveniosVisibles, categoriasVigentes } from '../../utils/conven
 // para completar CUIL/CBU/convenio/categoría (Fase 1 solo construyó la
 // vista de lectura), y sin esos 4 datos la Edge Function liquidar-periodo
 // salta a la persona por "legajo incompleto" (Task 17).
-export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
+// `iniciarEditando`: el asistente de alta (AsistenteAlta.jsx) muestra este
+// mismo editor, pero ahí no tiene sentido arrancar en modo lectura con un
+// botón "Editar" de por medio.
+export default function EditorDatosLegajo({ legajo, personalId, empresaId, iniciarEditando = false }) {
   const guardarLegajo = useLegajoStore((s) => s.guardarLegajo)
-  const [editando, setEditando] = useState(false)
+  const [editando, setEditando] = useState(iniciarEditando)
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState('')
 
@@ -20,6 +23,8 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
   // filtradas, solo para los <select> de edición.
   const [todosConvenios, setTodosConvenios] = useState([])
   const [todasCategorias, setTodasCategorias] = useState([])
+  const [cargandoConvenios, setCargandoConvenios] = useState(true)
+  const [cargandoCategorias, setCargandoCategorias] = useState(false)
 
   const [form, setForm] = useState({
     cuil: legajo?.cuil || '',
@@ -27,6 +32,7 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
     banco: legajo?.banco || '',
     obraSocial: legajo?.obraSocial || '',
     jornada: legajo?.jornada || 'completa',
+    fechaIngreso: legajo?.fechaIngreso || '',
     convenioId: legajo?.convenioId || '',
     categoriaId: legajo?.categoriaId || '',
     fueraConvenio: legajo?.fueraConvenio || false,
@@ -51,6 +57,7 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
       banco: legajo.banco || '',
       obraSocial: legajo.obraSocial || '',
       jornada: legajo.jornada || 'completa',
+      fechaIngreso: legajo.fechaIngreso || '',
       convenioId: legajo.convenioId || '',
       categoriaId: legajo.categoriaId || '',
       fueraConvenio: legajo.fueraConvenio || false,
@@ -87,8 +94,9 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
     // clon de la empresa pisa al global homónimo en el <select>
     // (filtrarConveniosVisibles); esta lista sin filtrar solo se usa para
     // resolver el nombre en la vista de solo lectura.
+    setCargandoConvenios(true)
     supabase.from('nom_convenios').select('id, nombre, empresa_id').order('nombre')
-      .then(({ data }) => setTodosConvenios(data || []))
+      .then(({ data }) => { setTodosConvenios(data || []); setCargandoConvenios(false) })
   }, [])
 
   // Se prueba primero el convenio del formulario y, si está vacío (primer
@@ -96,9 +104,10 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
   // solo lectura resuelve el nombre de la categoría sin depender del resync.
   const convenioParaCategorias = form.convenioId || legajo?.convenioId || ''
   useEffect(() => {
-    if (!convenioParaCategorias) { setTodasCategorias([]); return }
+    if (!convenioParaCategorias) { setTodasCategorias([]); setCargandoCategorias(false); return }
+    setCargandoCategorias(true)
     supabase.from('nom_categorias').select('id, nombre, vigencia_desde').eq('convenio_id', convenioParaCategorias).order('nombre')
-      .then(({ data }) => setTodasCategorias(data || []))
+      .then(({ data }) => { setTodasCategorias(data || []); setCargandoCategorias(false) })
   }, [convenioParaCategorias])
 
   const convenios = filtrarConveniosVisibles(todosConvenios)
@@ -124,6 +133,7 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
         <p>Banco: {legajo?.banco || '—'}</p>
         <p>Obra social: {legajo?.obraSocial || '—'}</p>
         <p>Jornada: {legajo?.jornada || '—'}</p>
+        <p>Fecha de ingreso: {legajo?.fechaIngreso || '—'}</p>
         {legajo?.fueraConvenio ? (
           <>
             <p>Convenio: Fuera de convenio</p>
@@ -133,8 +143,8 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
           </>
         ) : (
           <>
-            <p>Convenio: {todosConvenios.find((c) => c.id === legajo?.convenioId)?.nombre || (legajo?.convenioId ? legajo.convenioId : '—')}</p>
-            <p>Categoría: {todasCategorias.find((c) => c.id === legajo?.categoriaId)?.nombre || (legajo?.categoriaId ? legajo.categoriaId : '—')}</p>
+            <p>Convenio: {cargandoConvenios ? 'Cargando…' : (todosConvenios.find((c) => c.id === legajo?.convenioId)?.nombre || (legajo?.convenioId ? 'Convenio no encontrado' : '—'))}</p>
+            <p>Categoría: {(legajo?.convenioId && cargandoCategorias) ? 'Cargando…' : (todasCategorias.find((c) => c.id === legajo?.categoriaId)?.nombre || (legajo?.categoriaId ? 'Categoría no encontrada' : '—'))}</p>
           </>
         )}
         <p>Localidad: {legajo?.localidad || '—'}</p>
@@ -173,6 +183,17 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId }) {
           <option value="completa">Completa</option>
           <option value="parcial">Parcial</option>
         </select>
+      </div>
+      <div>
+        <label htmlFor="fecha-ingreso-input" style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Fecha de ingreso</label>
+        <input
+          id="fecha-ingreso-input"
+          aria-label="Fecha de ingreso"
+          className="input"
+          type="date"
+          value={form.fechaIngreso}
+          onChange={(e) => setForm((f) => ({ ...f, fechaIngreso: e.target.value }))}
+        />
       </div>
       <div>
         <label htmlFor="fuera-convenio-checkbox" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem' }}>
