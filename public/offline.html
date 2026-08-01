@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Recursio — sin conexión</title>
+    <style>
+      :root { color-scheme: dark light; }
+      body {
+        margin: 0; min-height: 100vh;
+        display: flex; align-items: center; justify-content: center;
+        background: #0d1117; color: #e6edf3;
+        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+        text-align: center; padding: 2rem;
+      }
+      @media (prefers-color-scheme: light) {
+        body { background: #f3f5f8; color: #0f1b2d; }
+      }
+      img { width: 72px; height: auto; margin-bottom: 1.5rem; }
+      h1 { font-size: 1.25rem; margin: 0 0 0.5rem; }
+      p { margin: 0 0 1.5rem; opacity: 0.75; font-size: 0.95rem; max-width: 34ch; }
+      button {
+        border: none; border-radius: 10px; padding: 0.7rem 1.5rem;
+        background: #c8a84b; color: #0f2238; font-weight: 700; font-size: 0.95rem;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div>
+      <img src="/icons/icon-192.png" alt="Recursio" />
+      <h1>Sin conexión</h1>
+      <p>Recursio necesita internet para mostrar liquidaciones y legajos actualizados. Volvé a intentar cuando recuperes la señal.</p>
+      <button onclick="location.reload()">Reintentar</button>
+    </div>
+  </body>
+</html>
