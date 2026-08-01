@@ -1,10 +1,33 @@
 <!doctype html>
-<html lang="en">
+<html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>recursio_tmp</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Recursio — Gestión de nómina</title>
+    <meta name="description" content="Liquidación de sueldos, legajos y aprobaciones para el ecosistema Presencio." />
+
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0d1117" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Recursio" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png" />
+
+    <script>
+      // Aplica el tema guardado antes del primer pintado para evitar el
+      // "flash" blanco al abrir la app (sobre todo en modo standalone).
+      (function () {
+        try {
+          var pref = localStorage.getItem('recursio:tema') || 'auto'
+          var oscuro = pref === 'oscuro' || (pref === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          document.documentElement.setAttribute('data-theme', oscuro ? 'oscuro' : 'claro')
+          document.documentElement.style.colorScheme = oscuro ? 'dark' : 'light'
+        } catch (e) { /* modo privado */ }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
