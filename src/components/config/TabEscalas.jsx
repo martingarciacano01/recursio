@@ -21,7 +21,7 @@ export default function TabEscalas({ convenio, soloLectura }) {
         conModalidad
         onGuardar={async (filas, fecha) => {
           const r = await guardarVigencias(convenio.id, filas, fecha)
-          if (r.ok) await cargarEscala(convenio.id)
+          if (r.ok) await cargarEscala(convenio.id, { forzar: true })
           return r
         }}
       />

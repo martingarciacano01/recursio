@@ -22,8 +22,11 @@ export function validarYGenerarFormula(config) {
 //  concepto: existente (con config) o null para alta
 //  categorias: nombres disponibles del convenio (para el multiselect; null = ocultar)
 //  conMonto: permitir modo nominal (Adicionales sí, Aportes no)
-//  onGuardar({ config, formula, categorias, codigoRecibo }) → { ok, error? }
-export default function FormularioConcepto({ concepto, categorias, conMonto, onGuardar }) {
+//  conAsignacionPorLegajo: mostrar la opción "empleados asignados" (adicionales
+//    por legajo, migración 0040) — solo tiene sentido donde ya se ofrece
+//    elegir categorías (TabAdicionales.jsx)
+//  onGuardar({ config, formula, categorias, codigoRecibo, asignacion }) → { ok, error? }
+export default function FormularioConcepto({ concepto, categorias, conMonto, conAsignacionPorLegajo, onGuardar }) {
   const cfg = concepto?.config || {}
   const [modo, setModo] = useState(cfg.modo || 'porcentaje')
   const [porcentaje, setPorcentaje] = useState(cfg.porcentaje ?? '')
@@ -34,6 +37,10 @@ export default function FormularioConcepto({ concepto, categorias, conMonto, onG
   const [codigoRecibo, setCodigoRecibo] = useState(concepto?.codigoRecibo || '')
   const [grupoRecibo, setGrupoRecibo] = useState(cfg.recibo?.grupo || '')
   const [detalleRecibo, setDetalleRecibo] = useState(cfg.recibo?.detalle || '')
+  // "Aplica a": categoria+ninguna marcada = todas las categorías; categoria+
+  // algunas marcadas = categorías elegidas; legajo = empleados asignados
+  // (ignora `categorias` por completo — ver filtrarAsignados en motor.ts).
+  const [asignacion, setAsignacion] = useState(concepto?.asignacion || 'categoria')
   const [error, setError] = useState(null)
   const [guardando, setGuardando] = useState(false)
 
@@ -46,8 +53,10 @@ export default function FormularioConcepto({ concepto, categorias, conMonto, onG
     if (!v.ok) { setError(v.error); return }
     setGuardando(true); setError(null)
     const r = await onGuardar({
-      config, formula: v.formula, categorias: seleccion.length > 0 ? seleccion : null,
+      config, formula: v.formula,
+      categorias: asignacion === 'legajo' ? null : (seleccion.length > 0 ? seleccion : null),
       codigoRecibo: codigoRecibo.trim() || null,
+      asignacion,
     })
     setGuardando(false)
     if (!r?.ok) setError(r?.error || 'No se pudo guardar')
@@ -80,7 +89,17 @@ export default function FormularioConcepto({ concepto, categorias, conMonto, onG
           </label>
         </div>
       )}
-      {categorias && (
+      {categorias && conAsignacionPorLegajo && (
+        <div style={{ marginTop: 8 }}>
+          <label htmlFor="asignacion" style={{ display: 'block', color: 'var(--text-secondary)' }}>Aplica a</label>
+          <select id="asignacion" className="input" style={{ width: 260 }} value={asignacion}
+            onChange={(e) => setAsignacion(e.target.value)}>
+            <option value="categoria">Todas las categorías / categorías elegidas</option>
+            <option value="legajo">Empleados asignados (en la ficha del legajo)</option>
+          </select>
+        </div>
+      )}
+      {categorias && asignacion !== 'legajo' && (
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
           <span style={{ color: 'var(--text-secondary)' }}>Aplica a:</span>
           {categorias.map((n) => (
@@ -92,6 +111,12 @@ export default function FormularioConcepto({ concepto, categorias, conMonto, onG
           ))}
           <span style={{ color: 'var(--text-secondary)' }}>(ninguna marcada = todas)</span>
         </div>
+      )}
+      {categorias && conAsignacionPorLegajo && asignacion === 'legajo' && (
+        <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: 8 }}>
+          Este adicional no se filtra por categoría: se asigna persona por persona
+          desde la pestaña "Adicionales" de la ficha del legajo.
+        </p>
       )}
       <div style={{ marginTop: 8 }}>
         <label htmlFor="grupoRecibo" style={{ display: 'block', color: 'var(--text-secondary)' }}>Sección del recibo</label>

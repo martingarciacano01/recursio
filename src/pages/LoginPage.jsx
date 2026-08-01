@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
-import { Landmark, Lock, Mail, AlertCircle, LogIn } from 'lucide-react'
+import { Lock, Mail, AlertCircle, LogIn } from 'lucide-react'
+import Logo from '../components/Logo'
 
 // Layout calcado del LoginPage de Presencio (fichaobra/src/pages/LoginPage.jsx),
-// con logo/marca de Recursio como placeholder hasta definir branding final.
+// ya con el isologo definitivo de Recursio (cambia según tema claro/oscuro).
 export default function LoginPage() {
   const login = useAuthStore((s) => s.login)
   const navigate = useNavigate()
@@ -30,18 +31,8 @@ export default function LoginPage() {
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
       <div style={{ width: '100%', maxWidth: '420px' }} className="animate-fade">
-        <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '12px', marginBottom: '1rem' }}>
-            <div style={{ width: 48, height: 48, borderRadius: 12, background: 'linear-gradient(135deg, var(--brand-primary), var(--brand-primary-light))', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 16px rgba(26,58,92,0.5)' }}>
-              <Landmark size={24} color="var(--brand-secondary)" strokeWidth={2} />
-            </div>
-            <div style={{ textAlign: 'left' }}>
-              <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: '1.5rem', letterSpacing: '-0.02em' }}>
-                Recurs<span style={{ color: 'var(--brand-secondary)' }}>io</span>
-              </div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Nómina Presencio</div>
-            </div>
-          </div>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '2.25rem' }}>
+          <Logo alto={52} />
         </div>
 
         <div className="card" style={{ borderColor: 'var(--border-strong)' }}>
@@ -83,7 +74,7 @@ export default function LoginPage() {
                 <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />{error}
               </div>
             )}
-            <button className="btn btn-primary btn-lg" type="submit" disabled={loading} style={{ marginTop: '0.5rem' }}>
+            <button className="btn btn-primary btn-lg btn-bloque-centro" type="submit" disabled={loading} style={{ marginTop: '0.5rem' }}>
               {loading ? 'Ingresando…' : <><LogIn size={16} /> Ingresar</>}
             </button>
           </form>

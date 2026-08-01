@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useConceptosStore } from '../../store/conceptosStore'
 import EditorReglas from './EditorReglas'
 import FormularioConcepto from './FormularioConcepto'
+import Colapsable from '../Colapsable'
 
 const slug = (s) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
 
@@ -33,10 +34,20 @@ export default function TabAportes({ convenio, empresaId, soloLectura }) {
   return (
     <div>
       {errorGuardado && <div className="card" style={{ color: 'var(--danger)' }}>Error al guardar: {errorGuardado}</div>}
+      {/* Cada concepto va plegado: con 15-20 aportes la pantalla era una
+          tabla interminable. El encabezado deja ver nombre, tipo y fórmula
+          sin abrir. */}
       {lista.map((c) => (
-        <div key={c.id} className="card" style={{ marginBottom: '1rem' }}>
-          <h3>{c.orden}. {c.nombre} <span className="badge badge-neutral">{c.tipo === 'descuento' ? 'aporte del trabajador' : 'contribución patronal'}</span></h3>
-          <p style={{ color: 'var(--text-secondary)', fontFamily: 'monospace', fontSize: '0.85rem' }}>{c.formula}</p>
+        <Colapsable
+          key={c.id}
+          titulo={`${c.orden}. ${c.nombre}`}
+          resumen={c.formula}
+          insignias={(
+            <span className="badge badge-neutral">
+              {c.tipo === 'descuento' ? 'aporte del trabajador' : 'contribución patronal'}
+            </span>
+          )}
+        >
           {!soloLectura && (
             <FormularioConcepto concepto={c} categorias={null} conMonto={false}
               onGuardar={async ({ config, formula, codigoRecibo }) => {
@@ -51,7 +62,12 @@ export default function TabAportes({ convenio, empresaId, soloLectura }) {
               setErrorGuardado(r?.ok === false ? r.error : null)
             }} />
           )}
-        </div>
+          {soloLectura && (
+            <p className="texto-secundario" style={{ fontSize: '0.85rem' }}>
+              Convenio plantilla: para editar este concepto, personalizá el convenio.
+            </p>
+          )}
+        </Colapsable>
       ))}
       {lista.length === 0 && <div className="card" style={{ marginBottom: '1rem' }}>Todavía no hay aportes ni contribuciones para este convenio.</div>}
 

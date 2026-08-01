@@ -1,4 +1,4 @@
-import { jsPDF } from 'jspdf'
+import { cargarJsPDF } from './cargarJsPDF.js'
 import { numeroALetras } from './numeroALetras.js'
 import { armarRecibo } from './reciboLayout.js'
 import { dibujarTorta } from './reciboPie.js'
@@ -13,7 +13,10 @@ const fmt = (n) => `$${(Number(n) || 0).toLocaleString('es-AR', { minimumFractio
 // empleador (contribuciones + derivados CCT) y sueldo del trabajador
 // (remunerativo/no remunerativo/descuentos), con columnas Unidad/Base/Monto,
 // composición salarial, neto en letras, detalle por organismo y torta.
-export function generarReciboPdf({ empresa, persona, periodo, items, codigoRecibo }) {
+// jsPDF (+ html2canvas) pesa ~380 kB y solo hace falta cuando alguien emite un
+// recibo, así que se carga con import() dinámico: por eso la función es async.
+export async function generarReciboPdf({ empresa, persona, periodo, items, codigoRecibo }) {
+  const jsPDF = await cargarJsPDF()
   const doc = new jsPDF({ orientation: 'portrait', format: 'a4' })
   const R = armarRecibo(items)
   const M = 10                         // margen
@@ -65,6 +68,21 @@ export function generarReciboPdf({ empresa, persona, periodo, items, codigoRecib
   }
 
   // ── Cabecera: empresa + datos fiscales ──────────────────────────────
+  // El logo (Configuración → Empresa) va arriba a la derecha, encajado en un
+  // recuadro fijo respetando su relación de aspecto. Si falla el dibujado no
+  // se corta la emisión: el recibo sale igual, sin logo.
+  if (empresa?.logo?.dataUrl) {
+    try {
+      const CAJA_ANCHO = 42
+      const CAJA_ALTO = 16
+      const prop = empresa.logo.alto > 0 ? empresa.logo.ancho / empresa.logo.alto : CAJA_ANCHO / CAJA_ALTO
+      let ancho = CAJA_ANCHO
+      let alto = ancho / prop
+      if (alto > CAJA_ALTO) { alto = CAJA_ALTO; ancho = alto * prop }
+      doc.addImage(empresa.logo.dataUrl, empresa.logo.formato || 'PNG', W - M - ancho, y - 4, ancho, alto)
+    } catch { /* logo inválido: se sigue sin él */ }
+  }
+
   doc.setFont(undefined, 'bold'); doc.setFontSize(12)
   doc.text(String(empresa?.nombre || '—'), colConcepto, y); y += 5
   doc.setFont(undefined, 'normal'); doc.setFontSize(8)

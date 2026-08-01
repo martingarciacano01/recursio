@@ -1,42 +1,39 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
+import { useTemaStore } from '../store/temaStore'
 import { puede } from '../utils/permisos'
+import Logo from './Logo'
 import {
   LayoutDashboard, FileText, Settings, Calculator,
-  CheckSquare, BarChart3, UserCog, LogOut, Landmark, ShieldAlert, LogIn,
+  CheckSquare, BarChart3, UserCog, LogOut, ShieldAlert, LogIn,
+  Sun, Moon, MonitorSmartphone, X,
 } from 'lucide-react'
 
 // Estructura de navegación de Recursio (Recursio_Diseno.md, rutas del
-// plan de ejecución Task 5). Simplificada respecto al Sidebar de
-// Presencio (fichaobra/src/components/layout/Sidebar.jsx): sin roles
-// custom por config todavía (llega con el flujo de aprobación, Fase 3).
+// plan de ejecución Task 5).
 //
 // `accion` (Fase 5G Task 29): gating de UI por rol de nómina (ver
 // src/utils/permisos.js). Dashboard no tiene `accion` = siempre visible
 // para cualquier usuario logueado.
-const NAV_ITEMS = [
+export const NAV_ITEMS = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
+  { to: '/liquidacion', icon: Calculator, label: 'Liquidaciones', accion: 'ver_liquidacion' },
   { to: '/legajos', icon: FileText, label: 'Legajos', accion: 'ver_legajos' },
-  { to: '/liquidacion', icon: Calculator, label: 'Liquidación', accion: 'ver_liquidacion' },
   { to: '/aprobaciones', icon: CheckSquare, label: 'Aprobaciones', accion: 'aprobar' },
-  { to: '/reportes', icon: BarChart3, label: 'Reportes', accion: 'ver_reportes' },
   { to: '/usuarios', icon: UserCog, label: 'Usuarios', accion: 'gestionar_usuarios' },
+  { to: '/reportes', icon: BarChart3, label: 'Reportes', accion: 'ver_reportes' },
   { to: '/configuracion', icon: Settings, label: 'Configuración', accion: 'ver_configuracion' },
 ]
 
-const navLinkStyle = (isActive) => ({
-  display: 'flex', alignItems: 'center', gap: 10,
-  padding: '0.6rem 0.75rem', borderRadius: 'var(--radius)',
-  textDecoration: 'none', transition: 'all 0.12s',
-  color: isActive ? 'var(--brand-secondary)' : 'var(--text-secondary)',
-  background: isActive ? 'rgba(200,168,75,0.1)' : 'transparent',
-  fontWeight: isActive ? 600 : 400, fontSize: '0.875rem',
-  whiteSpace: 'nowrap', overflow: 'hidden',
-})
+const ICONO_TEMA = { claro: Sun, oscuro: Moon, auto: MonitorSmartphone }
+const ROTULO_TEMA = { claro: 'Claro', oscuro: 'Oscuro', auto: 'Automático' }
 
-export default function Sidebar() {
+export default function Sidebar({ onNavegar }) {
   const { usuario, rol, empresa, empresaVista, rolesNomina, logout, salirDeEmpresa } = useAuthStore()
+  const preferencia = useTemaStore((s) => s.preferencia)
+  const alternar = useTemaStore((s) => s.alternar)
   const navigate = useNavigate()
+  const IconoTema = ICONO_TEMA[preferencia] || MonitorSmartphone
 
   const handleLogout = async () => {
     await logout()
@@ -48,83 +45,87 @@ export default function Sidebar() {
     navigate('/superadmin')
   }
 
-  // Mismo patrón que Presencio (fichaobra/src/components/layout/Sidebar.jsx,
-  // NAV_BASE): el item de Superadmin va al final con un separador antes,
-  // visible solo para ese rol.
   // Gating de UI por rol (Fase 5G Task 29, diseño §2.3): superadmin sigue
-  // viendo todo, igual que hoy; para usuarios de empresa se filtra cada
-  // item con `accion` según lo que permite puede(rolesNomina, accion).
-  // Esto es SOLO gating de UI — la RLS del backend (0026_rls_roles.sql,
-  // pendiente) es la que realmente protege los datos.
+  // viendo todo; para usuarios de empresa se filtra cada item con `accion`
+  // según lo que permite puede(rolesNomina, accion). Esto es SOLO gating de
+  // UI — la RLS del backend es la que realmente protege los datos.
   const navItems = (rol === 'superadmin'
     ? [...NAV_ITEMS, { to: '/superadmin', icon: ShieldAlert, label: 'Superadmin', dividerBefore: true }]
     : NAV_ITEMS
   ).filter((item) => !item.accion || rol === 'superadmin' || puede(rolesNomina, item.accion))
 
   return (
-    <aside style={{
-      width: 220, height: '100vh', background: 'var(--bg-surface)',
-      borderRight: '1px solid var(--border)', display: 'flex',
-      flexDirection: 'column', position: 'sticky', top: 0, flexShrink: 0,
-    }}>
-      <div style={{ padding: '1rem', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{ width: 32, height: 32, borderRadius: 8, background: 'linear-gradient(135deg, var(--brand-primary), var(--brand-primary-light))', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <Landmark size={16} color="var(--brand-secondary)" />
-        </div>
-        <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: '1.1rem' }}>
-          Recurs<span style={{ color: 'var(--brand-secondary)' }}>io</span>
-        </div>
+    <aside className="sidebar">
+      <div className="sidebar-brand">
+        <Logo alto={44} />
+        <button type="button" className="sidebar-cerrar" onClick={onNavegar} aria-label="Cerrar menú">
+          <X size={18} />
+        </button>
       </div>
 
-      <nav style={{ flex: 1, padding: '0.5rem', display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <nav className="sidebar-nav">
         {navItems.map(({ to, icon: Icon, label, dividerBefore }) => (
           <div key={to}>
-            {dividerBefore && <div style={{ height: 1, background: 'var(--border)', margin: '6px 4px' }} />}
-            <NavLink to={to} end={to === '/'} style={({ isActive }) => navLinkStyle(isActive)}>
+            {dividerBefore && <div className="sidebar-divider" />}
+            <NavLink
+              to={to}
+              end={to === '/'}
+              onClick={onNavegar}
+              className={({ isActive }) => `nav-link${isActive ? ' nav-link-activo' : ''}`}
+            >
               <Icon size={17} style={{ flexShrink: 0 }} />
-              {label}
+              <span>{label}</span>
             </NavLink>
           </div>
         ))}
       </nav>
 
-      <div style={{ padding: '0.75rem', borderTop: '1px solid var(--border)' }}>
+      <div className="sidebar-pie">
         {empresaVista && (
-          <div style={{
-            padding: '0.5rem 0.75rem', marginBottom: 8, borderRadius: 'var(--radius)',
-            background: 'rgba(200,168,75,0.1)', border: '1px solid rgba(200,168,75,0.3)',
-          }}>
-            <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginBottom: 4 }}>Viendo como</div>
+          <div className="sidebar-empresa">
+            <div className="sidebar-empresa-rotulo">Viendo como</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-              {/* Avatar de iniciales, mismo patrón que TabEmpresas en
-                  Presencio (fichaobra/src/pages/SuperAdminPage.jsx) */}
-              <div style={{
-                width: 28, height: 28, borderRadius: 7, flexShrink: 0,
-                background: empresaVista.colorPrimario || 'var(--brand-primary)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>
-                <span style={{ color: empresaVista.colorSecundario || 'var(--brand-secondary)', fontWeight: 800, fontSize: '0.65rem' }}>
+              {/* Avatar de iniciales, mismo patrón que TabEmpresas en Presencio */}
+              <div
+                className="sidebar-avatar"
+                style={{ background: empresaVista.colorPrimario || 'var(--brand-primary)' }}
+              >
+                <span style={{ color: empresaVista.colorSecundario || 'var(--brand-secondary)' }}>
                   {(empresaVista.nombre || '?').slice(0, 2).toUpperCase()}
                 </span>
               </div>
-              <div style={{ fontSize: '0.8rem', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {empresaVista.nombre}
-              </div>
+              <div className="sidebar-empresa-nombre">{empresaVista.nombre}</div>
             </div>
-            <button onClick={handleSalirDeEmpresa} className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', gap: 6, fontSize: '0.72rem' }}>
+            <button onClick={handleSalirDeEmpresa} className="btn btn-ghost btn-sm btn-bloque">
               <LogIn size={13} /> Salir de la empresa
             </button>
           </div>
         )}
+
         {usuario && (
-          <div style={{ padding: '0.4rem 0.75rem', marginBottom: 6 }}>
-            <div style={{ fontSize: '0.78rem', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{usuario.email}</div>
-            {rol && <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'capitalize' }}>{rol}{empresa ? ` · ${empresa.id.slice(0, 8)}` : ''}</div>}
+          <div className="sidebar-usuario">
+            <div className="sidebar-usuario-mail">{usuario.email}</div>
+            {rol && (
+              <div className="sidebar-usuario-rol">
+                {rol}{empresa ? ` · ${empresa.id.slice(0, 8)}` : ''}
+              </div>
+            )}
           </div>
         )}
-        <button onClick={handleLogout} className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', gap: 8 }}>
-          <LogOut size={15} /> Salir
-        </button>
+
+        <div className="sidebar-acciones">
+          <button
+            onClick={alternar}
+            className="btn btn-ghost btn-sm btn-bloque"
+            title={`Tema: ${ROTULO_TEMA[preferencia]}`}
+            aria-label={`Cambiar tema (actual: ${ROTULO_TEMA[preferencia]})`}
+          >
+            <IconoTema size={15} /> {ROTULO_TEMA[preferencia]}
+          </button>
+          <button onClick={handleLogout} className="btn btn-ghost btn-sm btn-bloque">
+            <LogOut size={15} /> Salir
+          </button>
+        </div>
       </div>
     </aside>
   )

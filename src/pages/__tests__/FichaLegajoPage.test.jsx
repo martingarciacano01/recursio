@@ -30,6 +30,10 @@ vi.mock('../../lib/supabase', () => {
     nom_v_personal: { data: { id: 'p1', nombre: 'Juan Pérez', dni: '30111222', puesto: 'Oficial' }, error: null },
     nom_v_ausencias: { data: [], error: null },
     nom_liquidaciones: { data: [], error: null },
+    // La guía de alta (ChecklistAlta) lee documentación requerida y cargada.
+    nom_documentos_requeridos: { data: [], error: null },
+    nom_documentos_legajo: { data: [], error: null },
+    documentos_personal: { data: [], error: null },
   }
   const from = (tabla) => {
     const builder = {
@@ -37,7 +41,7 @@ vi.mock('../../lib/supabase', () => {
       eq: () => builder,
       order: () => builder,
       single: () => builder,
-      then: (resolve) => resolve(respuestas[tabla]),
+      then: (resolve) => resolve(respuestas[tabla] ?? { data: [], error: null }),
     }
     return builder
   }
@@ -55,19 +59,21 @@ vi.mock('../../components/legajo/SemaforoLegajo', () => ({
 }))
 
 describe('FichaLegajoPage', () => {
-  it('muestra los botones de las 6 pestañas', async () => {
+  // Las pestañas de la ficha pasaron de <button class="btn"> a role="tab"
+  // (misma barra .tabs que usan Configuración y Liquidaciones).
+  it('muestra las 6 pestañas', async () => {
     render(<FichaLegajoPage />)
     expect(await screen.findByText('editor-datos')).toBeInTheDocument()
     for (const p of ['Datos', 'Familiares', 'Documentación', 'Ausencias', 'Liquidaciones']) {
-      expect(screen.getByRole('button', { name: p })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: p })).toBeInTheDocument()
     }
-    expect(screen.getByRole('button', { name: 'Sanciones (0)' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Sanciones (0)' })).toBeInTheDocument()
   })
 
   it('al clickear Liquidaciones muestra su contenido y oculta Datos', async () => {
     render(<FichaLegajoPage />)
     await screen.findByText('editor-datos')
-    fireEvent.click(screen.getByRole('button', { name: 'Liquidaciones' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Liquidaciones' }))
     expect(screen.getByText('Sin liquidaciones registradas.')).toBeInTheDocument()
     expect(screen.queryByText('editor-datos')).not.toBeInTheDocument()
   })

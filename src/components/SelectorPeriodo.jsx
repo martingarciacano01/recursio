@@ -1,33 +1,32 @@
-import { etiquetaTipoPeriodo } from '../utils/etiquetaPeriodo'
+import { etiquetaPeriodo } from '../utils/etiquetaPeriodo'
+import { agruparPorAnio } from '../utils/ordenarPeriodos'
 
 // Select nativo agrupado por año (Fase 6b — Liquidaciones individuales):
 // reemplaza los recuadros anidados año → mes → botón, que se veían mal y
 // iban a acumular información sin límite con el tiempo. Un <optgroup> por
 // año alcanza — los navegadores ya saben colapsar/buscar dentro de un
 // <select> largo, así que no hace falta un combobox a medida.
+//
+// El orden dentro de cada año es mes descendente y, dentro del mes, por tipo
+// (ver src/utils/ordenarPeriodos.js). La etiqueta arranca con "Mes Año · tipo"
+// para poder buscar tipeando el mes, y deja las fechas exactas al final.
 export default function SelectorPeriodo({ periodos, value, onChange }) {
-  const porAnio = new Map()
-  for (const p of periodos) {
-    const anio = p.fecha_desde.slice(0, 4)
-    if (!porAnio.has(anio)) porAnio.set(anio, [])
-    porAnio.get(anio).push(p)
-  }
-  const anios = [...porAnio.keys()].sort().reverse()
+  const grupos = agruparPorAnio(periodos)
 
   return (
     <select
       className="input"
       aria-label="Período"
-      style={{ maxWidth: 320 }}
+      style={{ maxWidth: 380 }}
       value={value}
       onChange={(e) => onChange(e.target.value)}
     >
       <option value="">Elegir período…</option>
-      {anios.map((anio) => (
+      {grupos.map(([anio, delAnio]) => (
         <optgroup key={anio} label={anio}>
-          {porAnio.get(anio).map((p) => (
+          {delAnio.map((p) => (
             <option key={p.id} value={p.id}>
-              {etiquetaTipoPeriodo(p.tipo)} · {p.fecha_desde} a {p.fecha_hasta} ({p.estado})
+              {etiquetaPeriodo(p)} · {p.fecha_desde} a {p.fecha_hasta}{p.estado === 'cerrado' ? ' (cerrado)' : ''}
             </option>
           ))}
         </optgroup>

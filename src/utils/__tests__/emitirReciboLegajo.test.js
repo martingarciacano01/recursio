@@ -26,7 +26,9 @@ describe('datosReciboDesdeSupabase', () => {
 
   it('arma empresa, persona y categoria resueltas', async () => {
     const r = await datosReciboDesdeSupabase({ empresaId: 'e1', personalId: 'p1', nombrePersona: 'Juan Martín García Cano' })
-    expect(r.empresa).toEqual({ nombre: 'Asset Construcciones', cuit: '30-1111-9', domicilio: 'Av. Siempreviva 742' })
+    // `logo` es null porque en este caso ni nom_empresa_config ni empresas
+    // tienen logo_url cargado (ver cargarLogoRecibo).
+    expect(r.empresa).toEqual({ nombre: 'Asset Construcciones', cuit: '30-1111-9', domicilio: 'Av. Siempreviva 742', logo: null })
     expect(r.persona.cuil).toBe('20-33901676-4')
     expect(r.persona.categoria).toBe('Ayudante')
     expect(r.persona.nombre).toBe('Juan Martín García Cano')

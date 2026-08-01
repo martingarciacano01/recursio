@@ -20,7 +20,7 @@ vi.mock('../../lib/supabase', () => ({
   },
 }))
 
-import { legajoFromDB, legajoToDB, familiarFromDB, sancionFromDB, useLegajoStore } from '../legajoStore'
+import { legajoFromDB, legajoToDB, familiarFromDB, sancionFromDB, adicionalLegajoFromDB, adicionalLegajoToDB, useLegajoStore } from '../legajoStore'
 
 describe('mappers de legajo', () => {
   it('legajoFromDB mapea snake_case a camelCase', () => {
@@ -98,6 +98,58 @@ describe('useLegajoStore - familiares CRUD', () => {
   })
 })
 
+describe('mappers de adicionales por legajo (migración 0040)', () => {
+  it('adicionalLegajoFromDB mapea snake_case a camelCase', () => {
+    const row = {
+      id: 'al1', empresa_id: 'e1', legajo_id: 'l1', concepto_id: 'c1',
+      modo: 'porcentaje', porcentaje: '10', monto: null,
+      vigencia_desde: '2026-08-01', vigencia_hasta: null,
+    }
+    expect(adicionalLegajoFromDB(row)).toEqual({
+      id: 'al1', empresaId: 'e1', legajoId: 'l1', conceptoId: 'c1',
+      modo: 'porcentaje', porcentaje: 10, monto: null,
+      vigenciaDesde: '2026-08-01', vigenciaHasta: null,
+    })
+  })
+
+  it('adicionalLegajoToDB con modo porcentaje solo manda porcentaje (monto null)', () => {
+    const row = adicionalLegajoToDB(
+      { conceptoId: 'c1', modo: 'porcentaje', porcentaje: 10, vigenciaDesde: '2026-08-01' },
+      'l1', 'e1'
+    )
+    expect(row).toEqual({
+      empresa_id: 'e1', legajo_id: 'l1', concepto_id: 'c1', modo: 'porcentaje',
+      porcentaje: 10, monto: null, vigencia_desde: '2026-08-01', vigencia_hasta: null,
+    })
+  })
+
+  it('adicionalLegajoToDB con modo nominal solo manda monto (porcentaje null)', () => {
+    const row = adicionalLegajoToDB(
+      { conceptoId: 'c1', modo: 'nominal', monto: 45000, vigenciaDesde: '2026-08-01' },
+      'l1', 'e1'
+    )
+    expect(row.monto).toBe(45000)
+    expect(row.porcentaje).toBeNull()
+  })
+})
+
+describe('useLegajoStore - adicionales por legajo CRUD', () => {
+  it('guardarAdicionalLegajo inserta una asignación nueva', async () => {
+    const r = await useLegajoStore.getState().guardarAdicionalLegajo(
+      { conceptoId: 'c1', modo: 'heredado', vigenciaDesde: '2026-08-01' },
+      'legajo-1', 'empresa-1'
+    )
+    expect(r.ok).toBe(true)
+  })
+
+  it('quitarAdicionalLegajo borra por id y lo saca del estado', async () => {
+    useLegajoStore.setState({ adicionalesLegajo: [{ id: 'al1', conceptoId: 'c1' }] })
+    const r = await useLegajoStore.getState().quitarAdicionalLegajo('al1')
+    expect(r.ok).toBe(true)
+    expect(useLegajoStore.getState().adicionalesLegajo).toEqual([])
+  })
+})
+
 describe('useLegajoStore - sanciones CRUD', () => {
   it('guardarSancion inserta una sancion nueva', async () => {
     const r = await useLegajoStore.getState().guardarSancion(
@@ -112,5 +164,52 @@ describe('useLegajoStore - sanciones CRUD', () => {
     const r = await useLegajoStore.getState().eliminarSancion('s1')
     expect(r.ok).toBe(true)
     expect(useLegajoStore.getState().sanciones).toEqual([])
+  })
+})
+
+describe('cargarLegajos — cache por empresa', () => {
+  beforeEach(async () => {
+    useLegajoStore.setState({ legajos: [], cargando: false, error: null, cargadoEmpresaId: null })
+    const { supabase } = await import('../../lib/supabase')
+    supabase.from.mockClear()
+  })
+
+  it('no vuelve a pedir a Supabase si ya cargó para la misma empresa', async () => {
+    const { supabase } = await import('../../lib/supabase')
+    supabase.from.mockImplementation(() => ({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+    }))
+
+    await useLegajoStore.getState().cargarLegajos('empresa-1')
+    await useLegajoStore.getState().cargarLegajos('empresa-1')
+
+    expect(supabase.from).toHaveBeenCalledTimes(1)
+  })
+
+  it('SÍ vuelve a pedir si cambia la empresa', async () => {
+    const { supabase } = await import('../../lib/supabase')
+    supabase.from.mockImplementation(() => ({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+    }))
+
+    await useLegajoStore.getState().cargarLegajos('empresa-1')
+    await useLegajoStore.getState().cargarLegajos('empresa-2')
+
+    expect(supabase.from).toHaveBeenCalledTimes(2)
+  })
+
+  it('vuelve a pedir si se pasa forzar: true aunque sea la misma empresa', async () => {
+    const { supabase } = await import('../../lib/supabase')
+    supabase.from.mockImplementation(() => ({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+    }))
+
+    await useLegajoStore.getState().cargarLegajos('empresa-1')
+    await useLegajoStore.getState().cargarLegajos('empresa-1', { forzar: true })
+
+    expect(supabase.from).toHaveBeenCalledTimes(2)
   })
 })

@@ -37,7 +37,7 @@ export default function AprobacionesPage() {
       {errorAccion && <div className="card" style={{ color: 'var(--danger)' }}>Error: {errorAccion}</div>}
 
       {seleccion.length > 0 && (
-        <div className="card" style={{ marginBottom: '1rem', display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div className="card card-compacta" style={{ marginBottom: '1rem', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <span>{seleccion.length} seleccionados</span>
           <button className="btn btn-primary btn-sm" disabled={procesando} onClick={() => accionar(seleccion, 'aprobado')}>Aprobar seleccionados</button>
           <button className="btn btn-ghost btn-sm" disabled={procesando} onClick={() => accionar(seleccion, 'rechazado')}>Rechazar seleccionados</button>

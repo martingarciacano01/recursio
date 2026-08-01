@@ -10,14 +10,15 @@ export const convenioFromDB = (r) => ({
 })
 
 export const useConveniosStore = create((set, get) => ({
-  convenios: [], cargando: false, error: null,
+  convenios: [], cargando: false, error: null, cargadoEmpresaId: null,
 
-  cargarConvenios: async (empresaId) => {
+  cargarConvenios: async (empresaId, { forzar = false } = {}) => {
+    if (!forzar && get().cargadoEmpresaId === empresaId && !get().error) return
     set({ cargando: true, error: null })
     const { data, error } = await supabase.from('nom_convenios').select('*')
       .or(`empresa_id.is.null,empresa_id.eq.${empresaId}`).order('nombre')
     if (error) { set({ error: error.message, cargando: false }); return }
-    set({ convenios: (data || []).map(convenioFromDB), cargando: false })
+    set({ convenios: (data || []).map(convenioFromDB), cargando: false, cargadoEmpresaId: empresaId })
   },
 
   // Clona un convenio global a la empresa (función SQL SECURITY DEFINER,
@@ -44,7 +45,7 @@ export const useConveniosStore = create((set, get) => ({
       corte_mensual_desde: corteMensualDesde ?? 1, corte_mensual_hasta: corteMensualHasta ?? null,
     }).select().single()
     if (error) return { ok: false, error: error.message }
-    await get().cargarConvenios(empresaId)
+    await get().cargarConvenios(empresaId, { forzar: true })
     return { ok: true, convenioId: data.id }
   },
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useConceptosStore } from '../../store/conceptosStore'
 import { useEscalasStore, agruparVigencias } from '../../store/escalasStore'
 import FormularioConcepto from './FormularioConcepto'
+import Colapsable from '../Colapsable'
 
 const slug = (s) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
 
@@ -20,11 +21,11 @@ export default function TabAdicionales({ convenio, empresaId, soloLectura }) {
   const delConvenio = conceptos.filter((c) => c.convenioId === convenio?.id)
   const adicionales = delConvenio.filter((c) => (c.tipo === 'remunerativo' || c.tipo === 'no_remunerativo') && c.config)
 
-  const crear = async ({ config, formula, categorias: cats, codigoRecibo }) => {
+  const crear = async ({ config, formula, categorias: cats, codigoRecibo, asignacion }) => {
     const orden = Math.max(0, ...delConvenio.map((c) => c.orden)) + 1
     const r = await guardarConcepto({
       convenioId: convenio.id, codigo: slug(nuevoNombre), nombre: nuevoNombre.trim(),
-      tipo: nuevoTipo, formula, orden, imprimible: true, config, categorias: cats, codigoRecibo,
+      tipo: nuevoTipo, formula, orden, imprimible: true, config, categorias: cats, codigoRecibo, asignacion,
     }, empresaId)
     if (r.ok) { setNuevoNombre(''); setCreando(false) }
     return r
@@ -33,16 +34,29 @@ export default function TabAdicionales({ convenio, empresaId, soloLectura }) {
   return (
     <div>
       {adicionales.map((c) => (
-        <div key={c.id} className="card" style={{ marginBottom: '1rem' }}>
-          <h3>{c.nombre} <span className="badge badge-neutral">{c.tipo}</span>
-            {c.categorias?.length > 0 && <span className="badge badge-neutral">{c.categorias.join(', ')}</span>}</h3>
-          <p style={{ color: 'var(--text-secondary)', fontFamily: 'monospace', fontSize: '0.85rem' }}>{c.formula}</p>
-          {!soloLectura && (
-            <FormularioConcepto concepto={c} categorias={nombresCategorias} conMonto
-              onGuardar={({ config, formula, categorias: cats, codigoRecibo }) =>
-                guardarConcepto({ ...c, config, formula, categorias: cats, codigoRecibo }, empresaId)} />
+        <Colapsable
+          key={c.id}
+          titulo={c.nombre}
+          resumen={c.formula}
+          insignias={(
+            <>
+              <span className="badge badge-neutral">{c.tipo}</span>
+              {c.asignacion === 'legajo'
+                ? <span className="badge badge-neutral">por empleado</span>
+                : c.categorias?.length > 0 && <span className="badge badge-neutral">{c.categorias.join(', ')}</span>}
+            </>
           )}
-        </div>
+        >
+          {!soloLectura ? (
+            <FormularioConcepto concepto={c} categorias={nombresCategorias} conMonto conAsignacionPorLegajo
+              onGuardar={({ config, formula, categorias: cats, codigoRecibo, asignacion }) =>
+                guardarConcepto({ ...c, config, formula, categorias: cats, codigoRecibo, asignacion }, empresaId)} />
+          ) : (
+            <p className="texto-secundario" style={{ fontSize: '0.85rem' }}>
+              Convenio plantilla: para editar este adicional, personalizá el convenio.
+            </p>
+          )}
+        </Colapsable>
       ))}
       {adicionales.length === 0 && <div className="card" style={{ marginBottom: '1rem' }}>Todavía no hay adicionales para este convenio.</div>}
 
@@ -60,7 +74,7 @@ export default function TabAdicionales({ convenio, empresaId, soloLectura }) {
             </select>
           </div>
           {nuevoNombre.trim()
-            ? <FormularioConcepto concepto={null} categorias={nombresCategorias} conMonto onGuardar={crear} />
+            ? <FormularioConcepto concepto={null} categorias={nombresCategorias} conMonto conAsignacionPorLegajo onGuardar={crear} />
             : <p style={{ color: 'var(--text-secondary)' }}>Poné un nombre para continuar.</p>}
           <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => setCreando(false)}>Cancelar</button>
         </div>

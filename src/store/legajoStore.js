@@ -18,7 +18,7 @@ export const legajoToDB = (l, empresaId) => ({
   ...(l.cuil !== undefined && { cuil: l.cuil }),
   ...(l.fechaNacimiento !== undefined && { fecha_nacimiento: l.fechaNacimiento }),
   ...(l.domicilio !== undefined && { domicilio: l.domicilio }),
-  ...(l.fechaIngreso !== undefined && { fecha_ingreso: l.fechaIngreso }),
+  ...(l.fechaIngreso !== undefined && { fecha_ingreso: l.fechaIngreso || null }),
   ...(l.convenioId !== undefined && { convenio_id: l.convenioId }),
   ...(l.categoriaId !== undefined && { categoria_id: l.categoriaId }),
   ...(l.cbu !== undefined && { cbu: l.cbu }),
@@ -62,6 +62,26 @@ export const sancionToDB = (s, personalId, empresaId) => ({
   ...(s.diasSuspension !== undefined && { dias_suspension: s.diasSuspension ? Number(s.diasSuspension) : null }),
 })
 
+// Adicionales asignados a un legajo puntual (migración 0040, plan
+// 2026-07-29 §3): mismo patrón mapper que familiar/sancion.
+export const adicionalLegajoFromDB = (r) => ({
+  id: r.id, empresaId: r.empresa_id, legajoId: r.legajo_id, conceptoId: r.concepto_id,
+  modo: r.modo, porcentaje: r.porcentaje != null ? Number(r.porcentaje) : null,
+  monto: r.monto != null ? Number(r.monto) : null,
+  vigenciaDesde: r.vigencia_desde, vigenciaHasta: r.vigencia_hasta,
+})
+
+export const adicionalLegajoToDB = (a, legajoId, empresaId) => ({
+  empresa_id: empresaId,
+  legajo_id: legajoId,
+  concepto_id: a.conceptoId,
+  modo: a.modo,
+  porcentaje: a.modo === 'porcentaje' && a.porcentaje !== undefined ? Number(a.porcentaje) : null,
+  monto: a.modo === 'nominal' && a.monto !== undefined ? Number(a.monto) : null,
+  vigencia_desde: a.vigenciaDesde,
+  vigencia_hasta: a.vigenciaHasta || null,
+})
+
 // Contadores de secuencia por colección: si se dispara una carga nueva
 // antes de que termine la anterior (ej. cambio rápido de empresaId o
 // personalId), la respuesta vieja se descarta al llegar tarde en vez de
@@ -69,18 +89,24 @@ export const sancionToDB = (s, personalId, empresaId) => ({
 let seqLegajos = 0
 let seqFamiliares = 0
 let seqSanciones = 0
+let seqAdicionalesLegajo = 0
 
 export const useLegajoStore = create((set, get) => ({
-  legajos: [], familiares: [], sanciones: [], cargando: false, error: null,
+  legajos: [], familiares: [], sanciones: [], adicionalesLegajo: [], cargando: false, error: null,
+  // empresaId para el que `legajos` ya está cargado — evita refetch al
+  // revisitar un menú (LegajosPage/FichaLegajoPage se desmontan y montan
+  // en cada navegación del sidebar). `forzar: true` lo salta a propósito.
+  cargadoEmpresaId: null,
 
-  cargarLegajos: async (empresaId) => {
+  cargarLegajos: async (empresaId, { forzar = false } = {}) => {
+    if (!forzar && get().cargadoEmpresaId === empresaId && !get().error) return
     const miSeq = ++seqLegajos
     set({ cargando: true, error: null })
     try {
       const { data, error } = await supabase.from('nom_legajo').select('*').eq('empresa_id', empresaId)
       if (miSeq !== seqLegajos) return // llegó una carga más nueva primero, descartar
       if (error) { set({ error: error.message, cargando: false }); return }
-      set({ legajos: (data || []).map(legajoFromDB), cargando: false })
+      set({ legajos: (data || []).map(legajoFromDB), cargando: false, cargadoEmpresaId: empresaId })
     } catch (e) {
       if (miSeq !== seqLegajos) return
       set({ error: e.message, cargando: false })
@@ -191,6 +217,55 @@ export const useLegajoStore = create((set, get) => ({
       const { error } = await supabase.from('nom_sanciones_personal').delete().eq('id', id)
       if (error) { set({ error: error.message }); return { ok: false, error: error.message } }
       set((s) => ({ sanciones: s.sanciones.filter((x) => x.id !== id) }))
+      return { ok: true }
+    } catch (e) {
+      set({ error: e.message })
+      return { ok: false, error: e.message }
+    }
+  },
+
+  cargarAdicionalesLegajo: async (legajoId) => {
+    const miSeq = ++seqAdicionalesLegajo
+    set({ cargando: true, error: null })
+    try {
+      const { data, error } = await supabase.from('nom_legajo_adicionales').select('*').eq('legajo_id', legajoId)
+      if (miSeq !== seqAdicionalesLegajo) return
+      if (error) { set({ error: error.message, cargando: false }); return }
+      set({ adicionalesLegajo: (data || []).map(adicionalLegajoFromDB), cargando: false })
+    } catch (e) {
+      if (miSeq !== seqAdicionalesLegajo) return
+      set({ error: e.message, cargando: false })
+    }
+  },
+
+  guardarAdicionalLegajo: async (adicional, legajoId, empresaId) => {
+    set({ error: null })
+    try {
+      const row = adicionalLegajoToDB(adicional, legajoId, empresaId)
+      const query = adicional.id
+        ? supabase.from('nom_legajo_adicionales').update(row).eq('id', adicional.id).select().single()
+        : supabase.from('nom_legajo_adicionales').insert(row).select().single()
+      const { data, error } = await query
+      if (error) { set({ error: error.message }); return { ok: false, error: error.message } }
+      const nuevo = adicionalLegajoFromDB(data)
+      set((s) => ({
+        adicionalesLegajo: adicional.id
+          ? s.adicionalesLegajo.map((a) => (a.id === nuevo.id ? nuevo : a))
+          : [...s.adicionalesLegajo, nuevo],
+      }))
+      return { ok: true, adicional: nuevo }
+    } catch (e) {
+      set({ error: e.message })
+      return { ok: false, error: e.message }
+    }
+  },
+
+  quitarAdicionalLegajo: async (id) => {
+    set({ error: null })
+    try {
+      const { error } = await supabase.from('nom_legajo_adicionales').delete().eq('id', id)
+      if (error) { set({ error: error.message }); return { ok: false, error: error.message } }
+      set((s) => ({ adicionalesLegajo: s.adicionalesLegajo.filter((a) => a.id !== id) }))
       return { ok: true }
     } catch (e) {
       set({ error: e.message })

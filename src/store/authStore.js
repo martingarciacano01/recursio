@@ -5,6 +5,33 @@ import { supabase } from '../lib/supabase'
 // instrucción 6: sin persist para datos sensibles). La sesión la maneja
 // supabase-js internamente (localStorage propio, compartido con Presencio);
 // acá solo se guarda en memoria el perfil derivado (usuario, empresa, rol).
+//
+// Única excepción: la empresa que un Superadmin está "viendo" se guarda en
+// sessionStorage (ver EMPRESA_VISTA_KEY). No son datos sensibles —id, nombre y
+// colores de marca, todo lo que ya devuelve get_empresas_superadmin()— y evita
+// que recargar la página deje la app vacía. sessionStorage y no localStorage a
+// propósito: la elección muere al cerrar la pestaña y no se comparte entre
+// pestañas, así que no queda un contexto de empresa "pegado" para siempre.
+const EMPRESA_VISTA_KEY = 'recursio:empresaVista'
+
+function guardarEmpresaVista(empresaVista) {
+  try {
+    if (empresaVista) sessionStorage.setItem(EMPRESA_VISTA_KEY, JSON.stringify(empresaVista))
+    else sessionStorage.removeItem(EMPRESA_VISTA_KEY)
+  } catch { /* modo privado / sin storage: se sigue operando en memoria */ }
+}
+
+export function leerEmpresaVista() {
+  try {
+    const crudo = sessionStorage.getItem(EMPRESA_VISTA_KEY)
+    if (!crudo) return null
+    const v = JSON.parse(crudo)
+    return v && typeof v.id === 'string' ? v : null
+  } catch {
+    return null
+  }
+}
+
 export const useAuthStore = create((set, get) => ({
   session: null,
   usuario: null,
@@ -16,12 +43,10 @@ export const useAuthStore = create((set, get) => ({
   // "Entrar en empresa": solo para usuarios Superadmin (que no tienen
   // `empresa` fija, ver SuperAdminPage.jsx). Reemplaza el patrón anterior
   // de que cada página resolviera el problema empresa-null por su cuenta
-  // (parche que existió brevemente en LiquidacionPage). Vive SOLO en
-  // memoria — sin persist, como el resto de este store — así que se
-  // pierde al recargar la página; es una decisión intencional, no un bug:
-  // preferimos que el superadmin tenga que re-elegir la empresa a que la
-  // elección quede en localStorage.
-  empresaVista: null,
+  // (parche que existió brevemente en LiquidacionPage). Sobrevive a un
+  // F5 dentro de la misma pestaña vía sessionStorage; cargarSesion() la
+  // descarta si el usuario ya no es superadmin.
+  empresaVista: leerEmpresaVista(),
 
   // Resuelve rol y empresa_id server-side vía la RPC whoami() (mismo patrón
   // de seguridad que appStore.js de Presencio: user_metadata del JWT es
@@ -65,6 +90,7 @@ export const useAuthStore = create((set, get) => ({
 
   logout: async () => {
     await supabase.auth.signOut()
+    guardarEmpresaVista(null)
     set({ session: null, usuario: null, empresa: null, rol: null, rolesNomina: [], empresaVista: null })
   },
 
@@ -72,22 +98,23 @@ export const useAuthStore = create((set, get) => ({
   // porque quien la invoca (SuperAdminPage) ya filtró el acceso a la
   // página por rol.
   entrarEnEmpresa: (empresa) => {
-    set({
-      empresaVista: {
-        id: empresa.id,
-        nombre: empresa.nombre,
-        // Colores de marca de la empresa (mismos campos que devuelve
-        // get_empresas_superadmin(), ya usados por Presencio para el
-        // avatar de iniciales en su SuperAdminPage) — opcionales, con
-        // fallback a los colores de marca de Recursio si la empresa no
-        // definió los suyos.
-        colorPrimario: empresa.color_primario || empresa.colorPrimario || null,
-        colorSecundario: empresa.color_secundario || empresa.colorSecundario || null,
-      },
-    })
+    const empresaVista = {
+      id: empresa.id,
+      nombre: empresa.nombre,
+      // Colores de marca de la empresa (mismos campos que devuelve
+      // get_empresas_superadmin(), ya usados por Presencio para el
+      // avatar de iniciales en su SuperAdminPage) — opcionales, con
+      // fallback a los colores de marca de Recursio si la empresa no
+      // definió los suyos.
+      colorPrimario: empresa.color_primario || empresa.colorPrimario || null,
+      colorSecundario: empresa.color_secundario || empresa.colorSecundario || null,
+    }
+    guardarEmpresaVista(empresaVista)
+    set({ empresaVista })
   },
 
   salirDeEmpresa: () => {
+    guardarEmpresaVista(null)
     set({ empresaVista: null })
   },
 
@@ -98,10 +125,16 @@ export const useAuthStore = create((set, get) => ({
     set({ cargando: true })
     const { data } = await supabase.auth.getSession()
     if (!data.session) {
+      guardarEmpresaVista(null)
       set({ session: null, usuario: null, empresa: null, rol: null, rolesNomina: [], empresaVista: null, cargando: false })
       return
     }
     const perfil = await get()._resolverPerfil(data.session.user)
-    set({ session: data.session, ...perfil, empresaVista: null, cargando: false })
+    // La empresa vista solo se rehidrata si el usuario sigue siendo
+    // superadmin: es el único rol que puede operar en nombre de otra
+    // empresa, y la RLS del backend igual no le daría datos a nadie más.
+    const empresaVista = perfil.rol === 'superadmin' ? leerEmpresaVista() : null
+    if (!empresaVista) guardarEmpresaVista(null)
+    set({ session: data.session, ...perfil, empresaVista, cargando: false })
   },
 }))

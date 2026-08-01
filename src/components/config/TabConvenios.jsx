@@ -44,45 +44,95 @@ export default function TabConvenios({ empresaId }) {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div className="lista-fichas">
+      {propios.length === 0 && !creando && (
+        <p className="texto-secundario" style={{ fontSize: '0.88rem' }}>
+          Todavía no tenés convenios propios. Creá uno nuevo o personalizá una plantilla.
+        </p>
+      )}
       {propios.map((c) => (
-        <div key={c.id} className="card">
-          <strong>{c.nombre}</strong> <span className="badge badge-neutral">{c.modalidad}</span>
-          {editandoId !== c.id && (
-            <button className="btn btn-ghost btn-sm" style={{ marginLeft: 8 }} onClick={() => empezarEdicion(c)}>Editar</button>
-          )}
+        <div key={c.id} className="card card-compacta">
+          <div className="acciones">
+            <strong className="ficha-titulo">{c.nombre}</strong>
+            <span className="badge badge-neutral">{c.modalidad}</span>
+            {editandoId !== c.id && (
+              <button className="btn btn-ghost btn-sm" onClick={() => empezarEdicion(c)}>Editar</button>
+            )}
+          </div>
           {editandoId === c.id && (
-            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <label htmlFor={`modalidad-${c.id}`}>Modalidad</label>
-              <select id={`modalidad-${c.id}`} className="input" style={{ maxWidth: 200 }}
-                value={edicion.modalidad} onChange={(e) => setEdicion((v) => ({ ...v, modalidad: e.target.value }))}>
-                <option value="quincenal">Quincenal</option>
-                <option value="mensual">Mensual</option>
-              </select>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <label htmlFor={`q1d-${c.id}`}>1ra quincena — desde</label>
-                <input id={`q1d-${c.id}`} className="input" type="number" style={{ width: 70 }}
-                  value={edicion.corteQ1Desde} onChange={(e) => setEdicion((v) => ({ ...v, corteQ1Desde: Number(e.target.value) }))} />
-                <label htmlFor={`q1h-${c.id}`}>1ra quincena — hasta</label>
-                <input id={`q1h-${c.id}`} className="input" type="number" style={{ width: 70 }}
-                  value={edicion.corteQ1Hasta} onChange={(e) => setEdicion((v) => ({ ...v, corteQ1Hasta: Number(e.target.value) }))} />
-                <label htmlFor={`q2d-${c.id}`}>2da quincena — desde</label>
-                <input id={`q2d-${c.id}`} className="input" type="number" style={{ width: 70 }}
-                  value={edicion.corteQ2Desde} onChange={(e) => setEdicion((v) => ({ ...v, corteQ2Desde: Number(e.target.value) }))} />
-                <label htmlFor={`q2h-${c.id}`}>2da quincena — hasta (vacío = fin de mes)</label>
-                <input id={`q2h-${c.id}`} className="input" type="number" style={{ width: 70 }}
-                  value={edicion.corteQ2Hasta ?? ''} onChange={(e) => setEdicion((v) => ({ ...v, corteQ2Hasta: e.target.value ? Number(e.target.value) : null }))} />
-                <label htmlFor={`mesd-${c.id}`}>Mensual — desde</label>
-                <input id={`mesd-${c.id}`} className="input" type="number" style={{ width: 70 }}
-                  value={edicion.corteMensualDesde} onChange={(e) => setEdicion((v) => ({ ...v, corteMensualDesde: Number(e.target.value) }))} />
-                <label htmlFor={`mesh-${c.id}`}>Mensual — hasta (vacío = fin de mes)</label>
-                <input id={`mesh-${c.id}`} className="input" type="number" style={{ width: 70 }}
-                  value={edicion.corteMensualHasta ?? ''} onChange={(e) => setEdicion((v) => ({ ...v, corteMensualHasta: e.target.value ? Number(e.target.value) : null }))} />
+            <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+              <div className="input-group input-medio" style={{ marginBottom: 16 }}>
+                <label className="input-label" htmlFor={`modalidad-${c.id}`}>Modalidad</label>
+                <select id={`modalidad-${c.id}`} className="input"
+                  value={edicion.modalidad} onChange={(e) => setEdicion((v) => ({ ...v, modalidad: e.target.value }))}>
+                  <option value="quincenal">Quincenal</option>
+                  <option value="mensual">Mensual</option>
+                </select>
               </div>
-              {errorEditar && <p style={{ color: 'var(--danger)' }}>{errorEditar}</p>}
-              <div>
+
+              {/* Solo se muestran los cortes de la modalidad elegida: antes
+                  se veían los seis campos juntos aunque cuatro no aplicaran. */}
+              {edicion.modalidad === 'quincenal' ? (
+                <>
+                  <div className="grupo-cortes">
+                    <span className="grupo-cortes-titulo">1ra quincena</span>
+                    <div className="cortes-fila">
+                      {/* El label visible es corto porque el grupo ya dice de
+                          qué quincena se trata; el aria-label mantiene el
+                          nombre completo para lectores de pantalla. */}
+                      <div className="input-group">
+                        <label className="input-label" htmlFor={`q1d-${c.id}`}>Día desde</label>
+                        <input id={`q1d-${c.id}`} aria-label="1ra quincena — desde" className="input input-dia" type="number" min="1" max="31"
+                          value={edicion.corteQ1Desde} onChange={(e) => setEdicion((v) => ({ ...v, corteQ1Desde: Number(e.target.value) }))} />
+                      </div>
+                      <div className="input-group">
+                        <label className="input-label" htmlFor={`q1h-${c.id}`}>Día hasta</label>
+                        <input id={`q1h-${c.id}`} aria-label="1ra quincena — hasta" className="input input-dia" type="number" min="1" max="31"
+                          value={edicion.corteQ1Hasta} onChange={(e) => setEdicion((v) => ({ ...v, corteQ1Hasta: Number(e.target.value) }))} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grupo-cortes">
+                    <span className="grupo-cortes-titulo">2da quincena</span>
+                    <div className="cortes-fila">
+                      <div className="input-group">
+                        <label className="input-label" htmlFor={`q2d-${c.id}`}>Día desde</label>
+                        <input id={`q2d-${c.id}`} aria-label="2da quincena — desde" className="input input-dia" type="number" min="1" max="31"
+                          value={edicion.corteQ2Desde} onChange={(e) => setEdicion((v) => ({ ...v, corteQ2Desde: Number(e.target.value) }))} />
+                      </div>
+                      <div className="input-group">
+                        <label className="input-label" htmlFor={`q2h-${c.id}`}>Día hasta</label>
+                        <input id={`q2h-${c.id}`} aria-label="2da quincena — hasta" className="input input-dia" type="number" min="1" max="31" placeholder="fin"
+                          value={edicion.corteQ2Hasta ?? ''} onChange={(e) => setEdicion((v) => ({ ...v, corteQ2Hasta: e.target.value ? Number(e.target.value) : null }))} />
+                      </div>
+                      <span className="cortes-ayuda">Vacío = último día del mes</span>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="grupo-cortes">
+                  <span className="grupo-cortes-titulo">Período mensual</span>
+                  <div className="cortes-fila">
+                    <div className="input-group">
+                      <label className="input-label" htmlFor={`mesd-${c.id}`}>Día desde</label>
+                      <input id={`mesd-${c.id}`} aria-label="Mensual — desde" className="input input-dia" type="number" min="1" max="31"
+                        value={edicion.corteMensualDesde} onChange={(e) => setEdicion((v) => ({ ...v, corteMensualDesde: Number(e.target.value) }))} />
+                    </div>
+                    <div className="input-group">
+                      <label className="input-label" htmlFor={`mesh-${c.id}`}>Día hasta</label>
+                      <input id={`mesh-${c.id}`} aria-label="Mensual — hasta" className="input input-dia" type="number" min="1" max="31" placeholder="fin"
+                        value={edicion.corteMensualHasta ?? ''} onChange={(e) => setEdicion((v) => ({ ...v, corteMensualHasta: e.target.value ? Number(e.target.value) : null }))} />
+                    </div>
+                    <span className="cortes-ayuda">Vacío = último día del mes</span>
+                  </div>
+                </div>
+              )}
+
+              {errorEditar && <p style={{ color: 'var(--danger)', marginBottom: 10 }}>{errorEditar}</p>}
+              <div className="acciones">
                 <button className="btn btn-primary btn-sm" onClick={guardarEdicion}>Guardar cambios</button>
-                <button className="btn btn-ghost btn-sm" style={{ marginLeft: 8 }} onClick={() => { setEditandoId(null); setErrorEditar('') }}>Cancelar</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => { setEditandoId(null); setErrorEditar('') }}>Cancelar</button>
               </div>
             </div>
           )}
@@ -91,25 +141,35 @@ export default function TabConvenios({ empresaId }) {
 
       {!creando && <button className="btn btn-primary btn-sm" onClick={() => setCreando(true)}>Nuevo convenio</button>}
       {creando && (
-        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <label htmlFor="nc-nombre">Nombre</label>
-          <input id="nc-nombre" className="input" value={nuevo.nombre} onChange={(e) => setNuevo((v) => ({ ...v, nombre: e.target.value }))} />
-          <label htmlFor="nc-regimen">Régimen</label>
-          <select id="nc-regimen" className="input" style={{ maxWidth: 200 }}
-            value={nuevo.regimen} onChange={(e) => setNuevo((v) => ({ ...v, regimen: e.target.value }))}>
-            <option value="lct">LCT (Ley 20.744)</option>
-            <option value="22250">Construcción (Ley 22.250)</option>
-          </select>
-          <label htmlFor="nc-modalidad">Modalidad</label>
-          <select id="nc-modalidad" className="input" style={{ maxWidth: 200 }}
-            value={nuevo.modalidad} onChange={(e) => setNuevo((v) => ({ ...v, modalidad: e.target.value }))}>
-            <option value="quincenal">Quincenal</option>
-            <option value="mensual">Mensual</option>
-          </select>
-          {errorCrear && <p style={{ color: 'var(--danger)' }}>{errorCrear}</p>}
-          <div>
+        <div className="card">
+          <h3 style={{ fontSize: '1rem', marginBottom: 12 }}>Nuevo convenio</h3>
+          <div className="form-grid" style={{ marginBottom: 14 }}>
+            <div className="input-group">
+              <label className="input-label" htmlFor="nc-nombre">Nombre</label>
+              <input id="nc-nombre" className="input" placeholder="ej: UOCRA"
+                value={nuevo.nombre} onChange={(e) => setNuevo((v) => ({ ...v, nombre: e.target.value }))} />
+            </div>
+            <div className="input-group">
+              <label className="input-label" htmlFor="nc-regimen">Régimen</label>
+              <select id="nc-regimen" className="input"
+                value={nuevo.regimen} onChange={(e) => setNuevo((v) => ({ ...v, regimen: e.target.value }))}>
+                <option value="lct">LCT (Ley 20.744)</option>
+                <option value="22250">Construcción (Ley 22.250)</option>
+              </select>
+            </div>
+            <div className="input-group">
+              <label className="input-label" htmlFor="nc-modalidad">Modalidad</label>
+              <select id="nc-modalidad" className="input"
+                value={nuevo.modalidad} onChange={(e) => setNuevo((v) => ({ ...v, modalidad: e.target.value }))}>
+                <option value="quincenal">Quincenal</option>
+                <option value="mensual">Mensual</option>
+              </select>
+            </div>
+          </div>
+          {errorCrear && <p style={{ color: 'var(--danger)', marginBottom: 10 }}>{errorCrear}</p>}
+          <div className="acciones">
             <button className="btn btn-primary btn-sm" onClick={handleCrear} disabled={!nuevo.nombre.trim()}>Guardar convenio</button>
-            <button className="btn btn-ghost btn-sm" style={{ marginLeft: 8 }} onClick={() => { setCreando(false); setErrorCrear('') }}>Cancelar</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => { setCreando(false); setErrorCrear('') }}>Cancelar</button>
           </div>
         </div>
       )}

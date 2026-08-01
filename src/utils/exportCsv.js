@@ -6,10 +6,29 @@ const escaparCsv = (v) => {
   return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 
-// Pura (sin DOM), testeable directamente.
+// Formatea un número para CSV en configuración regional es-AR: coma como
+// separador decimal, SIN separador de miles (si lo tuviera, un punto de
+// miles rompería el parseo de Excel al abrir el archivo — el mismo bug que
+// se arregla acá, pero al revés). Bug original: los números se escribían
+// con String(v), o sea con punto decimal ("352594.48"); Excel es-AR
+// interpreta ese punto como separador de miles, no de decimales, y el
+// número deja de ser válido.
+const formatearNumero = (v) => {
+  const n = Number(v ?? 0)
+  if (Number.isNaN(n)) return escaparCsv(v)
+  return n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false })
+}
+
+// Pura (sin DOM), testeable directamente. `columnas` es
+// `{ titulo, valor, tipo? }`: tipo 'numero' formatea con coma decimal
+// es-AR; cualquier otro valor (o ausente) se trata como texto plano, igual
+// que antes.
 export function armarCsv(columnas, filas) {
   const encabezado = columnas.map((c) => escaparCsv(c.titulo)).join(';')
-  const cuerpo = filas.map((fila) => columnas.map((c) => escaparCsv(c.valor(fila))).join(';')).join('\n')
+  const cuerpo = filas.map((fila) => columnas.map((c) => {
+    const v = c.valor(fila)
+    return c.tipo === 'numero' ? formatearNumero(v) : escaparCsv(v)
+  }).join(';')).join('\n')
   return `${encabezado}\n${cuerpo}`
 }
 

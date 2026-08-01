@@ -1,5 +1,7 @@
-import { describe, it, expect } from 'vitest'
-import { agruparVigencias, categoriaFromDB } from '../escalasStore'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { agruparVigencias, categoriaFromDB, useEscalasStore } from '../escalasStore'
+
+vi.mock('../../lib/supabase', () => ({ supabase: { from: vi.fn() } }))
 
 describe('agruparVigencias', () => {
   it('agrupa por nombre con el valor vigente (mayor vigencia <= hoy) y el historial ordenado', () => {
@@ -41,5 +43,40 @@ describe('categoriaFromDB', () => {
   it('categoriaFromDB incluye la modalidad', () => {
     const row = { id: 'c1', convenio_id: 'v1', nombre: 'Oficial', basico: 1000, vigencia_desde: '2026-01-01', modalidad: 'mensual' }
     expect(categoriaFromDB(row).modalidad).toBe('mensual')
+  })
+})
+
+describe('cargarEscala — cache por convenio', () => {
+  beforeEach(async () => {
+    useEscalasStore.setState({ categorias: [], cargando: false, error: null, cargadoConvenioId: null })
+    const { supabase } = await import('../../lib/supabase')
+    supabase.from.mockReset()
+    supabase.from.mockImplementation(() => {
+      const chain = {
+        select: vi.fn(() => chain),
+        eq: vi.fn(() => chain),
+        order: vi.fn(function (...args) {
+          // El segundo .order() (vigencia_desde) cierra la cadena.
+          if (this._ordenados) return Promise.resolve({ data: [], error: null })
+          this._ordenados = true
+          return chain
+        }),
+      }
+      return chain
+    })
+  })
+
+  it('no vuelve a pedir si ya cargó para el mismo convenio', async () => {
+    await useEscalasStore.getState().cargarEscala('conv-1')
+    await useEscalasStore.getState().cargarEscala('conv-1')
+    const { supabase } = await import('../../lib/supabase')
+    expect(supabase.from).toHaveBeenCalledTimes(1)
+  })
+
+  it('vuelve a pedir si cambia el convenio', async () => {
+    await useEscalasStore.getState().cargarEscala('conv-1')
+    await useEscalasStore.getState().cargarEscala('conv-2')
+    const { supabase } = await import('../../lib/supabase')
+    expect(supabase.from).toHaveBeenCalledTimes(2)
   })
 })

@@ -25,19 +25,21 @@ const items = [
 // funcionando en el repo; no inventar otro método.
 const textoDe = (doc) => doc.internal.pages.map((p) => (Array.isArray(p) ? p.join(' ') : '')).join(' ')
 
+// generarReciboPdf es async desde que jsPDF se carga con import() dinámico
+// (src/utils/cargarJsPDF.js), de ahí los await.
 describe('generarReciboPdf (formato costo laboral vertical)', () => {
-  it('devuelve un jsPDF en A4 vertical', () => {
-    const doc = generarReciboPdf({ ...cabecera, items })
+  it('devuelve un jsPDF en A4 vertical', async () => {
+    const doc = await generarReciboPdf({ ...cabecera, items })
     expect(doc).toBeTruthy()
     expect(doc.internal.pageSize.getWidth()).toBeLessThan(doc.internal.pageSize.getHeight()) // portrait
   })
 
-  it('no lanza con items vacíos', () => {
-    expect(() => generarReciboPdf({ ...cabecera, items: [] })).not.toThrow()
+  it('no lanza con items vacíos', async () => {
+    await expect(generarReciboPdf({ ...cabecera, items: [] })).resolves.toBeTruthy()
   })
 
-  it('escribe los títulos de sección del modelo', () => {
-    const doc = generarReciboPdf({ ...cabecera, items })
+  it('escribe los títulos de sección del modelo', async () => {
+    const doc = await generarReciboPdf({ ...cabecera, items })
     const texto = textoDe(doc)
     // Substrings SOLO ASCII: los acentos se codifican distinto en el stream.
     expect(texto).toContain('COSTO TOTAL EMPLEADOR')
@@ -47,8 +49,8 @@ describe('generarReciboPdf (formato costo laboral vertical)', () => {
     expect(texto).toContain('Detalle de la')
   })
 
-  it('incluye el nombre de la empresa y del empleado', () => {
-    const doc = generarReciboPdf({ ...cabecera, items })
+  it('incluye el nombre de la empresa y del empleado', async () => {
+    const doc = await generarReciboPdf({ ...cabecera, items })
     const texto = textoDe(doc)
     expect(texto).toContain('LA EMPRESA S.A.')
     expect(texto).toContain('Perez')

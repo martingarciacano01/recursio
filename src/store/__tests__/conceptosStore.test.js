@@ -1,5 +1,11 @@
-import { describe, it, expect } from 'vitest'
-import { conceptoFromDB, conceptoToDB } from '../conceptosStore'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { conceptoFromDB, conceptoToDB, useConceptosStore } from '../conceptosStore'
+
+vi.mock('../../lib/supabase', () => ({
+  supabase: { from: vi.fn() },
+}))
+
+import { supabase } from '../../lib/supabase'
 
 describe('mappers de conceptos', () => {
   it('conceptoFromDB mapea snake_case a camelCase incluyendo reglas anidadas', () => {
@@ -44,5 +50,29 @@ describe('mappers de conceptos', () => {
     expect(row.categorias).toBeNull()
     expect(row.config).toBeNull()
     expect(row.codigo_recibo).toBeNull()
+  })
+})
+
+describe('cargarConceptos — cache por empresa', () => {
+  beforeEach(() => {
+    useConceptosStore.setState({ conceptos: [], cargando: false, error: null, cargadoEmpresaId: null })
+    supabase.from.mockReset()
+    supabase.from.mockImplementation(() => ({
+      select: vi.fn().mockReturnThis(),
+      or: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [], error: null }),
+    }))
+  })
+
+  it('no vuelve a pedir si ya cargó para la misma empresa', async () => {
+    await useConceptosStore.getState().cargarConceptos('empresa-1')
+    await useConceptosStore.getState().cargarConceptos('empresa-1')
+    expect(supabase.from).toHaveBeenCalledTimes(1)
+  })
+
+  it('vuelve a pedir si cambia la empresa', async () => {
+    await useConceptosStore.getState().cargarConceptos('empresa-1')
+    await useConceptosStore.getState().cargarConceptos('empresa-2')
+    expect(supabase.from).toHaveBeenCalledTimes(2)
   })
 })

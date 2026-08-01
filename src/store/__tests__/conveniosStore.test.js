@@ -82,3 +82,27 @@ describe('actualizarConvenio', () => {
     expect(actualizado.nombre).toBe('UOCRA')
   })
 })
+
+describe('cargarConvenios — cache por empresa', () => {
+  beforeEach(() => {
+    useConveniosStore.setState({ convenios: [], cargando: false, error: null, cargadoEmpresaId: null })
+    supabase.from.mockReset()
+    supabase.from.mockImplementation(() => ({
+      select: vi.fn().mockReturnThis(),
+      or: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [], error: null }),
+    }))
+  })
+
+  it('no vuelve a pedir si ya cargó para la misma empresa', async () => {
+    await useConveniosStore.getState().cargarConvenios('empresa-1')
+    await useConveniosStore.getState().cargarConvenios('empresa-1')
+    expect(supabase.from).toHaveBeenCalledTimes(1)
+  })
+
+  it('vuelve a pedir si cambia la empresa', async () => {
+    await useConveniosStore.getState().cargarConvenios('empresa-1')
+    await useConveniosStore.getState().cargarConvenios('empresa-2')
+    expect(supabase.from).toHaveBeenCalledTimes(2)
+  })
+})

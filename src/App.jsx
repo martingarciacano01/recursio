@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { useAuthStore } from './store/authStore'
+import { useTemaStore } from './store/temaStore'
 import ProtectedRoute from './components/ProtectedRoute'
 import Layout from './components/Layout'
 import LoginPage from './pages/LoginPage'
@@ -20,10 +21,15 @@ import UsuariosPage from './pages/UsuariosPage'
 // shell completo (Layout + Sidebar), no una página en blanco.
 function App() {
   const cargarSesion = useAuthStore((s) => s.cargarSesion)
+  const initTema = useTemaStore((s) => s.init)
 
   useEffect(() => {
     cargarSesion()
   }, [cargarSesion])
+
+  // Aplica el tema guardado y queda escuchando cambios del sistema
+  // mientras la preferencia sea "automático".
+  useEffect(() => initTema(), [initTema])
 
   return (
     <BrowserRouter>

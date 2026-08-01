@@ -23,3 +23,21 @@ export function agruparAusencias(ausencias, anio) {
     totalDiasInjustificadas: sumar(injustificadas),
   }
 }
+
+// Cuenta los días "falta sin fichaje" que devuelve construirDiasPeriodo
+// (packages/motor/src/asistencia.ts): día laborable, sin entrada registrada
+// y sin ninguna ausencia (licencia) que lo cubra. Es la MISMA regla que usa
+// calcularAsistencia para descontar faltasInjustificadas en la liquidación,
+// y coincide con lo que Presencio llama "FALTA NO JUSTIFICADA"/"faltas no
+// justificadas" en su pantalla de Reportes — a diferencia de
+// agruparAusencias (arriba), que solo mira licencias explícitas cargadas en
+// la tabla `ausencias` (casi siempre 0, porque una falta sin aviso nunca se
+// carga como licencia). "Injustificadas" en la pestaña Ausencias del legajo
+// usa esto, no la tabla `ausencias`, para coincidir con el número que
+// Martin ve en Presencio (2026-07-30: "fijate que no dan lo mismo" — el
+// motivo era justamente que antes se usaba la tabla, casi siempre vacía).
+export function contarFaltasSinFichaje(dias) {
+  return dias.filter(
+    (d) => d.horaEntradaEsperada !== null && d.horaEntradaReal === null && !d.ausenciaAprobada
+  ).length
+}

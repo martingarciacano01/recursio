@@ -24,15 +24,16 @@ export function agruparVigencias(filas, hoy) {
     })
 }
 
-export const useEscalasStore = create((set) => ({
-  categorias: [], cargando: false, error: null,
+export const useEscalasStore = create((set, get) => ({
+  categorias: [], cargando: false, error: null, cargadoConvenioId: null,
 
-  cargarEscala: async (convenioId) => {
+  cargarEscala: async (convenioId, { forzar = false } = {}) => {
+    if (!forzar && get().cargadoConvenioId === convenioId && !get().error) return
     set({ cargando: true, error: null })
     const { data, error } = await supabase.from('nom_categorias').select('*')
       .eq('convenio_id', convenioId).order('nombre').order('vigencia_desde', { ascending: false })
     if (error) { set({ error: error.message, cargando: false }); return }
-    set({ categorias: (data || []).map(categoriaFromDB), cargando: false })
+    set({ categorias: (data || []).map(categoriaFromDB), cargando: false, cargadoConvenioId: convenioId })
   },
 
   // Alta de una vigencia nueva para varias categorías a la vez (paritaria).

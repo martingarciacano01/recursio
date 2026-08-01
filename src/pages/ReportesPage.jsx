@@ -54,6 +54,15 @@ export default function ReportesPage() {
   }, [periodoId, empresaId])
 
   const periodo = periodos.find((p) => p.id === periodoId)
+  // Ya formatea en es-AR con separador de miles ("100.000,00") ANTES de
+  // pasarlo a exportarCsv — por eso las columnas de acá NO llevan
+  // `tipo: 'numero'` (ver src/utils/exportCsv.js): ese tipo espera un
+  // número crudo y lo formatea él mismo sin separador de miles; aplicarlo
+  // sobre un string ya formateado como "100.000,00" lo rompería
+  // (Number("100.000,00") no da el valor esperado). El bug de
+  // LiquidacionPage.jsx (números crudos con punto decimal, que Excel
+  // es-AR interpretaba como separador de miles) no ocurre acá porque
+  // nunca se exportó un número sin pasar por este `fmt`.
   const fmt = (n) => (Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
   const reportePago = () => {
@@ -151,7 +160,7 @@ export default function ReportesPage() {
 
       {empresaActiva && (
         <>
-          <div className="card" style={{ marginBottom: '1rem', display: 'flex', gap: 12, alignItems: 'center' }}>
+          <div className="card card-compacta" style={{ marginBottom: '1rem', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             <SelectorPeriodo periodos={periodos} value={periodoId} onChange={(v) => { setPeriodoId(v); setAlertaEscala(null) }} />
           </div>
 
