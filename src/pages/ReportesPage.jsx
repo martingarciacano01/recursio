@@ -33,6 +33,7 @@ export default function ReportesPage() {
   }, [empresaId])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset intencional al no haber período seleccionado.
     if (!periodoId) { setLiquidaciones([]); setItems([]); return }
     setCargando(true)
     Promise.all([

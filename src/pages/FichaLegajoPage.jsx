@@ -57,6 +57,7 @@ export default function FichaLegajoPage() {
     // Reset explícito: sin esto, al navegar de una ficha a otra la página
     // muestra por un instante los datos de la persona anterior mientras
     // llegan las nuevas cargas (revisión de calidad, Task 10).
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset intencional al cambiar de persona.
     setPersona(null)
     setAusencias([])
     setLiquidaciones([])

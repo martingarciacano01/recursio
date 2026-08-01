@@ -51,6 +51,7 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId, inici
   // usuario está tipeando si otra carga refresca el legajo.
   useEffect(() => {
     if (!legajo || editando) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resync intencional del form al llegar/cambiar el legajo.
     setForm({
       cuil: legajo.cuil || '',
       cbu: legajo.cbu || '',
@@ -94,6 +95,7 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId, inici
     // clon de la empresa pisa al global homónimo en el <select>
     // (filtrarConveniosVisibles); esta lista sin filtrar solo se usa para
     // resolver el nombre en la vista de solo lectura.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- kickoff intencional del fetch inicial de convenios.
     setCargandoConvenios(true)
     supabase.from('nom_convenios').select('id, nombre, empresa_id').order('nombre')
       .then(({ data }) => { setTodosConvenios(data || []); setCargandoConvenios(false) })
@@ -104,6 +106,7 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId, inici
   // solo lectura resuelve el nombre de la categoría sin depender del resync.
   const convenioParaCategorias = form.convenioId || legajo?.convenioId || ''
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset/kickoff intencional al cambiar de convenio.
     if (!convenioParaCategorias) { setTodasCategorias([]); setCargandoCategorias(false); return }
     setCargandoCategorias(true)
     supabase.from('nom_categorias').select('id, nombre, vigencia_desde').eq('convenio_id', convenioParaCategorias).order('nombre')

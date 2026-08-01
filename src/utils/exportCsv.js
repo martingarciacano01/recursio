@@ -34,6 +34,7 @@ export function armarCsv(columnas, filas) {
 
 export function exportarCsv(nombreArchivo, columnas, filas) {
   const contenido = armarCsv(columnas, filas)
+  // eslint-disable-next-line no-irregular-whitespace -- BOM intencional para que Excel detecte UTF-8.
   const blob = new Blob([`﻿${contenido}`], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')

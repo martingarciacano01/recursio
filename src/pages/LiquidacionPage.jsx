@@ -87,6 +87,7 @@ export default function LiquidacionPage() {
 
   useEffect(() => {
     cargarPeriodos()
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset intencional al cambiar de empresa.
     setPeriodoSeleccionado('')
     if (!empresaId) return
     supabase.from('nom_v_personal').select('id, nombre').eq('empresa_id', empresaId)
@@ -106,6 +107,7 @@ export default function LiquidacionPage() {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset intencional al cambiar de período.
     setLiqExpandida(null)
     setItemsPorLiq({})
     if (periodoSeleccionado) cargarLiquidaciones(periodoSeleccionado)

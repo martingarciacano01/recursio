@@ -29,6 +29,7 @@ export default function TabAlertas({ empresaId }) {
   useEffect(() => { if (empresaId) cargarParametros(empresaId) }, [empresaId])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resync intencional del form local cuando cambian los parámetros cargados.
     setValores(Object.fromEntries(
       ALERTAS.map((a) => [a.codigo, String(valorAlerta(parametros, a.codigo, a.porDefecto))])
     ))

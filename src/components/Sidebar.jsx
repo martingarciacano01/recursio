@@ -15,7 +15,7 @@ import {
 // `accion` (Fase 5G Task 29): gating de UI por rol de nómina (ver
 // src/utils/permisos.js). Dashboard no tiene `accion` = siempre visible
 // para cualquier usuario logueado.
-export const NAV_ITEMS = [
+const NAV_ITEMS = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/liquidacion', icon: Calculator, label: 'Liquidaciones', accion: 'ver_liquidacion' },
   { to: '/legajos', icon: FileText, label: 'Legajos', accion: 'ver_legajos' },

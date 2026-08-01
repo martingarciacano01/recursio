@@ -13,6 +13,7 @@ export default function Layout() {
   const { pathname } = useLocation()
 
   // Al navegar se cierra el drawer.
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resync intencional del estado UI local al cambiar de ruta.
   useEffect(() => { setMenuAbierto(false) }, [pathname])
 
   // Bloquea el scroll del fondo mientras el drawer está abierto.

@@ -14,6 +14,7 @@ export default function TabEmpresa({ empresaId }) {
   const inputArchivo = useRef(null)
 
   useEffect(() => { if (empresaId) cargar(empresaId) }, [empresaId])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resync intencional del form local cuando llegan los datos de la empresa.
   useEffect(() => { setForm({ cuit, domicilio }) }, [cuit, domicilio])
 
   if (cargando) return <div className="card">Cargando…</div>

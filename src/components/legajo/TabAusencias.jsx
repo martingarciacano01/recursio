@@ -47,6 +47,7 @@ export default function TabAusencias({ ausencias, personalId, legajo }) {
 
   useEffect(() => {
     let cancelado = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset intencional del error antes de re-disparar la carga.
     setErrorFichajes('')
     supabase.from('nom_v_horas_dia').select('tipo, timestamp')
       .eq('personal_id', personalId)

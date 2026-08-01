@@ -55,7 +55,7 @@ describe('cargarEscala — cache por convenio', () => {
       const chain = {
         select: vi.fn(() => chain),
         eq: vi.fn(() => chain),
-        order: vi.fn(function (...args) {
+        order: vi.fn(function () {
           // El segundo .order() (vigencia_desde) cierra la cadena.
           if (this._ordenados) return Promise.resolve({ data: [], error: null })
           this._ordenados = true

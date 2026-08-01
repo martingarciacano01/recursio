@@ -22,7 +22,7 @@ import TabConvenios from '../components/config/TabConvenios'
 //   · "Empresa"   -> parámetros generales que no dependen del convenio.
 // El selector de convenio solo aparece dentro de la sección Convenios, que es
 // donde realmente aplica.
-export const SECCIONES = [
+const SECCIONES = [
   {
     id: 'convenios',
     label: 'Convenios',
@@ -60,6 +60,7 @@ export default function ConfiguracionPage() {
   useEffect(() => {
     if (!convenioId && convenios.length > 0) {
       const propio = convenios.find((c) => c.empresaId === empresaActiva?.id)
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- selección por defecto intencional cuando llegan los convenios.
       setConvenioId((propio || convenios[0]).id)
     }
   }, [convenios, convenioId, empresaActiva?.id])

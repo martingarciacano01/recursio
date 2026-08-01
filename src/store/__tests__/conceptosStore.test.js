@@ -18,7 +18,7 @@ describe('mappers de conceptos', () => {
     expect(r).toEqual({
       id: 'c1', empresaId: null, convenioId: 'cv1', codigo: 'presentismo', nombre: 'Presentismo',
       tipo: 'remunerativo', formula: 'remunerativo_acumulado * 0.0833', orden: 2, imprimible: true,
-      categorias: null, config: null, codigoRecibo: null,
+      categorias: null, config: null, codigoRecibo: null, asignacion: 'categoria',
       reglas: [{ id: 'r1', orden: 1, condicion: 'tardanzas > 3', formula: '0' }],
     })
   })
@@ -28,7 +28,7 @@ describe('mappers de conceptos', () => {
     expect(conceptoToDB(concepto, 'e1')).toEqual({
       empresa_id: 'e1', convenio_id: 'cv1', codigo: 'basico', nombre: 'Básico',
       tipo: 'remunerativo', formula: 'basico_convenio', orden: 1, imprimible: true,
-      categorias: null, config: null, codigo_recibo: null,
+      categorias: null, config: null, codigo_recibo: null, asignacion: 'categoria',
     })
   })
 

@@ -56,6 +56,7 @@ export default function LiquidacionesIndividuales({ empresaId }) {
   useEffect(cargarHistorial, [empresaId])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset intencional al cambiar de persona, antes de disparar las cargas.
     setLegajo(null); setAusencias([]); setVacacionesLiquidadas([])
     setAusenciaElegida(''); setManual(false); setFechaDesde(''); setFechaHasta('')
     setErrorVac(''); setErrorFinal('')

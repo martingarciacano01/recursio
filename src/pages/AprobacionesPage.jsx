@@ -25,8 +25,6 @@ export default function AprobacionesPage() {
     await cargarInstancias()
   }
 
-  const masivas = instancias.filter((i) => seleccion.includes(i.id))
-
   return (
     <div className="page">
       <div className="page-header">

@@ -43,6 +43,7 @@ export default function SuperAdminPage() {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- kickoff intencional del fetch inicial.
     cargarEmpresas()
   }, [])
 

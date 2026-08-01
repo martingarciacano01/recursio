@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { validarYGenerarFormula } from '../FormularioConcepto'
+import { validarYGenerarFormula } from '../validarFormula'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import FormularioConcepto from '../FormularioConcepto'
 
