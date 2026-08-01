@@ -64,6 +64,29 @@ Deno.serve(async (req) => {
   let periodoId: string | undefined
   let supabase: ReturnType<typeof createClient> | undefined
   try {
+  // El cliente de datos usa service_role (saltea RLS a propósito, para
+  // poder liquidar a toda la empresa de una), así que la autorización NO
+  // la puede delegar en RLS: hay que validarla acá explícitamente.
+  // Sin esto, cualquier usuario autenticado del proyecto puede pasar el
+  // periodoId de OTRA empresa y liquidarle la nómina (hallazgo Fase 5H).
+  const authHeader = req.headers.get('Authorization')
+  if (!authHeader) {
+    return new Response(JSON.stringify({ error: 'falta header Authorization' }), {
+      status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+  const supabaseAuth = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_ANON_KEY')!,
+    { global: { headers: { Authorization: authHeader } } }
+  )
+  const { data: { user }, error: errUser } = await supabaseAuth.auth.getUser()
+  if (errUser || !user) {
+    return new Response(JSON.stringify({ error: 'no autenticado' }), {
+      status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+
   const body = await req.json()
   periodoId = body.periodoId
   const personalIds = body.personalIds
@@ -76,7 +99,8 @@ Deno.serve(async (req) => {
     // inexistente, permiso denegado, etc.) en el mismo "período no
     // encontrado", ocultando la causa real. Devolvemos el mensaje real
     // del error para poder diagnosticar sin acceso a los logs de Supabase.
-    return new Response(JSON.stringify({ error: `error al buscar el período: ${errPeriodo.message}`, code: errPeriodo.code }), {
+    console.error('liquidar-periodo: error al buscar el período', { periodoId, err: errPeriodo })
+    return new Response(JSON.stringify({ error: 'no se pudo leer el período solicitado' }), {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }
@@ -85,6 +109,29 @@ Deno.serve(async (req) => {
       status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }
+
+  // El usuario tiene que pertenecer a la empresa del período y tener un rol
+  // que habilite calcular (matriz de src/utils/permisos.js: calcular_liquidacion
+  // => admin, rrhh). Se consulta con el cliente service_role porque
+  // nom_usuarios_empresas tiene RLS y acá todavía no hay contexto de usuario.
+  // El criterio de superadmin es el mismo que usa el resto del repo
+  // (RPC is_superadmin(), ver 0008_superadmin_bypass.sql e invitar-usuario).
+  const { data: esSuperadmin } = await supabaseAuth.rpc('is_superadmin')
+  if (!esSuperadmin) {
+    const { data: vinculos } = await supabase
+      .from('nom_usuarios_empresas')
+      .select('rol')
+      .eq('usuario_id', user.id)
+      .eq('empresa_id', periodo.empresa_id)
+    const rolesDelUsuario = (vinculos || []).map((v: any) => v.rol)
+    const ROLES_QUE_LIQUIDAN = ['admin', 'rrhh']
+    if (!rolesDelUsuario.some((r: string) => ROLES_QUE_LIQUIDAN.includes(r))) {
+      return new Response(JSON.stringify({ error: 'sin permiso para liquidar este período' }), {
+        status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+  }
+
   if (periodo.estado === 'cerrado') {
     return new Response(JSON.stringify({ error: 'período cerrado: no se puede recalcular' }), {
       status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
