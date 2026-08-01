@@ -35,7 +35,13 @@ dist-ssr
 # Estado local del CLI de Supabase (link al proyecto remoto, no es del repo)
 supabase/.temp/
 
+# Dumps de datos de producción — contienen PII real, jamás al repo
+scripts/.dumps/
+*.dump.sql
+prod_data*.sql
+
 # Archivos de scratch de sesiones de test/debug
 vitest.temp.config.js
 vitest_resultado.txt
 recibo-muestra.pdf
+.claude/settings.local.json
