@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { liquidarConceptos, filtrarPorCategoria, type Concepto } from './motor'
+import { liquidarConceptos, filtrarPorCategoria, filtrarAsignados, type Concepto } from './motor'
 import { generarFormula } from './formulas'
 
 const presentismoEscalonado = {
@@ -116,6 +116,63 @@ describe('filtrarPorCategoria', () => {
   })
   it('array vacío equivale a todas las categorías', () => {
     expect(filtrarPorCategoria([{ codigo: 'e', categorias: [] }], 'Oficial').map((c) => c.codigo)).toEqual(['e'])
+  })
+})
+
+describe('filtrarAsignados — adicionales por legajo (migración 0040)', () => {
+  const conceptos = [
+    { codigo: 'presentismo', categorias: ['Oficial'] }, // asignacion 'categoria' (default, no especificada)
+    { codigo: 'altura', categorias: null, asignacion: 'legajo' as const }, // solo por asignación al legajo
+    { codigo: 'zona_desfavorable', categorias: ['Ayudante'], asignacion: 'legajo' as const },
+  ]
+
+  it('un concepto asignacion=legajo NO entra por categoría: solo si está en el set de asignados', () => {
+    // "altura" tiene categorias:null (aplicaría a TODAS por filtrarPorCategoria normal)
+    // pero al ser asignacion:'legajo' eso se ignora — solo cuenta el set.
+    expect(filtrarAsignados(conceptos, 'Oficial', new Set()).map((c) => c.codigo)).toEqual(['presentismo'])
+  })
+
+  it('con el legajo asignado, el concepto asignacion=legajo entra sin importar la categoría', () => {
+    // zona_desfavorable está listado para 'Ayudante' pero el legajo es 'Oficial':
+    // igual entra porque lo que manda es la asignación explícita, no `categorias`.
+    const r = filtrarAsignados(conceptos, 'Oficial', new Set(['altura', 'zona_desfavorable']))
+    expect(r.map((c) => c.codigo).sort()).toEqual(['altura', 'presentismo', 'zona_desfavorable'])
+  })
+
+  it('los conceptos asignacion=categoria (default) siguen la lógica de siempre, ignoran el set de asignados', () => {
+    const r = filtrarAsignados(conceptos, 'Ayudante', new Set(['altura']))
+    // presentismo (categorias:['Oficial']) NO pasa para categoria 'Ayudante'; altura sí por estar asignado
+    expect(r.map((c) => c.codigo)).toEqual(['altura'])
+  })
+})
+
+describe('override de adicional por legajo vía generarFormula (Edge Function)', () => {
+  it('override porcentual usa % del básico, no el % configurado en el convenio', () => {
+    // Simula lo que hace aplicarOverridesAdicionales en liquidar-periodo/index.ts:
+    // el concepto trae una fórmula "de fábrica" del convenio, pero el override
+    // del legajo la pisa por completo antes de liquidar.
+    const alturaConvenio: Concepto = {
+      codigo: 'altura', nombre: 'Adicional altura', tipo: 'remunerativo', orden: 20,
+      formula: generarFormula({ modo: 'porcentaje', porcentaje: 5, base: 'remunerativo' }), // valor "de fábrica"
+      imprimible: true, asignacion: 'legajo',
+    }
+    const overridePisado: Concepto = {
+      ...alturaConvenio,
+      formula: generarFormula({ modo: 'porcentaje', porcentaje: 10, base: 'basico' }), // override del legajo: 10% del básico
+    }
+    const basicoConcepto: Concepto = { codigo: 'basico', nombre: 'Básico', tipo: 'remunerativo', orden: 1, formula: 'basico_periodo', imprimible: true }
+    const r = liquidarConceptos([basicoConcepto, overridePisado], { basico_periodo: 200000 })
+    const item = r.items.find((i) => i.codigo === 'altura')!
+    expect(item.monto).toBeCloseTo(20000, 2) // 10% de 200000, no 5% de remunerativo_acumulado
+  })
+
+  it('override nominal fija un monto propio, independiente del básico', () => {
+    const overrideNominal: Concepto = {
+      codigo: 'altura', nombre: 'Adicional altura', tipo: 'remunerativo', orden: 20,
+      formula: generarFormula({ modo: 'nominal', monto: 45000 }), imprimible: true, asignacion: 'legajo',
+    }
+    const r = liquidarConceptos([overrideNominal], {})
+    expect(r.items[0].monto).toBe(45000)
   })
 })
 

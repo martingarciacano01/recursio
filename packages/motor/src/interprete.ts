@@ -372,6 +372,13 @@ function evaluarNodo(nodo: Nodo, vars: Record<string, Valor>): Valor {
             throw new Error('round necesita exactamente un argumento numérico')
           }
           return Math.round(args[0] * 100) / 100
+        case 'ceil':
+          // Redondeo hacia arriba al entero más próximo (ej. básico por hora:
+          // 71,26 horas se liquidan como 72 — ver packages/motor/src/basico.ts).
+          if (args.length !== 1) {
+            throw new Error('ceil necesita exactamente un argumento numérico')
+          }
+          return Math.ceil(args[0])
         default:
           throw new Error('función desconocida: ' + nodo.nombre)
       }

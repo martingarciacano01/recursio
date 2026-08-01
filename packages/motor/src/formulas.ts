@@ -6,7 +6,7 @@
 export interface ConfigConcepto {
   modo: 'porcentaje' | 'nominal'
   porcentaje?: number
-  base?: 'remunerativo' | 'no_remunerativo' | 'ambos' | 'acumulado_mensual'
+  base?: 'remunerativo' | 'no_remunerativo' | 'ambos' | 'acumulado_mensual' | 'basico'
   tope?: string | null
   monto?: number
 }
@@ -22,6 +22,10 @@ const BASES: Record<string, string> = {
   // 11% con tope SIPA) calcula sobre el acumulado del MES y no sobre cada
   // quincena por separado, evitando aplicar el tope dos veces.
   acumulado_mensual: '(remunerativo_acumulado + remunerativo_quincena1)',
+  // "% del básico" (adicionales por legajo, plan 2026-07-29 §3): ej. un
+  // adicional por trabajo en altura pactado como % del básico del convenio,
+  // no del acumulado remunerativo (que ya podría incluir otros adicionales).
+  basico: 'basico_periodo',
 }
 
 export function generarFormula(config: ConfigConcepto): string {

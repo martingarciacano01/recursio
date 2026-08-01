@@ -52,6 +52,18 @@ describe('evaluar', () => {
     expect(() => evaluar('round(1.5, 2)', {})).toThrow('round necesita exactamente un argumento numérico')
   })
 
+  it('ceil(71.26) da 72 (redondeo hacia arriba, usado por el básico por hora)', () => {
+    expect(evaluar('ceil(71.26)', {})).toBe(72)
+  })
+
+  it('ceil(78) de un entero exacto da el mismo entero', () => {
+    expect(evaluar('ceil(78)', {})).toBe(78)
+  })
+
+  it('ceil() sin argumentos tira error claro', () => {
+    expect(() => evaluar('ceil()', {})).toThrow('ceil necesita exactamente un argumento numérico')
+  })
+
   it('paréntesis sin cerrar da mensaje legible con posición, sin nombres internos de token', () => {
     expect(() => evaluar('(1 + 2', {})).toThrow(/se esperaba "\)".*en la posición/)
   })

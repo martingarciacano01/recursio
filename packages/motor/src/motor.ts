@@ -10,7 +10,7 @@ export interface ConfigRecibo {
 export interface ConfigConceptoMotor {
   modo?: 'porcentaje' | 'nominal'
   porcentaje?: number
-  base?: 'remunerativo' | 'no_remunerativo' | 'ambos' | 'acumulado_mensual'
+  base?: 'remunerativo' | 'no_remunerativo' | 'ambos' | 'acumulado_mensual' | 'basico'
   tope?: string | null
   monto?: number
   recibo?: ConfigRecibo
@@ -26,6 +26,13 @@ export interface Concepto {
   imprimible: boolean
   categorias?: string[] | null
   config?: ConfigConceptoMotor | null
+  // 'categoria' (default): se filtra por categoría, como siempre
+  // (filtrarPorCategoria). 'legajo': el concepto NO se aplica por categoría
+  // — solo a las personas que lo tengan asignado explícitamente en su
+  // legajo (nom_legajo_adicionales, ver migración 0040 y filtrarAsignados
+  // más abajo). Ej.: adicional por trabajo en altura, asignado persona por
+  // persona en vez de inventar una categoría por combinación.
+  asignacion?: 'categoria' | 'legajo'
 }
 
 export interface ItemLiquidado {
@@ -47,6 +54,12 @@ const BASES_EXPR: Record<string, string> = {
   no_remunerativo: 'no_remunerativo_acumulado',
   ambos: '(remunerativo_acumulado + no_remunerativo_acumulado)',
   acumulado_mensual: '(remunerativo_acumulado + remunerativo_quincena1)',
+  // "% del básico" (Fase adicionales por legajo, plan 2026-07-29 §3): un
+  // adicional como "trabajo en altura" suele pactarse como % del básico del
+  // convenio, no del acumulado remunerativo (que ya incluiría otros
+  // adicionales previos y distorsionaría el %). basico_periodo ya viene
+  // resuelto en variablesBase por liquidar-periodo/index.ts.
+  basico: 'basico_periodo',
 }
 
 // "10,77 %" — dos decimales, coma decimal (es-AR).
@@ -194,4 +207,22 @@ export function filtrarPorCategoria<T extends { categorias?: string[] | null }>(
   return conceptos.filter(
     (c) => !c.categorias || c.categorias.length === 0 || c.categorias.includes(categoriaNombre)
   )
+}
+
+// Igual que filtrarPorCategoria, pero además soporta conceptos con
+// `asignacion: 'legajo'` (adicionales por empleado, migración 0040): esos
+// NUNCA se filtran por categoría — solo entran si `asignadosPorLegajo`
+// (los códigos de concepto que este legajo puntual tiene asignados vigentes,
+// resuelto por el llamador contra nom_legajo_adicionales) los incluye. El
+// resto de los conceptos (asignacion 'categoria' o sin especificar) siguen
+// exactamente la lógica de siempre.
+export function filtrarAsignados<T extends { codigo: string; categorias?: string[] | null; asignacion?: 'categoria' | 'legajo' }>(
+  conceptos: T[],
+  categoriaNombre: string,
+  asignadosPorLegajo: Set<string>
+): T[] {
+  return conceptos.filter((c) => {
+    if (c.asignacion === 'legajo') return asignadosPorLegajo.has(c.codigo)
+    return !c.categorias || c.categorias.length === 0 || c.categorias.includes(categoriaNombre)
+  })
 }
