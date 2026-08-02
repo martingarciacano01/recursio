@@ -20,20 +20,53 @@ Deno.serve(async (req) => {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
+    // Validación de formato: el body llega directo del cliente sin pasar
+    // por RLS (esta función usa service_role recién más abajo), así que
+    // nada garantiza que `email`/`rol` tengan una forma sensata antes de
+    // esto — un email mal formado terminaría invitando a una dirección
+    // rara, y un `rol` fuera de la lista rompería el CHECK constraint de
+    // nom_usuarios_empresas (0025) con un error 500 poco claro.
+    const EMAIL_REGEX = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
+    if (!EMAIL_REGEX.test(email)) {
+      return new Response(JSON.stringify({ error: 'email inválido' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+    const ROLES_VALIDOS = ['admin', 'rrhh', 'consulta', 'supervisor', 'revisor_interno', 'revisor_externo', 'aprobador_pagos']
+    if (!ROLES_VALIDOS.includes(rol)) {
+      return new Response(JSON.stringify({ error: 'rol inválido' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
 
+    // Bug corregido (Fase 1, Task 1.4): las validaciones de abajo hacían
+    // supabase.rpc(...) con el cliente SERVICE_ROLE, que no lleva el JWT
+    // del llamante — dentro de esas funciones SQL, auth.uid() daba NULL y
+    // has_rol_nomina() devolvía false SIEMPRE, sin importar el rol real
+    // del usuario (403 permanente). Mismo patrón que liquidar-periodo
+    // (Task 1.1): un cliente "auth" con el Authorization del llamante
+    // para validar identidad/rol, y el cliente service_role reservado
+    // para lo que de verdad lo necesita (Auth Admin API y el upsert final
+    // — nom_usuarios_empresas tiene RLS y acá conviene no depender de que
+    // el admin que invita también tenga permiso de escritura directa).
+    const authHeader = req.headers.get('Authorization') ?? ''
+    const supabaseAuth = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: authHeader } } }
+    )
     const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
 
     // Verifica quién llama y que sea admin/superadmin de la empresa destino
     // — sin esto, cualquier usuario autenticado podría invitar a cualquier
     // rol en cualquier empresa con solo conocer el endpoint.
-    const authHeader = req.headers.get('Authorization') ?? ''
-    const { data: userData, error: errUser } = await supabase.auth.getUser(authHeader.replace('Bearer ', ''))
+    const { data: userData, error: errUser } = await supabaseAuth.auth.getUser()
     if (errUser || !userData?.user) {
       return new Response(JSON.stringify({ error: 'no autenticado' }), {
         status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
-    const { data: esAdmin } = await supabase.rpc('has_rol_nomina', { roles: ['admin'] })
+    const { data: esAdmin } = await supabaseAuth.rpc('has_rol_nomina', { roles: ['admin'] })
     if (!esAdmin) {
       return new Response(JSON.stringify({ error: 'requiere rol admin' }), {
         status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -46,9 +79,9 @@ Deno.serve(async (req) => {
     // Empresa A podría mandar empresaId de la Empresa B y auto-otorgarse
     // (o a un tercero) el rol admin ahí. Superadmin sigue exceptuado, igual
     // que en el resto del código (ver 0008_superadmin_bypass.sql).
-    const { data: esSuperadmin } = await supabase.rpc('is_superadmin')
+    const { data: esSuperadmin } = await supabaseAuth.rpc('is_superadmin')
     if (!esSuperadmin) {
-      const { data: miEmpresaId } = await supabase.rpc('auth_empresa_id')
+      const { data: miEmpresaId } = await supabaseAuth.rpc('auth_empresa_id')
       if (!miEmpresaId || miEmpresaId !== empresaId) {
         return new Response(JSON.stringify({ error: 'no autorizado para esta empresa' }), {
           status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
