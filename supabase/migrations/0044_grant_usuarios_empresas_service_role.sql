@@ -1,0 +1,12 @@
+-- 0044_grant_usuarios_empresas_service_role.sql
+--
+-- Bug: 0014_flujos_aprobacion.sql solo hizo GRANT a `authenticated` sobre
+-- nom_usuarios_empresas — nunca a `service_role`. El cliente service_role
+-- bypasea RLS pero SIGUE necesitando el GRANT de tabla (bypass de RLS y
+-- privilegios de tabla son cosas distintas en Postgres). Se detectó al
+-- probar el fix de invitar-usuario (Task 1.4): el upsert final con
+-- service_role fallaba con "permission denied for table
+-- nom_usuarios_empresas" en cuanto la función llegaba, por primera vez,
+-- más allá de la validación de rol (antes del fix, siempre cortaba en
+-- 403 y nunca se llegaba a probar el upsert).
+GRANT SELECT, INSERT, UPDATE, DELETE ON nom_usuarios_empresas TO service_role;
