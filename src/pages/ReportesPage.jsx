@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import { exportarCsv } from '../utils/exportCsv'
+import { registrarAcceso } from '../utils/auditoria'
+import { puede } from '../utils/permisos'
 import SelectorPeriodo from '../components/SelectorPeriodo'
 
 // Reportes de cierre de período (Fase 4, Task 30-32): reporte de pago
@@ -14,6 +16,12 @@ export default function ReportesPage() {
   const empresaVista = useAuthStore((s) => s.empresaVista)
   const empresaActiva = empresa || empresaVista
   const empresaId = empresaActiva?.id || ''
+  const rol = useAuthStore((s) => s.rol)
+  const rolesNomina = useAuthStore((s) => s.rolesNomina)
+  // Gating de UI (Fase 1, Task 1.6) — la RLS de 0026 ya bloquea la lectura
+  // de datos si el rol no corresponde; esto es solo para no mostrar
+  // botones que fallarían igual en el servidor.
+  const puedeExportar = rol === 'superadmin' || puede(rolesNomina, 'exportar')
 
   const [periodos, setPeriodos] = useState([])
   const [periodoId, setPeriodoId] = useState('')
@@ -77,6 +85,7 @@ export default function ReportesPage() {
       ],
       liquidaciones
     )
+    registrarAcceso(supabase, 'export_csv', null, `reporte de pago período ${periodo?.tipo || periodoId}`).catch(() => {})
   }
 
   const reporteAportes = () => {
@@ -96,6 +105,7 @@ export default function ReportesPage() {
       ],
       [...porConcepto.values()]
     )
+    registrarAcceso(supabase, 'export_csv', null, `reporte de aportes/contribuciones período ${periodo?.tipo || periodoId}`).catch(() => {})
   }
 
   const libroDeSueldos = () => {
@@ -111,6 +121,7 @@ export default function ReportesPage() {
       ],
       liquidaciones
     )
+    registrarAcceso(supabase, 'libro_sueldos', null, `libro de sueldos período ${periodo?.tipo || periodoId}`).catch(() => {})
   }
 
   const verificarEscalaVigente = async () => {
@@ -170,7 +181,7 @@ export default function ReportesPage() {
           {periodoId && !cargando && (
             <>
               {liquidaciones.length === 0 && <div className="card">Este período todavía no tiene liquidaciones calculadas.</div>}
-              {liquidaciones.length > 0 && (
+              {liquidaciones.length > 0 && puedeExportar && (
                 <div className="card" style={{ marginBottom: '1rem', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <button className="btn btn-primary btn-sm" onClick={reportePago}>Exportar reporte de pago (CSV)</button>
                   <button className="btn btn-primary btn-sm" onClick={reporteAportes}>Exportar aportes/contribuciones (CSV)</button>

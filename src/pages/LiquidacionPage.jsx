@@ -6,6 +6,8 @@ import { useAuthStore } from '../store/authStore'
 import { useLiquidacionStore } from '../store/liquidacionStore'
 import { useFlujosStore } from '../store/flujosStore'
 import { exportarCsv } from '../utils/exportCsv'
+import { registrarAcceso } from '../utils/auditoria'
+import { puede } from '../utils/permisos'
 import SelectorPeriodo from '../components/SelectorPeriodo'
 import { etiquetaConcepto } from '../utils/etiquetaConcepto'
 import { etiquetaPeriodo } from '../utils/etiquetaPeriodo'
@@ -23,6 +25,15 @@ export default function LiquidacionPage() {
   const [pestana, setPestana] = useState(PESTANAS[0])
   const empresa = useAuthStore((s) => s.empresa)
   const empresaVista = useAuthStore((s) => s.empresaVista)
+  const rol = useAuthStore((s) => s.rol)
+  const rolesNomina = useAuthStore((s) => s.rolesNomina)
+  // Gating de UI (Fase 1, Task 1.6): la RLS de 0026 ya bloquea la lectura
+  // de nom_liquidaciones/nom_liquidacion_items si el rol no corresponde
+  // — esto es solo para no mostrar un botón que fallaría igual en el
+  // servidor. Superadmin siempre puede, igual que el resto del gating de
+  // esta app (ver Sidebar.jsx/ProtectedRoute.jsx).
+  const puedeExportar = rol === 'superadmin' || puede(rolesNomina, 'exportar')
+  const puedeEmitirRecibos = rol === 'superadmin' || puede(rolesNomina, 'emitir_recibos')
   // Un usuario Superadmin no tiene `empresa` fija: opera sobre la que haya
   // elegido en /superadmin ("entrar en empresa", ver authStore.js). Esto
   // reemplaza al selector local que existía antes en esta misma página.
@@ -73,6 +84,10 @@ export default function LiquidacionPage() {
   const toggleDetalle = async (liqId) => {
     if (liqExpandida === liqId) { setLiqExpandida(null); return }
     setLiqExpandida(liqId)
+    // Fire-and-forget (Fase 1, Task 1.6): un fallo de log nunca debe
+    // bloquear la apertura del detalle. `detalle` es solo contexto (tipo
+    // de período), nunca montos ni CUIL — ver src/utils/auditoria.js.
+    registrarAcceso(supabase, 'liquidacion_detalle', liqId, `período ${periodoActivo?.tipo || ''}`).catch(() => {})
     if (!itemsPorLiq[liqId]) {
       const { data } = await supabase.from('nom_liquidacion_items').select('*').eq('liquidacion_id', liqId)
       setItemsPorLiq((prev) => ({ ...prev, [liqId]: data || [] }))
@@ -132,6 +147,7 @@ export default function LiquidacionPage() {
       const r = await emitirRecibo(l.id, hash)
       if (!r.ok) { setErrorRecibo(r.error); setEmitiendoRecibo(null); return }
       doc.save(`${nombreArchivo}-${r.numeroRecibo}.pdf`)
+      registrarAcceso(supabase, 'recibo_pdf', l.id, `período ${periodoActivo?.tipo || ''} ${periodoActivo?.fecha_desde || ''}`).catch(() => {})
       await cargarLiquidaciones(periodoSeleccionado)
     } catch (e) {
       setErrorRecibo(e instanceof Error ? e.message : String(e))
@@ -189,6 +205,7 @@ export default function LiquidacionPage() {
       { titulo: 'Contribuciones', valor: (l) => l.totalContribuciones, tipo: 'numero' },
       { titulo: 'Neto', valor: (l) => l.neto, tipo: 'numero' },
     ], liquidacionesFiltradas)
+    registrarAcceso(supabase, 'export_csv', null, `liquidacion ${periodoActivo?.tipo || ''} ${periodoActivo?.fecha_desde || ''}`).catch(() => {})
   }
 
   // Deshabilita el checkbox de selección en anuladas (no tiene sentido
@@ -386,10 +403,12 @@ export default function LiquidacionPage() {
         <button className="btn btn-ghost btn-sm" onClick={() => setMostrarFormNuevo((v) => !v)} disabled={!empresaId}>
           {mostrarFormNuevo ? 'Cancelar' : 'Nuevo período'}
         </button>
-        <button className="btn btn-ghost btn-sm" onClick={descargarCsv} disabled={liquidacionesFiltradas.length === 0}>
-          Descargar CSV
-        </button>
-        <button className="btn btn-ghost btn-sm" onClick={handleDescargarZip} disabled={seleccionadas.size === 0 || generandoZip}>
+        {puedeExportar && (
+          <button className="btn btn-ghost btn-sm" onClick={descargarCsv} disabled={liquidacionesFiltradas.length === 0}>
+            Descargar CSV
+          </button>
+        )}
+        <button className="btn btn-ghost btn-sm" onClick={handleDescargarZip} disabled={!puedeEmitirRecibos || seleccionadas.size === 0 || generandoZip}>
           {generandoZip
             ? `Generando… (${progresoZip?.procesados ?? 0} de ${progresoZip?.total ?? 0})`
             : `Descargar recibos (${seleccionadas.size})`}
@@ -645,7 +664,7 @@ export default function LiquidacionPage() {
                     {liqExpandida === l.id && (
                       <tr>
                         <td colSpan={14} style={{ background: 'var(--bg-subtle, rgba(255,255,255,0.03))' }}>
-                          {items.length > 0 && !l.anulado && (
+                          {items.length > 0 && !l.anulado && puedeEmitirRecibos && (
                             <button className="btn btn-primary btn-sm" style={{ marginBottom: 8 }}
                               onClick={(e) => { e.stopPropagation(); handleEmitirRecibo(l) }} disabled={emitiendoRecibo === l.id}>
                               {emitiendoRecibo === l.id ? 'Generando…' : l.numeroRecibo ? 'Regenerar recibo PDF' : 'Emitir recibo PDF'}
