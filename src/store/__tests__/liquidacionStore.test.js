@@ -40,6 +40,21 @@ describe('mappers de liquidacion', () => {
       id: 'i1', liquidacionId: 'l1', conceptoCodigo: 'basico', conceptoNombre: 'Básico', tipo: 'remunerativo', monto: 500, reglaAplicada: 'base',
     })
   })
+
+  it('liquidacionFromDB defiende bruto/neto/monto ausentes con 0 en vez de undefined (Task 3.2)', () => {
+    // Una fila con bruto/neto undefined no debe filtrar undefined al store:
+    // río abajo hay .toFixed()/formateos de moneda que tiran si reciben
+    // undefined en vez de un número, tumbando el render entero.
+    const row = { id: 'l1', empresa_id: 'e1', periodo_id: 'p1', personal_id: 'per1', estado: 'preliminar' }
+    const mapeada = liquidacionFromDB(row)
+    expect(mapeada.bruto).toBe(0)
+    expect(mapeada.neto).toBe(0)
+  })
+
+  it('itemFromDB defiende monto ausente con 0 (Task 3.2)', () => {
+    const row = { id: 'i1', liquidacion_id: 'l1', concepto_codigo: 'basico', concepto_nombre: 'Básico', tipo: 'remunerativo', regla_aplicada: 'base' }
+    expect(itemFromDB(row).monto).toBe(0)
+  })
 })
 
 describe('calcularPeriodo', () => {
@@ -61,6 +76,18 @@ describe('calcularPeriodo', () => {
     await useLiquidacionStore.getState().calcularPeriodo('periodo-1')
     expect(invoke).toHaveBeenCalledTimes(2)
     expect(invoke.mock.calls[1][1].body.reanudar).toBe(true)
+  })
+})
+
+describe('calcularPeriodo — red caída (Task 3.3)', () => {
+  it('no deja "calculando" trabado si invoke rechaza (caída de red)', async () => {
+    supabase.functions.invoke = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'))
+    const { useLiquidacionStore } = await import('../liquidacionStore')
+    const r = await useLiquidacionStore.getState().calcularPeriodo('periodo-1')
+    expect(r.ok).toBe(false)
+    expect(r.error).toBe('no se pudo contactar el servidor')
+    expect(useLiquidacionStore.getState().calculando).toBe(false)
+    expect(useLiquidacionStore.getState().error).toBe('no se pudo contactar el servidor')
   })
 })
 
@@ -102,6 +129,22 @@ describe('crearPeriodoFinal', () => {
     const body = invoke.mock.calls[0][1].body
     expect(body.personalIds).toEqual(['p1'])
     expect(body.personal_ids).toBeUndefined()
+  })
+
+  it('no revienta y borra el periodo huerfano si invoke rechaza (caída de red, Task 3.3)', async () => {
+    supabase.functions.invoke = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'))
+    const deleteFn = vi.fn().mockReturnThis()
+    const eqFn = vi.fn().mockResolvedValue({ data: null, error: null })
+    supabase.from = vi.fn(() => ({
+      insert: vi.fn().mockReturnThis(), select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { id: 'periodo-final-1' }, error: null }),
+      delete: deleteFn, eq: eqFn,
+    }))
+    const { useLiquidacionStore } = await import('../liquidacionStore')
+    const r = await useLiquidacionStore.getState().crearPeriodoFinal('p1', '2026-07-27', 'empresa-1')
+    expect(r.ok).toBe(false)
+    expect(r.error).toBe('no se pudo contactar el servidor')
+    expect(deleteFn).toHaveBeenCalled()
   })
 
   it('borra el nom_periodos recien creado si la Edge Function devuelve error (evita huerfanos)', async () => {
@@ -202,6 +245,44 @@ describe('crearPeriodoVacaciones', () => {
     expect(r.ok).toBe(false)
     expect(deleteFn).toHaveBeenCalled()
     expect(eqFn).toHaveBeenCalledWith('id', 'periodo-vac-1')
+  })
+
+  it('no revienta si invoke rechaza (caída de red, Task 3.3)', async () => {
+    supabase.functions.invoke = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'))
+    const deleteFn = vi.fn().mockReturnThis()
+    const eqFn = vi.fn().mockResolvedValue({ data: null, error: null })
+    supabase.from = vi.fn(() => ({
+      insert: vi.fn().mockReturnThis(), select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { id: 'periodo-vac-1' }, error: null }),
+      delete: deleteFn, eq: eqFn,
+    }))
+    const { useLiquidacionStore } = await import('../liquidacionStore')
+    const r = await useLiquidacionStore.getState().crearPeriodoVacaciones('p1', '2026-07-01', '2026-07-10', 'empresa-1', null)
+    expect(r.ok).toBe(false)
+    expect(r.error).toBe('no se pudo contactar el servidor')
+    expect(deleteFn).toHaveBeenCalled()
+  })
+})
+
+describe('cargarLiquidaciones — guardia de secuencia (Task 3.1, race condition C1)', () => {
+  it('descarta la respuesta de un pedido viejo si llega despues de uno mas nuevo', async () => {
+    // periodo A tarda, periodo B es rapido: A llega DESPUES de B en el
+    // tiempo real, pero fue pedido ANTES. Sin guardia, ganaba "el que
+    // responde ultimo" (A) y pisaba los datos correctos de B.
+    let resolverA
+    const promesaA = new Promise((resolve) => { resolverA = resolve })
+    supabase.from = vi.fn((tabla) => ({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn((_col, periodoId) => (periodoId === 'periodo-A' ? promesaA : Promise.resolve({ data: [{ id: 'liq-B', periodo_id: 'periodo-B' }], error: null }))),
+    }))
+    const { useLiquidacionStore } = await import('../liquidacionStore')
+    const pA = useLiquidacionStore.getState().cargarLiquidaciones('periodo-A')
+    await useLiquidacionStore.getState().cargarLiquidaciones('periodo-B')
+    expect(useLiquidacionStore.getState().liquidaciones.map((l) => l.id)).toEqual(['liq-B'])
+    resolverA({ data: [{ id: 'liq-A', periodo_id: 'periodo-A' }], error: null })
+    await pA
+    // la respuesta tardia de A no debe pisar los datos de B
+    expect(useLiquidacionStore.getState().liquidaciones.map((l) => l.id)).toEqual(['liq-B'])
   })
 })
 

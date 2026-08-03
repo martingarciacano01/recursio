@@ -4,7 +4,11 @@ import { diasEnRango } from '../utils/agruparAusencias'
 
 export const liquidacionFromDB = (r) => ({
   id: r.id, empresaId: r.empresa_id, periodoId: r.periodo_id, personalId: r.personal_id,
-  bruto: r.bruto, neto: r.neto, estado: r.estado,
+  // bruto/neto ?? 0 (Task 3.2, mappers defensivos): fila inesperada (o un
+  // shape futuro que los omita) no debe filtrar undefined hacia formateos
+  // de moneda río abajo (.toFixed(), etc.) que tirarían y romperían el
+  // render entero.
+  bruto: r.bruto ?? 0, neto: r.neto ?? 0, estado: r.estado,
   totalAportes: r.total_aportes ?? 0,
   totalContribuciones: r.total_contribuciones ?? 0,
   detalleHoras: r.detalle_horas || null,
@@ -17,7 +21,7 @@ export const liquidacionFromDB = (r) => ({
 
 export const itemFromDB = (r) => ({
   id: r.id, liquidacionId: r.liquidacion_id, conceptoCodigo: r.concepto_codigo,
-  conceptoNombre: r.concepto_nombre, tipo: r.tipo, monto: r.monto, reglaAplicada: r.regla_aplicada,
+  conceptoNombre: r.concepto_nombre, tipo: r.tipo, monto: r.monto ?? 0, reglaAplicada: r.regla_aplicada,
 })
 
 // Reintenta la Edge Function liquidar-periodo con reanudar:true mientras
@@ -31,6 +35,27 @@ export const itemFromDB = (r) => ({
 //     un período con personas omitidas (legajo incompleto) disparaba las
 //     20 invocaciones completas, cada una releyendo toda la nómina: eso
 //     era el "calcular tarda muchísimo" reportado el 28/07/2026.
+// El cliente de supabase-js (`functions.invoke`) colapsa CUALQUIER status
+// no-2xx en el mismo error.message genérico ("Edge Function returned a
+// non-2xx status code"), sin importar qué haya devuelto la función en el
+// body — el bloqueo por recibos emitidos (Task 2.6, 409), "período no
+// encontrado" (404), "sin permiso" (403), etc. todos se veían igual de
+// "error del sistema". El body real (con el `error` legible que la Edge
+// Function sí arma) viaja en `error.context`, un Response — hay que
+// leerlo aparte. Ver https://github.com/supabase/supabase-js FunctionsHttpError.
+async function mensajeDeErrorEdgeFunction(error) {
+  if (!error) return null
+  try {
+    if (error.context && typeof error.context.json === 'function') {
+      const body = await error.context.clone().json()
+      if (body?.error) return body.error
+    }
+  } catch {
+    // body no era JSON o ya se consumió: nos quedamos con error.message
+  }
+  return error.message
+}
+
 async function invocarConReintento(body) {
   let respuesta = await supabase.functions.invoke('liquidar-periodo', { body })
   let intentos = 1
@@ -47,7 +72,17 @@ async function invocarConReintento(body) {
 
 // Store SIN persist: contiene montos de sueldo reales (Recursio_Plan_
 // Ejecucion_Sonnet5.md, instrucción 6).
-export const useLiquidacionStore = create((set) => ({
+//
+// Task 3.1 (race condition C1): cambiar de período mientras una respuesta
+// anterior todavía está en vuelo podía pisar la pantalla con datos del
+// período viejo si esa respuesta llegaba DESPUÉS de la del período nuevo
+// (orden de red no garantizado). Mismo patrón en las 3 acciones que traen
+// datos de un período/liquidación puntual: un contador `_seqX` propio por
+// acción (no uno solo compartido — así calcularPeriodo y cargarLiquidaciones
+// no se invalidan entre sí sin motivo), incrementado ANTES de arrancar el
+// pedido; si al volver el contador ya cambió, la respuesta es obsoleta y se
+// descarta sin tocar el estado.
+export const useLiquidacionStore = create((set, get) => ({
   liquidaciones: [], items: [], calculando: false, error: null,
   // Legajos que la Edge Function saltea (incompletos) y advertencias de
   // escala faltante por persona — nada de $0 silenciosos (Fase 5A Task 2).
@@ -55,16 +90,30 @@ export const useLiquidacionStore = create((set) => ({
   // Personal sin fichajes ni ausencias aprobadas en el período: no se
   // liquida en $0 silenciosamente, se lista aparte (Fase 5A Task 2).
   sinHoras: [],
+  _seqCalculo: 0, _seqLiq: 0, _seqItems: 0,
 
   calcularPeriodo: async (periodoId) => {
-    set({ calculando: true, error: null })
-    const { data, error } = await invocarConReintento({ periodoId })
-    if (error) {
-      set({ error: error.message, calculando: false, omitidos: [], advertencias: [], sinHoras: [] })
-      return { ok: false, error: error.message }
+    const seq = get()._seqCalculo + 1
+    set({ _seqCalculo: seq, calculando: true, error: null })
+    try {
+      const { data, error } = await invocarConReintento({ periodoId })
+      if (get()._seqCalculo !== seq) return { ok: false, error: 'obsoleto' } // se pidió calcular otro período mientras esta respuesta viajaba
+      if (error) {
+        const mensaje = await mensajeDeErrorEdgeFunction(error)
+        if (get()._seqCalculo !== seq) return { ok: false, error: 'obsoleto' }
+        set({ error: mensaje, calculando: false, omitidos: [], advertencias: [], sinHoras: [] })
+        return { ok: false, error: mensaje }
+      }
+      set({ calculando: false, omitidos: data?.omitidos ?? [], advertencias: data?.advertencias ?? [], sinHoras: data?.sinHoras ?? [] })
+      return { ok: true, data }
+    } catch {
+      // invoke() rechaza (no resuelve con {error}) si la red cae antes de
+      // llegar a la Edge Function (Task 3.3) — sin este catch, "calculando"
+      // quedaba en true para siempre y la UI parecía trabada sin aviso.
+      if (get()._seqCalculo !== seq) return { ok: false, error: 'obsoleto' }
+      set({ error: 'no se pudo contactar el servidor', calculando: false, omitidos: [], advertencias: [], sinHoras: [] })
+      return { ok: false, error: 'no se pudo contactar el servidor' }
     }
-    set({ calculando: false, omitidos: data?.omitidos ?? [], advertencias: data?.advertencias ?? [], sinHoras: data?.sinHoras ?? [] })
-    return { ok: true, data }
   },
 
   // Crea un período tipo 'final' acotado a una sola persona (fecha_desde =
@@ -72,20 +121,30 @@ export const useLiquidacionStore = create((set) => ({
   // personalIds: [personalId] para no tocar al resto de la nómina
   // (Fase 5E Task 33 — botón "Generar liquidación final" en FichaLegajoPage).
   crearPeriodoFinal: async (personalId, fechaBaja, empresaId) => {
+    const seq = get()._seqCalculo + 1
+    set({ _seqCalculo: seq })
     const { data: periodo, error: errPeriodo } = await supabase.from('nom_periodos').insert({
       empresa_id: empresaId, tipo: 'final', fecha_desde: fechaBaja, fecha_hasta: fechaBaja, estado: 'abierto',
     }).select().single()
     if (errPeriodo) return { ok: false, error: errPeriodo.message }
-    const { data, error } = await invocarConReintento({ periodoId: periodo.id, personalIds: [personalId] })
-    if (error) {
-      // Evita dejar un nom_periodos huérfano en estado 'abierto' sin
-      // liquidaciones cuando la Edge Function falla (best-effort: si el
-      // delete también falla, queda el mismo huérfano que había antes).
+    try {
+      const { data, error } = await invocarConReintento({ periodoId: periodo.id, personalIds: [personalId] })
+      if (get()._seqCalculo !== seq) return { ok: false, error: 'obsoleto' }
+      if (error) {
+        // Evita dejar un nom_periodos huérfano en estado 'abierto' sin
+        // liquidaciones cuando la Edge Function falla (best-effort: si el
+        // delete también falla, queda el mismo huérfano que había antes).
+        await supabase.from('nom_periodos').delete().eq('id', periodo.id)
+        return { ok: false, error: await mensajeDeErrorEdgeFunction(error) }
+      }
+      if (data?.omitidos?.length > 0) return { ok: false, error: data.omitidos[0].motivo }
+      return { ok: true, data }
+    } catch {
+      // invoke() rechaza por caída de red (Task 3.3): mismo best-effort de
+      // borrar el período huérfano antes de devolver el error.
       await supabase.from('nom_periodos').delete().eq('id', periodo.id)
-      return { ok: false, error: error.message }
+      return { ok: false, error: 'no se pudo contactar el servidor' }
     }
-    if (data?.omitidos?.length > 0) return { ok: false, error: data.omitidos[0].motivo }
-    return { ok: true, data }
   },
 
   // Crea un período tipo 'vacaciones' acotado a una sola persona (vacaciones
@@ -98,17 +157,28 @@ export const useLiquidacionStore = create((set) => ({
   // tabla propia de Recursio que trackea qué ausencia ya se pagó, porque
   // Recursio no puede escribir en `ausencias` (tabla de Presencio).
   crearPeriodoVacaciones: async (personalId, fechaDesde, fechaHasta, empresaId, ausenciaId) => {
+    const seq = get()._seqCalculo + 1
+    set({ _seqCalculo: seq })
     const { data: periodo, error: errPeriodo } = await supabase.from('nom_periodos').insert({
       empresa_id: empresaId, tipo: 'vacaciones', fecha_desde: fechaDesde, fecha_hasta: fechaHasta, estado: 'abierto',
     }).select().single()
     if (errPeriodo) return { ok: false, error: errPeriodo.message }
-    const { data, error } = await invocarConReintento({ periodoId: periodo.id, personalIds: [personalId] })
+    let data, error
+    try {
+      const r = await invocarConReintento({ periodoId: periodo.id, personalIds: [personalId] })
+      data = r.data; error = r.error
+    } catch {
+      // invoke() rechaza por caída de red (Task 3.3).
+      await supabase.from('nom_periodos').delete().eq('id', periodo.id)
+      return { ok: false, error: 'no se pudo contactar el servidor' }
+    }
+    if (get()._seqCalculo !== seq) return { ok: false, error: 'obsoleto' }
     if (error) {
       // Evita dejar un nom_periodos huérfano en estado 'abierto' sin
       // liquidaciones cuando la Edge Function falla (mismo patrón que
       // crearPeriodoFinal).
       await supabase.from('nom_periodos').delete().eq('id', periodo.id)
-      return { ok: false, error: error.message }
+      return { ok: false, error: await mensajeDeErrorEdgeFunction(error) }
     }
     if (data?.omitidos?.length > 0) return { ok: false, error: data.omitidos[0].motivo }
     const { data: liq, error: errLiq } = await supabase.from('nom_liquidaciones').select('id')
@@ -125,11 +195,14 @@ export const useLiquidacionStore = create((set) => ({
   },
 
   cargarLiquidaciones: async (periodoId) => {
+    const seq = get()._seqLiq + 1
+    set({ _seqLiq: seq })
     // Guarda contra periodoId vacío: Postgres lo rechaza con "invalid input
     // syntax for type uuid" y el mensaje quedaba visible en la pantalla de
     // Liquidación como si el cálculo hubiera fallado.
     if (!periodoId) { set({ liquidaciones: [] }); return }
     const { data, error } = await supabase.from('nom_liquidaciones').select('*').eq('periodo_id', periodoId)
+    if (get()._seqLiq !== seq) return // se pidió otro período mientras esta respuesta viajaba: descartar
     if (error) { set({ error: error.message }); return }
     // Limpia el error previo: sin esto un error viejo (ej. un periodoId
     // vacío) quedaba pegado en pantalla para siempre, incluso sobre
@@ -138,7 +211,10 @@ export const useLiquidacionStore = create((set) => ({
   },
 
   cargarItems: async (liquidacionId) => {
+    const seq = get()._seqItems + 1
+    set({ _seqItems: seq })
     const { data, error } = await supabase.from('nom_liquidacion_items').select('*').eq('liquidacion_id', liquidacionId)
+    if (get()._seqItems !== seq) return // se pidió otra liquidación mientras esta respuesta viajaba: descartar
     if (error) { set({ error: error.message }); return }
     set({ items: (data || []).map(itemFromDB) })
   },
