@@ -36,20 +36,27 @@ describe('AprobacionesPage — detalle de recibos y rechazo individual', () => {
     expect(screen.getAllByText(/100\.000,00/).length).toBeGreaterThan(0)
   })
 
-  it('el botón Rechazar de una fila individual está deshabilitado sin motivo', () => {
+  it('rechazar es de dos pasos: clickear Rechazar abre el panel de motivo, y Confirmar está deshabilitado sin texto', () => {
     setupStore()
     render(<MemoryRouter><AprobacionesPage /></MemoryRouter>)
-    const botonesRechazar = screen.getAllByRole('button', { name: 'Rechazar' })
-    expect(botonesRechazar[0]).toBeDisabled()
+    // Antes de abrir el panel no hay ningún textarea de motivo en pantalla
+    // (Task 4.1 revisión de diseño: evitar 3 textareas vacíos siempre visibles).
+    expect(screen.queryByPlaceholderText('motivo del rechazo')).not.toBeInTheDocument()
+
+    const [botonRechazar] = screen.getAllByRole('button', { name: 'Rechazar' })
+    fireEvent.click(botonRechazar)
+
+    expect(screen.getByPlaceholderText('motivo del rechazo')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Confirmar' })).toBeDisabled()
   })
 
   it('rechazo individual llama a revisarLiquidacion con el motivo cargado', async () => {
     const { revisarLiquidacion } = setupStore()
     render(<MemoryRouter><AprobacionesPage /></MemoryRouter>)
-    const [textareaMotivo] = screen.getAllByPlaceholderText('motivo del rechazo')
-    fireEvent.change(textareaMotivo, { target: { value: 'legajo incompleto' } })
     const [botonRechazar] = screen.getAllByRole('button', { name: 'Rechazar' })
     fireEvent.click(botonRechazar)
+    fireEvent.change(screen.getByPlaceholderText('motivo del rechazo'), { target: { value: 'legajo incompleto' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar' }))
     expect(revisarLiquidacion).toHaveBeenCalledWith('l1', 'rechazado', 'legajo incompleto')
   })
 
