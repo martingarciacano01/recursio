@@ -5,6 +5,7 @@ import { useTemaStore } from './store/temaStore'
 import ProtectedRoute from './components/ProtectedRoute'
 import Layout from './components/Layout'
 import LoginPage from './pages/LoginPage'
+import RestablecerPasswordPage from './pages/RestablecerPasswordPage'
 import DashboardPage from './pages/DashboardPage'
 import LegajosPage from './pages/LegajosPage'
 import FichaLegajoPage from './pages/FichaLegajoPage'
@@ -34,6 +35,7 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/restablecer-password" element={<RestablecerPasswordPage />} />
         <Route
           path="/"
           element={
