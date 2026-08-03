@@ -73,6 +73,12 @@ function formatCantidad(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(2).replace('.', ',')
 }
 
+// Redondeo a centavos (2 decimales) evitando errores de punto flotante
+// (0.1 + 0.2 !== 0.3). Se usa al cerrar el monto de cada concepto.
+function redondearCentavos(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100
+}
+
 export interface ResultadoLiquidacion {
   items: ItemLiquidado[]
   remunerativoAcumulado: number
@@ -87,6 +93,35 @@ export function liquidarConceptos(
 ): ResultadoLiquidacion {
   const ordenados = [...conceptos].sort((a, b) => a.orden - b.orden)
 
+  // ── Pasada 1: totales del período (Task 2.11, bug reportado por el
+  // usuario). El motor exponía `remunerativo_acumulado` como el acumulado
+  // PARCIAL hasta cada concepto, así que un adicional creado desde la UI
+  // con orden max+1 (TabAdicionales.jsx:25) quedaba DESPUÉS de
+  // jubilación/OS/contribuciones y no entraba en su base. Acá se evalúan
+  // primero TODOS los remunerativos/no remunerativos (en orden, para
+  // respetar encadenamientos tipo presentismo % del acumulado) y se deja
+  // el total del período listo para la pasada 2.
+  let remunerativoTotal = 0
+  let noRemunerativoTotal = 0
+  for (const c of ordenados) {
+    if (c.tipo !== 'remunerativo' && c.tipo !== 'no_remunerativo') continue
+    const vars0: Record<string, number> = {
+      ...variablesBase,
+      remunerativo_acumulado: remunerativoTotal,
+      no_remunerativo_acumulado: noRemunerativoTotal,
+    }
+    let formula = c.formula
+    if (c.reglas && c.reglas.length > 0) {
+      const reglasOrdenadas = [...c.reglas].sort((a, b) => a.orden - b.orden)
+      for (const regla of reglasOrdenadas) {
+        if (evaluar(regla.condicion, vars0) === true) { formula = regla.formula; break }
+      }
+    }
+    const monto = redondearCentavos(evaluar(formula, vars0) as number)
+    if (c.tipo === 'remunerativo') remunerativoTotal += monto
+    else noRemunerativoTotal += monto
+  }
+
   const items: ItemLiquidado[] = []
   let remunerativoAcumulado = 0
   let noRemunerativoAcumulado = 0
@@ -94,10 +129,15 @@ export function liquidarConceptos(
   let totalDescuentos = 0
 
   for (const concepto of ordenados) {
+    // Descuentos y aportes patronales calculan sobre el TOTAL del período;
+    // el resto ve el acumulado parcial (comportamiento histórico).
+    const esDescuentoOAporte = concepto.tipo === 'descuento' || concepto.tipo === 'aporte_patronal'
     const vars: Record<string, number> = {
       ...variablesBase,
-      remunerativo_acumulado: remunerativoAcumulado,
-      no_remunerativo_acumulado: noRemunerativoAcumulado,
+      remunerativo_acumulado: esDescuentoOAporte ? remunerativoTotal : remunerativoAcumulado,
+      no_remunerativo_acumulado: esDescuentoOAporte ? noRemunerativoTotal : noRemunerativoAcumulado,
+      remunerativo_total: remunerativoTotal,
+      no_remunerativo_total: noRemunerativoTotal,
     }
 
     let formula = concepto.formula
@@ -116,7 +156,7 @@ export function liquidarConceptos(
       }
     }
 
-    const monto = evaluar(formula, vars) as number
+    const monto = redondearCentavos(evaluar(formula, vars) as number)
 
     const cfg = concepto.config ?? undefined
     const recibo = cfg?.recibo ?? undefined

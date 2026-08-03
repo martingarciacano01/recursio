@@ -174,6 +174,93 @@ describe('override de adicional por legajo vía generarFormula (Edge Function)',
     const r = liquidarConceptos([overrideNominal], {})
     expect(r.items[0].monto).toBe(45000)
   })
+
+  // Task 2.13: valida que los adicionales UOCRA del artículo e-sueldos
+  // sembrados en 0051 (asignacion:'legajo', formula por defecto '0') se
+  // comportan como cualquier otro adicional por legajo — sin override no
+  // aplican a nadie (filtrarAsignados), y con override porcentual pagan el
+  // % del básico que carga la empresa por esa persona puntual.
+  it('zona_desfavorable (0051): sin asignación no entra; con override porcentual paga % del básico', () => {
+    const zonaDesfavorableConvenio: Concepto = {
+      codigo: 'zona_desfavorable', nombre: 'Zona desfavorable', tipo: 'remunerativo', orden: 19,
+      formula: '0', imprimible: true, asignacion: 'legajo',
+    }
+    const basicoConcepto: Concepto = { codigo: 'basico', nombre: 'Básico', tipo: 'remunerativo', orden: 1, formula: 'basico_periodo', imprimible: true }
+
+    // Legajo SIN el adicional asignado: filtrarAsignados ya lo saca del set (probado en su propio describe) — acá solo se valida el override cuando SÍ está asignado.
+    const overrideZona: Concepto = {
+      ...zonaDesfavorableConvenio,
+      formula: generarFormula({ modo: 'porcentaje', porcentaje: 15, base: 'basico' }), // 15% cargado para esta persona
+    }
+    const r = liquidarConceptos([basicoConcepto, overrideZona], { basico_periodo: 900000 })
+    const item = r.items.find((i) => i.codigo === 'zona_desfavorable')!
+    expect(item.monto).toBeCloseTo(135000, 2) // 15% de 900000
+  })
+})
+
+describe('base de cálculo sobre el remunerativo TOTAL (Task 2.11)', () => {
+  it('un adicional con orden posterior a los descuentos entra igual en la base de jubilación', () => {
+    const conceptos: Concepto[] = [
+      { codigo: 'basico', nombre: 'Básico', tipo: 'remunerativo', orden: 10, formula: '1000000', imprimible: true },
+      { codigo: 'jubilacion', nombre: 'Jubilación', tipo: 'descuento', orden: 100,
+        formula: 'min(remunerativo_acumulado, tope_sipa) * 0.11', imprimible: true },
+      { codigo: 'adicional', nombre: 'Adicional nuevo', tipo: 'remunerativo', orden: 206, formula: '50000', imprimible: true },
+    ]
+    const r = liquidarConceptos(conceptos, { tope_sipa: 999999999 })
+    const jub = r.items.find((i) => i.codigo === 'jubilacion')!
+    expect(jub.monto).toBeCloseTo(1050000 * 0.11, 2) // hoy: 110000 (solo básico)
+  })
+
+  it('la base de las contribuciones patronales también usa el total', () => {
+    const conceptos: Concepto[] = [
+      { codigo: 'basico', nombre: 'Básico', tipo: 'remunerativo', orden: 10, formula: '1000000', imprimible: true },
+      { codigo: 'adicional', nombre: 'Adicional', tipo: 'remunerativo', orden: 206, formula: '50000', imprimible: true },
+      { codigo: 'c_sipa', nombre: 'SIPA', tipo: 'aporte_patronal', orden: 200,
+        formula: 'remunerativo_acumulado * 0.1077', imprimible: true },
+    ]
+    const r = liquidarConceptos(conceptos, {})
+    expect(r.items.find((i) => i.codigo === 'c_sipa')!.monto).toBeCloseTo(1050000 * 0.1077, 2)
+  })
+})
+
+describe('base y unidad de horas extra/feriado UOCRA (bug reportado en recibo real)', () => {
+  it('hora_extra_50: BASE = valor de una hora al 50%, UNIDAD = horas extra redondeadas hacia arriba', () => {
+    const he50: Concepto = {
+      codigo: 'hora_extra_50', nombre: 'Hora extra 50%', tipo: 'remunerativo', orden: 16,
+      formula: 'basico_convenio * 1.5 * horas_extra_50', imprimible: true,
+      config: {
+        modo: 'porcentaje', porcentaje: 150, base: 'basico',
+        recibo: { grupo: 'remunerativo', detalle: null, baseFormula: 'basico_convenio * 1.5', unidadFormula: 'ceil(horas_extra_50)' },
+      },
+    }
+    // basico_convenio para una categoría con modalidad 'hora' ya ES el
+    // valor de una hora (ej. $4.948 en el recibo real reportado) — NO un
+    // sueldo mensual a dividir por 200. El bug original dividía por 200 y
+    // pagaba centavos de hora extra.
+    const r = liquidarConceptos([he50], { basico_convenio: 5000, horas_extra_50: 4.2 })
+    const item = r.items[0]
+    expect(item.baseCalculo).toBeCloseTo(5000 * 1.5, 2) // valor de UNA hora extra 50%, no el básico/200
+    expect(item.unidadTexto).toBe('5') // ceil(4.2) — antes mostraba "150,00 %"
+    expect(item.monto).toBeCloseTo(5000 * 1.5 * 4.2, 2)
+  })
+})
+
+describe('redondeo a centavos (Task 2.4)', () => {
+  it('250519.17329999997 se guarda como 250519.17', () => {
+    const r = liquidarConceptos([{ codigo: 'x', nombre: 'X', tipo: 'remunerativo', orden: 1,
+      formula: '250519.17329999997', imprimible: true }], {})
+    expect(r.items[0].monto).toBe(250519.17)
+  })
+})
+
+describe('base acumulado_mensual (Task 2.3, tope SIPA consolidado por mes)', () => {
+  it('base acumulado_mensual = remunerativo_acumulado + remunerativo_quincena1', () => {
+    const j: Concepto = { codigo: 'jubilacion', nombre: 'J', tipo: 'descuento', orden: 5,
+      formula: 'min(remunerativo_acumulado + remunerativo_quincena1, tope_sipa) * 0.11', imprimible: true }
+    const b: Concepto = { codigo: 'basico', nombre: 'B', tipo: 'remunerativo', orden: 1, formula: '600000', imprimible: true }
+    const r = liquidarConceptos([b, j], { tope_sipa: 800000, remunerativo_quincena1: 600000 })
+    expect(r.items.find((i) => i.codigo === 'jubilacion')!.monto).toBeCloseTo(800000 * 0.11, 2)
+  })
 })
 
 describe('unidad y base en ítems (recibo costo laboral)', () => {
