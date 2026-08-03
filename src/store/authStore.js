@@ -50,21 +50,28 @@ export const useAuthStore = create((set, get) => ({
 
   // Resuelve rol y empresa_id server-side vía la RPC whoami() (mismo patrón
   // de seguridad que appStore.js de Presencio: user_metadata del JWT es
-  // editable por el propio cliente, por lo que rol/empresa_id NUNCA se toman
-  // de ahí directamente, solo como fallback si la RPC no está disponible).
+  // editable por el propio cliente, así que rol/empresa_id NUNCA se toman
+  // de ahí — ni siquiera como fallback. Antes (hasta Task 3.4, M6) sí se
+  // usaba user_metadata como fallback si whoami() fallaba, lo que dejaba
+  // una escalada de privilegios trivial: cualquier usuario puede editar su
+  // propio user_metadata y ponerse rol: 'admin', y si en ese momento
+  // whoami() no respondía (red caída, RPC caída), ese rol se aceptaba tal
+  // cual. Ahora, si whoami() falla, el perfil queda restrictivo (rol null,
+  // sin empresa, sin roles de nómina) — el gating por rol cierra en vez de
+  // abrir.
   _resolverPerfil: async (user) => {
     const meta = user.user_metadata || {}
-    let rol = meta.rol || null
-    let empresaId = meta.empresa_id || null
+    let rol = null
+    let empresaId = null
     let rolesNomina = []
     try {
       const { data: perfil } = await supabase.rpc('whoami').single()
       if (perfil) {
-        rol = perfil.rol || rol
-        empresaId = perfil.empresa_id ?? empresaId
+        rol = perfil.rol ?? null
+        empresaId = perfil.empresa_id ?? null
       }
     } catch {
-      // sin red o RPC no disponible: se usa el fallback de metadata
+      // sin red o RPC no disponible: perfil restrictivo, sin fallback a metadata
     }
     try {
       const { data: roles } = await supabase.rpc('whoami_nomina')
@@ -81,11 +88,17 @@ export const useAuthStore = create((set, get) => ({
   },
 
   login: async (email, password) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) return { ok: false, error: error.message }
-    const perfil = await get()._resolverPerfil(data.user)
-    set({ session: data.session, ...perfil, cargando: false })
-    return { ok: true }
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) return { ok: false, error: error.message }
+      const perfil = await get()._resolverPerfil(data.user)
+      set({ session: data.session, ...perfil, cargando: false })
+      return { ok: true }
+    } catch {
+      // Caída de red antes de llegar a Supabase Auth (Task 3.3): sin este
+      // catch, LoginPage quedaba con el botón en "Ingresando…" para siempre.
+      return { ok: false, error: 'no se pudo contactar el servidor' }
+    }
   },
 
   logout: async () => {
@@ -123,18 +136,25 @@ export const useAuthStore = create((set, get) => ({
   // perfil. Si no hay sesión, cargando pasa a false sin usuario.
   cargarSesion: async () => {
     set({ cargando: true })
-    const { data } = await supabase.auth.getSession()
-    if (!data.session) {
-      guardarEmpresaVista(null)
+    try {
+      const { data } = await supabase.auth.getSession()
+      if (!data.session) {
+        guardarEmpresaVista(null)
+        set({ session: null, usuario: null, empresa: null, rol: null, rolesNomina: [], empresaVista: null, cargando: false })
+        return
+      }
+      const perfil = await get()._resolverPerfil(data.session.user)
+      // La empresa vista solo se rehidrata si el usuario sigue siendo
+      // superadmin: es el único rol que puede operar en nombre de otra
+      // empresa, y la RLS del backend igual no le daría datos a nadie más.
+      const empresaVista = perfil.rol === 'superadmin' ? leerEmpresaVista() : null
+      if (!empresaVista) guardarEmpresaVista(null)
+      set({ session: data.session, ...perfil, empresaVista, cargando: false })
+    } catch {
+      // Caída de red al arrancar la app (Task 3.3): sin este catch,
+      // "cargando" quedaba en true para siempre y la app no mostraba ni
+      // login ni contenido — pantalla en blanco indefinida.
       set({ session: null, usuario: null, empresa: null, rol: null, rolesNomina: [], empresaVista: null, cargando: false })
-      return
     }
-    const perfil = await get()._resolverPerfil(data.session.user)
-    // La empresa vista solo se rehidrata si el usuario sigue siendo
-    // superadmin: es el único rol que puede operar en nombre de otra
-    // empresa, y la RLS del backend igual no le daría datos a nadie más.
-    const empresaVista = perfil.rol === 'superadmin' ? leerEmpresaVista() : null
-    if (!empresaVista) guardarEmpresaVista(null)
-    set({ session: data.session, ...perfil, empresaVista, cargando: false })
   },
 }))
