@@ -1,6 +1,50 @@
 import { useEffect, useRef, useState } from 'react'
 import { Upload, Trash2 } from 'lucide-react'
 import { useEmpresaConfigStore } from '../../store/empresaConfigStore'
+import { supabase } from '../../lib/supabase'
+
+// Task 2.12: si contabilizar horas extras y con qué tope diario, por
+// empresa. Config chica y de bajo tráfico — se lee/guarda directo contra
+// nom_config_horas (migración 0050) sin sumar un store nuevo para esto.
+const DEFAULT_CFG_HORAS = { contabilizar_horas_extras: true, tope_horas_diarias: '', jornada_horas: 8 }
+
+function useConfigHoras(empresaId) {
+  const [cfgHoras, setCfgHoras] = useState(DEFAULT_CFG_HORAS)
+  const [cargandoHoras, setCargandoHoras] = useState(true)
+  const [errorHoras, setErrorHoras] = useState(null)
+
+  useEffect(() => {
+    if (!empresaId) return
+    let activo = true
+    setCargandoHoras(true)
+    supabase.from('nom_config_horas').select('*').eq('empresa_id', empresaId).maybeSingle()
+      .then(({ data, error: err }) => {
+        if (!activo) return
+        if (err) { setErrorHoras(err.message); setCargandoHoras(false); return }
+        setCfgHoras(data ? {
+          contabilizar_horas_extras: data.contabilizar_horas_extras,
+          tope_horas_diarias: data.tope_horas_diarias ?? '',
+          jornada_horas: data.jornada_horas ?? 8,
+        } : DEFAULT_CFG_HORAS)
+        setCargandoHoras(false)
+      })
+    return () => { activo = false }
+  }, [empresaId])
+
+  const guardarHoras = async (valores) => {
+    const { error: err } = await supabase.from('nom_config_horas').upsert({
+      empresa_id: empresaId,
+      contabilizar_horas_extras: valores.contabilizar_horas_extras,
+      tope_horas_diarias: valores.tope_horas_diarias === '' ? null : Number(valores.tope_horas_diarias),
+      jornada_horas: Number(valores.jornada_horas) || 8,
+    })
+    if (err) return { ok: false, error: err.message }
+    setCfgHoras(valores)
+    return { ok: true }
+  }
+
+  return { cfgHoras, cargandoHoras, errorHoras, guardarHoras }
+}
 
 export default function TabEmpresa({ empresaId }) {
   const {
@@ -12,10 +56,22 @@ export default function TabEmpresa({ empresaId }) {
   const [errorLogo, setErrorLogo] = useState(null)
   const [guardado, setGuardado] = useState(false)
   const inputArchivo = useRef(null)
+  const { cfgHoras, cargandoHoras, errorHoras, guardarHoras } = useConfigHoras(empresaId)
+  const [formHoras, setFormHoras] = useState(DEFAULT_CFG_HORAS)
+  const [guardadoHoras, setGuardadoHoras] = useState(false)
+  const [errorGuardadoHoras, setErrorGuardadoHoras] = useState(null)
 
   useEffect(() => { if (empresaId) cargar(empresaId) }, [empresaId])
   // eslint-disable-next-line react-hooks/set-state-in-effect -- resync intencional del form local cuando llegan los datos de la empresa.
   useEffect(() => { setForm({ cuit, domicilio }) }, [cuit, domicilio])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resync intencional del form local cuando llega la config de horas.
+  useEffect(() => { setFormHoras(cfgHoras) }, [cfgHoras])
+
+  const handleGuardarHoras = async () => {
+    const r = await guardarHoras(formHoras)
+    setErrorGuardadoHoras(r.ok ? null : r.error)
+    if (r.ok) { setGuardadoHoras(true); setTimeout(() => setGuardadoHoras(false), 2500) }
+  }
 
   if (cargando) return <div className="card">Cargando…</div>
   if (error) return <div className="card" style={{ color: 'var(--danger)' }}>Error: {error}</div>
@@ -110,6 +166,48 @@ export default function TabEmpresa({ empresaId }) {
           {guardado && <span className="badge badge-success">guardado</span>}
         </div>
         {errorGuardado && <p style={{ color: 'var(--danger)', marginTop: 10 }}>{errorGuardado}</p>}
+      </div>
+
+      <div className="card">
+        <h3 style={{ fontSize: '1rem', marginBottom: 4 }}>Horas extra y jornada</h3>
+        <p className="texto-secundario" style={{ fontSize: '0.85rem', marginBottom: 14 }}>
+          Sin cambios acá, se liquida como siempre: horas extra pagadas, jornada de 8h (4h si es parcial).
+        </p>
+        {cargandoHoras ? (
+          <p className="texto-muted">Cargando…</p>
+        ) : (
+          <>
+            <div className="form-grid" style={{ marginBottom: 14 }}>
+              <div className="input-group">
+                <label className="input-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input
+                    type="checkbox"
+                    checked={formHoras.contabilizar_horas_extras}
+                    onChange={(e) => setFormHoras((f) => ({ ...f, contabilizar_horas_extras: e.target.checked }))}
+                  />
+                  Pagar horas extra con recargo
+                </label>
+              </div>
+              <div className="input-group">
+                <label className="input-label" htmlFor="emp-jornada">Jornada normal (horas/día)</label>
+                <input id="emp-jornada" className="input" type="number" min="1" step="0.5" value={formHoras.jornada_horas}
+                  onChange={(e) => setFormHoras((f) => ({ ...f, jornada_horas: e.target.value }))} />
+              </div>
+              <div className="input-group">
+                <label className="input-label" htmlFor="emp-tope-diario">Tope de horas diarias (opcional)</label>
+                <input id="emp-tope-diario" className="input" type="number" min="0" step="0.5" placeholder="Sin tope"
+                  value={formHoras.tope_horas_diarias}
+                  onChange={(e) => setFormHoras((f) => ({ ...f, tope_horas_diarias: e.target.value }))} />
+              </div>
+            </div>
+            <div className="acciones">
+              <button className="btn btn-primary btn-sm" onClick={handleGuardarHoras}>Guardar</button>
+              {guardadoHoras && <span className="badge badge-success">guardado</span>}
+            </div>
+            {errorGuardadoHoras && <p style={{ color: 'var(--danger)', marginTop: 10 }}>{errorGuardadoHoras}</p>}
+            {errorHoras && <p style={{ color: 'var(--danger)', marginTop: 10 }}>{errorHoras}</p>}
+          </>
+        )}
       </div>
     </div>
   )
