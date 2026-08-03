@@ -88,14 +88,16 @@ export default function LegajosPage() {
             <input
               type="text"
               placeholder="Buscar por nombre o DNI…"
+              aria-label="Buscar por nombre o DNI"
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
               className="input"
             />
             <select
+              aria-label="Filtrar por estado"
               value={filtroEstado}
               onChange={(e) => setFiltroEstado(e.target.value)}
-              className="select"
+              className="input"
             >
               <option value="activo">Activo</option>
               <option value="inactivo">Inactivo</option>

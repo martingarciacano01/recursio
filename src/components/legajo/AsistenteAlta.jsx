@@ -4,6 +4,7 @@ import { resumenGuia } from '../../utils/guiaAlta'
 import EditorDatosLegajo from './EditorDatosLegajo'
 import DocumentosLegajo from './DocumentosLegajo'
 import TabFamiliares from './TabFamiliares'
+import { useModalA11y } from '../../hooks/useModalA11y'
 
 // Asistente de alta: recorre los pasos de la guía uno por uno mostrando, en
 // cada uno, el mismo editor que ya usa la ficha (no hay formularios
@@ -18,6 +19,7 @@ export default function AsistenteAlta({ pasos, legajo, personalId, empresaId, on
   const enResumen = indice >= pasos.length
   const paso = pasos[indice]
   const resumen = resumenGuia(pasos)
+  const modalRef = useModalA11y(onCerrar)
 
   const contenidoDelPaso = () => {
     if (!paso) return null
@@ -32,7 +34,7 @@ export default function AsistenteAlta({ pasos, legajo, personalId, empresaId, on
 
   return (
     <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Guía de alta">
-      <div className="modal modal-ancho">
+      <div className="modal modal-ancho" ref={modalRef} tabIndex={-1}>
         <div className="modal-header">
           <div>
             <span className="modal-title">Guía de alta</span>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { AlertTriangle, Trash2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { etiquetaPeriodo } from '../utils/etiquetaPeriodo'
+import { useModalA11y } from '../hooks/useModalA11y'
 
 // Borrado de un período, para poder corregir uno cargado por error.
 //
@@ -15,6 +16,7 @@ export default function BorrarPeriodo({ periodo, onBorrado, onCancelar }) {
   const [confirmacion, setConfirmacion] = useState('')
   const [borrando, setBorrando] = useState(false)
   const [error, setError] = useState('')
+  const modalRef = useModalA11y(onCancelar)
 
   useEffect(() => {
     let cancelado = false
@@ -47,7 +49,7 @@ export default function BorrarPeriodo({ periodo, onBorrado, onCancelar }) {
 
   return (
     <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Borrar período">
-      <div className="modal">
+      <div className="modal" ref={modalRef} tabIndex={-1}>
         <div className="modal-header">
           <span className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <AlertTriangle size={18} color="var(--danger)" /> Borrar período
