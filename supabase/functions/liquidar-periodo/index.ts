@@ -132,6 +132,25 @@ Deno.serve(async (req) => {
     }
   }
 
+  // Task 2.6 (idempotencia de recibos emitidos): una vez que existe al
+  // menos un recibo emitido (numero_recibo no nulo) para este período, no
+  // se puede recalcular — recalcular pisaría los montos de un recibo ya
+  // entregado, dejando dos versiones distintas bajo el mismo numero_recibo.
+  // Decisión: bloquear, no anular+versionar. Para corregir hay que anular
+  // los recibos o emitir una rectificativa.
+  const { data: emitidos, error: errEmitidos } = await supabase.from('nom_liquidaciones')
+    .select('id').eq('periodo_id', periodoId).not('numero_recibo', 'is', null).limit(1)
+  if (errEmitidos) {
+    return new Response(JSON.stringify({ error: `error al verificar recibos emitidos: ${errEmitidos.message}`, code: errEmitidos.code }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+  if ((emitidos || []).length > 0) {
+    return new Response(JSON.stringify({
+      error: 'el período ya tiene recibos emitidos: no se puede recalcular. Anulá los recibos o emití una rectificativa.',
+    }), { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+  }
+
   if (periodo.estado === 'cerrado') {
     return new Response(JSON.stringify({ error: 'período cerrado: no se puede recalcular' }), {
       status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -311,7 +330,13 @@ Deno.serve(async (req) => {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }
-  const topeSipa = Number(topeRows?.[0]?.valor ?? 999999999) // sin parámetro cargado: sin tope efectivo
+  // Task 2.10 (bug): Number('') === 0, así que un `valor` vacío (string
+  // vacío, no NULL) topeaba TODA la base en $0 en vez de no tener tope
+  // efectivo. Se trata explícitamente el string vacío/blanco como "sin
+  // parámetro cargado", igual que el `?? 999999999` ya hacía con NULL.
+  const topeSipa = topeRows?.[0]?.valor != null && String(topeRows[0].valor).trim() !== ''
+    ? Number(topeRows[0].valor)
+    : 999999999 // sin parámetro cargado: sin tope efectivo
   const adelantoPorPersona = new Map<string, number>()
   for (const a of adelantos || []) {
     adelantoPorPersona.set(a.personal_id, (adelantoPorPersona.get(a.personal_id) ?? 0) + Number(a.monto))
@@ -560,6 +585,28 @@ Deno.serve(async (req) => {
   const fichajesPorPersona = agruparPorPersonalId(fichajesTodos)
   const ausenciasPorPersona = agruparPorPersonalId(ausenciasTodas)
 
+  // Task 2.5: feriados desde Presencio (empresas.config_json ->
+  // moduloHorasProyecto -> feriados), vía nom_v_empresa_feriados
+  // (migración 0048). El cliente service-role ya bypasea RLS.
+  const { data: empFeriados, error: errFeriados } = await supabase.from('nom_v_empresa_feriados')
+    .select('feriados').eq('empresa_id', periodo.empresa_id).maybeSingle()
+  if (errFeriados) {
+    await supabase.from('nom_periodos').update({ calculo_estado: 'error' }).eq('id', periodoId)
+    return new Response(JSON.stringify({ error: `error al leer feriados: ${errFeriados.message}`, code: errFeriados.code }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+  const feriadosSet = new Set((empFeriados?.feriados || []).map((f: any) => f.fecha))
+
+  // Task 2.12: config de horas extras/jornada por empresa (migración 0050).
+  // Sin fila cargada, se comporta exactamente igual que antes (contabiliza
+  // HE, sin topes, jornada 8h u 4h si es parcial).
+  const { data: cfgHoras } = await supabase.from('nom_config_horas')
+    .select('*').eq('empresa_id', periodo.empresa_id).maybeSingle()
+  const jornadaHorasConfig = cfgHoras?.jornada_horas != null
+    ? Number(cfgHoras.jornada_horas)
+    : null
+
   const resultados = []
   for (const persona of personalAProcesar) {
     const legajo = legajoPorPersonal.get(persona.id)
@@ -590,9 +637,16 @@ Deno.serve(async (req) => {
       (ausencias || []).map((a: any) => ({ fecha_desde: a.fecha_desde, fecha_hasta: a.fecha_hasta })),
       periodo.fecha_desde,
       periodo.fecha_hasta,
-      { fechaIngreso: fechaIngresoEfectiva, fechaBaja: legajo?.fecha_baja }
+      { fechaIngreso: fechaIngresoEfectiva, fechaBaja: legajo?.fecha_baja, feriados: feriadosSet }
     )
-    const asistencia = calcularAsistencia(dias, 15, legajo.jornada === 'parcial' ? 4 : 8)
+    const jornadaHoras = jornadaHorasConfig ?? (legajo.jornada === 'parcial' ? 4 : 8)
+    const asistencia = calcularAsistencia(dias, 15, jornadaHoras, {
+      contabilizarHorasExtras: cfgHoras?.contabilizar_horas_extras ?? true,
+      topeHorasDiarias: cfgHoras?.tope_horas_diarias != null ? Number(cfgHoras.tope_horas_diarias) : undefined,
+    })
+    if (cfgHoras?.contabilizar_horas_extras === false && asistencia.horasTrabajadas > jornadaHoras * dias.filter((d) => d.horaEntradaEsperada !== null).length) {
+      advertencias.push({ personal_id: persona.id, mensaje: 'la persona supera las horas topadas: se paga sin recargo' })
+    }
 
     // Sin ningún fichaje y sin ningún día cubierto por ausencia aprobada:
     // no liquidar en $0 silenciosamente, listar aparte.
@@ -623,6 +677,7 @@ Deno.serve(async (req) => {
       faltas_justificadas: asistencia.faltasJustificadas,
       horas_extra_50: asistencia.horasExtra50,
       horas_extra_100: asistencia.horasExtra100,
+      horas_feriado: asistencia.horasFeriado ?? 0, // Task 2.7 (recargo feriado UOCRA, hs_feriado)
       adelanto_monto: adelantoPorPersona.get(persona.id) ?? 0,
       tope_sipa: topeSipa,
       no_rem_convenio: noRem,
@@ -851,7 +906,11 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }
-  const topeSipa = Number(topeRowsEspecial?.[0]?.valor ?? 999999999) // sin parámetro cargado: sin tope efectivo
+  // Task 2.10: mismo fix que el flujo mensual — Number('') === 0 topeaba
+  // todo en $0 si `valor` era un string vacío en vez de NULL.
+  const topeSipa = topeRowsEspecial?.[0]?.valor != null && String(topeRowsEspecial[0].valor).trim() !== ''
+    ? Number(topeRowsEspecial[0].valor)
+    : 999999999 // sin parámetro cargado: sin tope efectivo
 
   // Mismo patrón que conceptosAportesLegajo en el flujo mensual (ahí se llama
   // conceptosLegajo, ver resolverBasicoYConceptos más arriba — acá se le da
@@ -959,11 +1018,28 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
   }
   const idsPeriodosSemestre = (periodosSemestre || []).map((p: any) => p.id)
 
-  async function brutosDelSemestre(personalId: string, idsPeriodos: string[]): Promise<number[]> {
+  // Task 2.1 (bug C1): antes devolvía un bruto por LIQUIDACIÓN (cada
+  // quincena ≈ mitad del mes), así que Math.max(...) tomaba la mejor
+  // quincena en vez del mejor mes, y calcularSACProporcionalUocra terminaba
+  // pagando 25% del mes en vez de 50%. Acá se consolidan las liquidaciones
+  // por mes calendario (a partir de nom_periodos.fecha_desde) antes de
+  // devolver los brutos, así el llamador siempre recibe brutos MENSUALES.
+  async function brutosMensualesDelSemestre(personalId: string, idsPeriodos: string[]): Promise<number[]> {
     if (idsPeriodos.length === 0) return []
-    const { data } = await supabase.from('nom_liquidaciones').select('bruto')
+    const { data: liqs } = await supabase.from('nom_liquidaciones').select('bruto, periodo_id')
       .eq('personal_id', personalId).in('periodo_id', idsPeriodos)
-    return (data || []).map((r: any) => Number(r.bruto))
+    const idsUnicos = [...new Set((liqs || []).map((l: any) => l.periodo_id))]
+    const { data: periodos } = idsUnicos.length
+      ? await supabase.from('nom_periodos').select('id, fecha_desde').in('id', idsUnicos)
+      : { data: [] }
+    const mesDeId = new Map((periodos || []).map((p: any) => [p.id, String(p.fecha_desde).slice(0, 7)]))
+    const porMes = new Map<string, number>()
+    for (const l of liqs || []) {
+      const mes = mesDeId.get(l.periodo_id)
+      if (!mes) continue
+      porMes.set(mes, (porMes.get(mes) ?? 0) + Number(l.bruto))
+    }
+    return [...porMes.values()]
   }
 
   // reglaAplicada/unidadTexto/baseCalculo/grupoRecibo/detalleRecibo quedan
@@ -1024,7 +1100,7 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
     const antiguedadAnios = calcularAntiguedadAnios(fechaIngresoEfectiva, legajo.antiguedad_reconocida, periodo.fecha_hasta)
 
     if (periodo.tipo === 'sac' || periodo.tipo === 'sac_1' || periodo.tipo === 'sac_2') {
-      const brutos = await brutosDelSemestre(persona.id, idsPeriodosSemestre)
+      const brutos = await brutosMensualesDelSemestre(persona.id, idsPeriodosSemestre)
       if (brutos.length === 0) {
         advertencias.push({ personal_id: persona.id, mensaje: 'sin liquidaciones mensuales/quincenales en el semestre: SAC calculado en $0' })
       }
@@ -1082,15 +1158,39 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
       })
     }
     const idsSemestreFinal = (periodosSemestreFinal || []).map((p: any) => p.id)
-    const brutos = await brutosDelSemestre(persona.id, idsSemestreFinal)
+    const brutos = await brutosMensualesDelSemestre(persona.id, idsSemestreFinal)
     const mejorBruto = brutos.length ? Math.max(...brutos) : 0
     const diasTrabajadosSemestreFinal = diasTrabajadosEnRango(fechaIngresoEfectiva, fechaBaja, semestreFinal.desde, semestreFinal.hasta)
     const anioBaja = Number(fechaBaja.slice(0, 4))
     const diasTrabajadosAnioFinal = diasTrabajadosEnRango(fechaIngresoEfectiva, fechaBaja, `${anioBaja}-01-01`, `${anioBaja}-12-31`)
-    // Días trabajados del mes de la baja: del día 1 al día de fecha_baja
-    // inclusive (ver simplificación #1: no descuenta ausencias sin goce
-    // dentro de ese tramo del mes).
-    const diasTrabajadosMes = Number(fechaBaja.slice(8, 10))
+    // Días trabajados del mes de la baja (Task 2.10, antes era solo el día
+    // de fecha_baja, sin restar las faltas injustificadas del tramo): del
+    // día 1 al día de fecha_baja inclusive, MENOS las faltas injustificadas
+    // detectadas en ese tramo (mismo criterio que calcularAsistencia — un
+    // día laborable sin fichaje y sin ausencia aprobada).
+    const primerDiaMesBaja = `${fechaBaja.slice(0, 7)}-01`
+    const diasCalendarioTramoBaja = Number(fechaBaja.slice(8, 10))
+    const { data: fichajesTramoBaja, error: errFichajesTramoBaja } = await supabase.from('nom_v_horas_dia')
+      .select('*').eq('personal_id', persona.id)
+      .gte('timestamp', primerDiaMesBaja).lte('timestamp', fechaBaja)
+    const { data: ausenciasTramoBaja, error: errAusenciasTramoBaja } = await supabase.from('nom_v_ausencias')
+      .select('fecha_desde, fecha_hasta').eq('personal_id', persona.id).eq('empresa_id', periodo.empresa_id)
+      .or('estado.is.null,estado.eq.aprobada')
+      .lte('fecha_desde', fechaBaja).gte('fecha_hasta', primerDiaMesBaja)
+    if (errFichajesTramoBaja || errAusenciasTramoBaja) {
+      const e = (errFichajesTramoBaja || errAusenciasTramoBaja)!
+      return new Response(JSON.stringify({ error: `error al leer asistencia del tramo de baja: ${e.message}`, code: e.code }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+    const diasTramoBaja = construirDiasPeriodo(
+      (fichajesTramoBaja || []).map((f: any) => ({ tipo: f.tipo, timestamp: f.timestamp })),
+      (ausenciasTramoBaja || []).map((a: any) => ({ fecha_desde: a.fecha_desde, fecha_hasta: a.fecha_hasta })),
+      primerDiaMesBaja, fechaBaja,
+      { fechaIngreso: fechaIngresoEfectiva, fechaBaja }
+    )
+    const faltasInjustificadasTramoBaja = calcularAsistencia(diasTramoBaja, 15).faltasInjustificadas
+    const diasTrabajadosMes = Math.max(0, diasCalendarioTramoBaja - faltasInjustificadasTramoBaja)
 
     // montoBaseEspecial: monto remunerativo combinado (días trabajados del
     // mes + SAC proporcional + vacaciones no gozadas en LCT; vacaciones no
@@ -1103,7 +1203,10 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
     let montoBaseEspecial: number
     const itemsNoRemunerativos: ItemEspecial[] = []
     if (insumos.regimen === '22250') {
-      const diasVacNoGozados = diasVacacionesPorAntiguedadUocra(antiguedadAnios)
+      // Task 2.2 (art. 152 LCT, aplicado por analogía al régimen UOCRA):
+      // proporcional a los días trabajados del año de la baja, no la
+      // escala completa.
+      const diasVacNoGozados = diasVacacionesPorAntiguedadUocra(antiguedadAnios) * (diasTrabajadosAnioFinal / 365)
       const r = calcularLiquidacionFinalUocra({
         remuneracionMensual: insumos.sueldoMensual,
         antiguedadAnios,
