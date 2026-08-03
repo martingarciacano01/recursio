@@ -100,10 +100,14 @@ describe('horas trabajadas, faltas justificadas y extras derivadas', () => {
 })
 
 describe('construirDiasPeriodo', () => {
+  // Task 2.7: timestamps en UTC real (los fichajes se guardan como
+  // timestamptz UTC). Los horarios "documentados" en los comentarios/tests
+  // (08:33, 18:33, 09:00) son la hora de Buenos Aires (UTC-3) — de ahí el
+  // +3h al escribirlos acá.
   const fichajes = [
-    { tipo: 'entrada', timestamp: '2026-06-15T08:33:00+00:00' },
-    { tipo: 'salida', timestamp: '2026-06-15T18:33:00+00:00' },
-    { tipo: 'entrada', timestamp: '2026-06-17T09:00:00+00:00' }, // sin salida
+    { tipo: 'entrada', timestamp: '2026-06-15T11:33:00Z' }, // 08:33 AR
+    { tipo: 'salida', timestamp: '2026-06-15T21:33:00Z' }, // 18:33 AR
+    { tipo: 'entrada', timestamp: '2026-06-17T12:00:00Z' }, // 09:00 AR, sin salida
   ]
 
   it('enumera todos los días del rango y aparea entrada/salida', () => {
@@ -185,5 +189,71 @@ describe('construirDiasPeriodo', () => {
     const dias = construirDiasPeriodo([], [], '2026-06-01', '2026-06-05')
     expect(dias.every((d) => d.fecha < '2026-06-06')).toBe(true)
     expect(dias.filter((d) => d.horaEntradaEsperada !== null).length).toBeGreaterThan(0)
+  })
+})
+
+describe('opciones de horas extra (Task 2.12, config por empresa)', () => {
+  it('contabilizarHorasExtras=false: el exceso sobre la jornada no se paga con recargo', () => {
+    const dias = [{ fecha: '2026-02-02', horaEntradaEsperada: '08:00', horaEntradaReal: '08:00', ausenciaAprobada: false, horasTrabajadas: 10 }]
+    const r = calcularAsistencia(dias, 15, 8, { contabilizarHorasExtras: false })
+    expect(r.horasExtra50).toBe(0)
+    expect(r.horasTrabajadas).toBe(10) // las horas trabajadas se siguen contando, solo no llevan recargo
+  })
+
+  it('con contabilizarHorasExtras=true (default) el exceso sigue pagando extra 50', () => {
+    const dias = [{ fecha: '2026-02-02', horaEntradaEsperada: '08:00', horaEntradaReal: '08:00', ausenciaAprobada: false, horasTrabajadas: 10 }]
+    const r = calcularAsistencia(dias, 15, 8)
+    expect(r.horasExtra50).toBe(2)
+  })
+
+  it('topeHorasDiarias: el excedente sobre el tope no cuenta como extra', () => {
+    const dias = [{ fecha: '2026-02-02', horaEntradaEsperada: '08:00', horaEntradaReal: '08:00', ausenciaAprobada: false, horasTrabajadas: 14 }]
+    const r = calcularAsistencia(dias, 15, 8, { topeHorasDiarias: 12 })
+    expect(r.horasExtra50).toBe(4) // 12 (tope) - 8 (jornada) = 4, no 6
+  })
+
+  it('jornada UOCRA de 9h: 9h trabajadas no generan extra', () => {
+    const dias = [{ fecha: '2026-02-02', horaEntradaEsperada: '08:00', horaEntradaReal: '08:00', ausenciaAprobada: false, horasTrabajadas: 9 }]
+    const r = calcularAsistencia(dias, 15, 9)
+    expect(r.horasExtra50).toBe(0)
+  })
+})
+
+describe('zona horaria Argentina (Task 2.7)', () => {
+  it('fichaje UTC 11:05 se interpreta como 08:05 en Buenos Aires, dentro de tolerancia (no tardanza espuria)', () => {
+    // Sin el fix (slice crudo del ISO UTC), la hora quedaría "11:05" — muy
+    // por encima de la tolerancia de 15 min sobre 08:00 — y marcaría una
+    // tardanza que en la realidad (hora AR) no existió.
+    const dias = construirDiasPeriodo(
+      [{ tipo: 'entrada', timestamp: '2026-06-15T11:05:00Z' }, { tipo: 'salida', timestamp: '2026-06-15T20:00:00Z' }],
+      [], '2026-06-15', '2026-06-15'
+    )
+    expect(dias[0].fecha).toBe('2026-06-15')
+    expect(dias[0].horaEntradaReal).toBe('08:05')
+    const r = calcularAsistencia(dias, 15)
+    expect(r.tardanzas).toBe(0)
+  })
+})
+
+describe('feriados (Task 2.5, desde Presencio)', () => {
+  it('feriado entre semana NO cuenta falta si no se trabajó', () => {
+    const dias = construirDiasPeriodo([], [], '2026-05-25', '2026-05-25', { feriados: new Set(['2026-05-25']) })
+    expect(dias[0].horaEntradaEsperada).toBeNull()
+    const r = calcularAsistencia(dias, 15)
+    expect(r.faltasInjustificadas).toBe(0)
+  })
+
+  it('feriado trabajado suma horasFeriado (recargo 100%) y no extra 50', () => {
+    const dias = construirDiasPeriodo([{ tipo: 'entrada', timestamp: '2026-05-25T08:00:00+00:00' },
+      { tipo: 'salida', timestamp: '2026-05-25T17:00:00+00:00' }], [], '2026-05-25', '2026-05-25',
+      { feriados: new Set(['2026-05-25']) })
+    const r = calcularAsistencia(dias, 15)
+    expect(r.horasFeriado).toBe(9)
+    expect(r.horasExtra50).toBe(0)
+  })
+
+  it('empresa sin feriados configurados: se comporta como hoy', () => {
+    const dias = construirDiasPeriodo([], [], '2026-05-25', '2026-05-25')
+    expect(dias[0].horaEntradaEsperada).toBe('08:00') // día normal
   })
 })
