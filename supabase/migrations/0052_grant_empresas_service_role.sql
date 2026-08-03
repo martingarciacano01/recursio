@@ -1,0 +1,11 @@
+-- 0052_grant_empresas_service_role.sql — fix del bug reportado en vivo:
+-- nom_v_empresa_feriados (migración 0048) es `security_invoker = true`
+-- (mismo patrón que nom_v_personal/nom_v_horas_dia/nom_v_ausencias,
+-- 0001_vistas_contrato.sql), así que Postgres chequea los GRANTs de tabla
+-- de `empresas` contra el rol que ejecuta la consulta (service_role en
+-- liquidar-periodo), no contra el dueño de la vista. El BYPASSRLS de
+-- service_role bypasea las POLICIES, pero no reemplaza un GRANT de tabla
+-- faltante — y `empresas` nunca se lo dio a service_role (a diferencia de
+-- `personal`/`horas_dia`/`ausencias`, que sí lo tenían). Error real visto:
+-- "permission denied for table empresas".
+GRANT SELECT ON empresas TO service_role;
