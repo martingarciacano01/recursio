@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import AprobacionesPage from '../AprobacionesPage'
 import { useAprobacionesStore } from '../../store/aprobacionesStore'
@@ -60,6 +60,7 @@ describe('AprobacionesPage — detalle de recibos y rechazo individual', () => {
     fireEvent.click(checkboxes[0])
     fireEvent.click(checkboxes[1])
     fireEvent.click(screen.getByRole('button', { name: 'Aprobar seleccionados' }))
+    await waitFor(() => expect(revisarLiquidacion).toHaveBeenCalledTimes(2))
     expect(revisarLiquidacion).toHaveBeenCalledWith('l1', 'aprobado', null)
     expect(revisarLiquidacion).toHaveBeenCalledWith('l2', 'aprobado', null)
   })
