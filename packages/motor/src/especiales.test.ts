@@ -40,6 +40,14 @@ describe('calcularVacaciones (LCT, art. 150)', () => {
     expect(r.montoDia).toBe(20000) // 2500 * 8
     expect(r.total).toBe(280000) // 14 * 20000
   })
+  it('no gozadas con 2 años y 74 días trabajados en el año: proporcional 14 × 74/365 (Task 2.2, art. 152 LCT)', () => {
+    // 2 años de antigüedad → escala de 14 días (menos de 5 años, ver
+    // diasVacacionesPorAntiguedad); lo que cambia con Task 2.2 es que ya
+    // no se pagan los 14 días completos sin importar cuánto se trabajó.
+    const r = calcularVacaciones({ antiguedadAnios: 2, diasTrabajadosAnio: 74, modalidad: 'mensual', sueldoMensual: 1500000 })
+    expect(r.dias).toBeCloseTo(14 * 74 / 365, 2) // ≈ 2.84
+    expect(r.total).toBeCloseTo(r.dias * (1500000 / 25), 2)
+  })
 })
 
 describe('calcularLiquidacionFinal (LCT)', () => {

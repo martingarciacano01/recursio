@@ -51,6 +51,13 @@ export interface ValorDiaVacacionesInput {
 // multiplicado por los días reales de la ausencia — Liquidaciones
 // individuales, Fase 6b).
 export function valorDiaVacaciones(input: ValorDiaVacacionesInput): number {
+  // Task 2.10 (Step 3, pendiente de validación con el contador — Task 2.9):
+  // para modalidad 'hora' se usa siempre valorHora * 8, aunque la jornada
+  // real de un jornalizado UOCRA sea de 9 h (ver conceptos-uocra.ts,
+  // /200 * 9 en otras fórmulas). No se cambia el multiplicador acá sin que
+  // el contador confirme si "remuneración normal y habitual" para
+  // vacaciones gozadas de un jornal UOCRA se calcula sobre 8 h u otro
+  // divisor — documentado en docs/VALIDACION-CONTADOR.md, no inventar.
   return input.modalidad === 'hora'
     ? (input.valorHora ?? 0) * 8
     : (input.sueldoMensual ?? 0) / 25
@@ -58,10 +65,14 @@ export function valorDiaVacaciones(input: ValorDiaVacacionesInput): number {
 
 export function calcularVacaciones(input: VacacionesInput): VacacionesResultado {
   // Art. 153 LCT: con menos de 6 meses de antigüedad, 1 día de descanso
-  // cada 20 trabajados, en vez de la escala fija del art. 150.
+  // cada 20 trabajados, en vez de la escala fija del art. 150. Con 6 meses
+  // o más, el art. 152 LCT prorratea la escala fija por los días
+  // efectivamente trabajados en el año (Task 2.2: antes se pagaban los
+  // días completos de la escala aunque la persona hubiera trabajado solo
+  // una fracción del año — p.ej. alta o baja a mitad de año).
   const dias = input.antiguedadAnios < 0.5
     ? Math.floor(input.diasTrabajadosAnio / 20)
-    : diasVacacionesPorAntiguedad(input.antiguedadAnios)
+    : diasVacacionesPorAntiguedad(input.antiguedadAnios) * (input.diasTrabajadosAnio / 365)
   const montoDia = valorDiaVacaciones(input)
   return { dias, montoDia, total: dias * montoDia }
 }
