@@ -30,10 +30,15 @@ export const useEscalasStore = create((set, get) => ({
   cargarEscala: async (convenioId, { forzar = false } = {}) => {
     if (!forzar && get().cargadoConvenioId === convenioId && !get().error) return
     set({ cargando: true, error: null })
-    const { data, error } = await supabase.from('nom_categorias').select('*')
-      .eq('convenio_id', convenioId).order('nombre').order('vigencia_desde', { ascending: false })
-    if (error) { set({ error: error.message, cargando: false }); return }
-    set({ categorias: (data || []).map(categoriaFromDB), cargando: false, cargadoConvenioId: convenioId })
+    try {
+      const { data, error } = await supabase.from('nom_categorias').select('*')
+        .eq('convenio_id', convenioId).order('nombre').order('vigencia_desde', { ascending: false })
+      if (error) { set({ error: error.message, cargando: false }); return }
+      set({ categorias: (data || []).map(categoriaFromDB), cargando: false, cargadoConvenioId: convenioId })
+    } catch {
+      // Caída de red (Task 3.3).
+      set({ error: 'no se pudo contactar el servidor', cargando: false })
+    }
   },
 
   // Alta de una vigencia nueva para varias categorías a la vez (paritaria).

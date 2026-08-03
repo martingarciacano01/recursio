@@ -48,6 +48,15 @@ export function faltantes(requeridos, documentos) {
 export const useDocumentosStore = create((set, get) => ({
   requeridos: [], documentos: [], cargando: false, error: null,
 
+  // reset (Task 3.4, B6): al cambiar de legajo en FichaLegajoPage había una
+  // ventana donde se seguían mostrando los documentos del legajo ANTERIOR
+  // — cargarDocumentos(personalId) es async, así que hasta que resuelve el
+  // store sigue teniendo la lista vieja; si encima la carga nueva falla
+  // (red caída), esa lista vieja quedaba pegada para siempre bajo el
+  // nombre del legajo nuevo. FichaLegajoPage llama a esto ANTES de
+  // cargarDocumentos al cambiar de personalId.
+  reset: () => set({ documentos: [], error: null }),
+
   cargarRequeridos: async (empresaId) => {
     if (!empresaId) { set({ requeridos: [] }); return }
     const { data, error } = await supabase.from('nom_documentos_requeridos').select('*')
@@ -78,18 +87,24 @@ export const useDocumentosStore = create((set, get) => ({
   // Presencio (documentos_personal, solo lectura).
   cargarDocumentos: async (personalId) => {
     set({ cargando: true, error: null })
-    const [{ data: propios, error: errPropios }, { data: presencio }] = await Promise.all([
-      supabase.from('nom_documentos_legajo').select('*').eq('personal_id', personalId).order('created_at', { ascending: false }),
-      supabase.from('documentos_personal').select('*').eq('personal_id', personalId),
-    ])
-    if (errPropios) { set({ error: errPropios.message, cargando: false }); return }
-    set({
-      documentos: [
-        ...(propios || []).map(documentoFromDB),
-        ...(presencio || []).map(documentoPresencioFromDB),
-      ],
-      cargando: false,
-    })
+    try {
+      const [{ data: propios, error: errPropios }, { data: presencio }] = await Promise.all([
+        supabase.from('nom_documentos_legajo').select('*').eq('personal_id', personalId).order('created_at', { ascending: false }),
+        supabase.from('documentos_personal').select('*').eq('personal_id', personalId),
+      ])
+      if (errPropios) { set({ error: errPropios.message, cargando: false }); return }
+      set({
+        documentos: [
+          ...(propios || []).map(documentoFromDB),
+          ...(presencio || []).map(documentoPresencioFromDB),
+        ],
+        cargando: false,
+      })
+    } catch {
+      // Caída de red (Task 3.3): sin este catch, "cargando" quedaba en
+      // true para siempre y la ficha del legajo no mostraba nada.
+      set({ error: 'no se pudo contactar el servidor', cargando: false })
+    }
   },
 
   // Sube el archivo al bucket privado y registra la fila. Si la subida

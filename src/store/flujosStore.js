@@ -22,13 +22,18 @@ export const useFlujosStore = create((set, get) => ({
 
   cargarFlujos: async (empresaId) => {
     set({ cargando: true, error: null })
-    const { data, error } = await supabase.from('nom_flujos').select('*, nom_flujo_pasos(*)')
-      .eq('empresa_id', empresaId).order('nombre')
-    if (error) { set({ error: error.message, cargando: false }); return }
-    const flujos = (data || []).map(flujoFromDB)
-    const pasos = (data || []).flatMap((f) => (f.nom_flujo_pasos || []).map(pasoFromDB))
-      .sort((a, b) => a.orden - b.orden)
-    set({ flujos, pasos, cargando: false })
+    try {
+      const { data, error } = await supabase.from('nom_flujos').select('*, nom_flujo_pasos(*)')
+        .eq('empresa_id', empresaId).order('nombre')
+      if (error) { set({ error: error.message, cargando: false }); return }
+      const flujos = (data || []).map(flujoFromDB)
+      const pasos = (data || []).flatMap((f) => (f.nom_flujo_pasos || []).map(pasoFromDB))
+        .sort((a, b) => a.orden - b.orden)
+      set({ flujos, pasos, cargando: false })
+    } catch {
+      // Caída de red (Task 3.3).
+      set({ error: 'no se pudo contactar el servidor', cargando: false })
+    }
   },
 
   crearFlujo: async (nombre, empresaId) => {

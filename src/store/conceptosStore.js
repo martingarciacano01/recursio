@@ -22,10 +22,15 @@ export const useConceptosStore = create((set, get) => ({
   cargarConceptos: async (empresaId, { forzar = false } = {}) => {
     if (!forzar && get().cargadoEmpresaId === empresaId && !get().error) return
     set({ cargando: true, error: null })
-    const { data, error } = await supabase.from('nom_conceptos').select('*, nom_concepto_reglas(*)')
-      .or(`empresa_id.is.null,empresa_id.eq.${empresaId}`).order('orden')
-    if (error) { set({ error: error.message, cargando: false }); return }
-    set({ conceptos: (data || []).map(conceptoFromDB), cargando: false, cargadoEmpresaId: empresaId })
+    try {
+      const { data, error } = await supabase.from('nom_conceptos').select('*, nom_concepto_reglas(*)')
+        .or(`empresa_id.is.null,empresa_id.eq.${empresaId}`).order('orden')
+      if (error) { set({ error: error.message, cargando: false }); return }
+      set({ conceptos: (data || []).map(conceptoFromDB), cargando: false, cargadoEmpresaId: empresaId })
+    } catch {
+      // Caída de red (Task 3.3).
+      set({ error: 'no se pudo contactar el servidor', cargando: false })
+    }
   },
 
   guardarConcepto: async (concepto, empresaId) => {

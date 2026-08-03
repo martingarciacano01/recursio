@@ -20,18 +20,23 @@ export const useEmpresaConfigStore = create((set, get) => ({
 
   cargar: async (empresaId) => {
     set({ cargando: true, error: null })
-    const [{ data: config, error: e1 }, { data: empresa, error: e2 }] = await Promise.all([
-      supabase.from('nom_empresa_config').select('*').eq('empresa_id', empresaId).maybeSingle(),
-      supabase.from('empresas').select('nombre, logo_url').eq('id', empresaId).single(),
-    ])
-    if (e1 || e2) { set({ error: (e1 || e2).message, cargando: false }); return }
-    set({
-      cuit: config?.cuit || '', domicilio: config?.domicilio || '',
-      nombre: empresa?.nombre || '',
-      logoPropio: config?.logo_url || null,
-      logoUrl: config?.logo_url || empresa?.logo_url || null,
-      cargando: false,
-    })
+    try {
+      const [{ data: config, error: e1 }, { data: empresa, error: e2 }] = await Promise.all([
+        supabase.from('nom_empresa_config').select('*').eq('empresa_id', empresaId).maybeSingle(),
+        supabase.from('empresas').select('nombre, logo_url').eq('id', empresaId).single(),
+      ])
+      if (e1 || e2) { set({ error: (e1 || e2).message, cargando: false }); return }
+      set({
+        cuit: config?.cuit || '', domicilio: config?.domicilio || '',
+        nombre: empresa?.nombre || '',
+        logoPropio: config?.logo_url || null,
+        logoUrl: config?.logo_url || empresa?.logo_url || null,
+        cargando: false,
+      })
+    } catch {
+      // Caída de red (Task 3.3).
+      set({ error: 'no se pudo contactar el servidor', cargando: false })
+    }
   },
 
   guardar: async (empresaId, { cuit, domicilio }) => {
