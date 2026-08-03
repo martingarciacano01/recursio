@@ -1,0 +1,16 @@
+{
+  "descripcion": "SINTÉTICO UOCRA — hora extra 50% (modalidad hora, basico_convenio = valor de una hora)",
+  "esReal": false,
+  "regimen": "22250",
+  "variablesBase": { "basico_convenio": 5000, "basico_periodo": 400000, "horas_extra_50": 4, "horas_extra_100": 0, "horas_feriado": 0, "tope_sipa": 999999999 },
+  "resultadoEsperado": {
+    "items": [
+      { "codigo": "hora_extra_50", "montoEsperado": 30000 },
+      { "codigo": "presentismo", "montoEsperado": 86000 },
+      { "codigo": "jubilacion", "montoEsperado": 56760 },
+      { "codigo": "ley_19032", "montoEsperado": 15480 },
+      { "codigo": "obra_social", "montoEsperado": 15480 }
+    ],
+    "neto": null
+  }
+}

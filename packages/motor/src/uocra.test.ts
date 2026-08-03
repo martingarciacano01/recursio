@@ -28,6 +28,10 @@ describe('SAC', () => {
   it('SAC proporcional por dias trabajados', () => {
     expect(calcularSACProporcional(150000, 91, 182)).toBeCloseTo(37500, 0)
   })
+  it('calcularSACProporcional recibe bruto MENSUAL: la mejor quincena ya fue consolidada por el llamador (Task 2.1)', () => {
+    // Se pasa el máximo mensual (750000), no cada quincena (375000).
+    expect(calcularSACProporcional(750000, 182, 182)).toBeCloseTo(375000, 2)
+  })
 })
 
 describe('vacaciones', () => {

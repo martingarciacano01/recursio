@@ -14,9 +14,12 @@ export const CONCEPTOS_FUERA_CONVENIO: Concepto[] = [
   { codigo: 'hora_extra_50', nombre: 'Hora extra 50%', tipo: 'remunerativo', orden: 3, formula: '(basico_convenio / 200) * 1.5 * horas_extra_50', imprimible: true },
   { codigo: 'hora_extra_100', nombre: 'Hora extra 100%', tipo: 'remunerativo', orden: 4, formula: '(basico_convenio / 200) * 2 * horas_extra_100', imprimible: true },
   { codigo: 'adelanto', nombre: 'Adelanto de sueldo', tipo: 'descuento', orden: 5, formula: 'adelanto_monto', imprimible: true },
-  { codigo: 'jubilacion', nombre: 'Jubilación', tipo: 'descuento', orden: 6, formula: 'round(min(remunerativo_acumulado, tope_sipa) * 0.11)', imprimible: true },
-  { codigo: 'ley_19032', nombre: 'Ley 19.032 (INSSJP/PAMI)', tipo: 'descuento', orden: 7, formula: 'round(remunerativo_acumulado * 0.03)', imprimible: true },
-  { codigo: 'obra_social', nombre: 'Obra social', tipo: 'descuento', orden: 8, formula: 'round(remunerativo_acumulado * 0.03)', imprimible: true },
+  // Task 2.4: fórmulas idénticas a las seed reales (0031_seed_conceptos_base.sql:65-73),
+  // sin el round() manual que traía este fixture de prueba — el redondeo a
+  // centavos ya lo hace el motor (redondearCentavos, Task 2.11/2.4).
+  { codigo: 'jubilacion', nombre: 'Jubilación', tipo: 'descuento', orden: 6, formula: 'min(remunerativo_acumulado, tope_sipa) * 0.11', imprimible: true },
+  { codigo: 'ley_19032', nombre: 'Ley 19.032 (INSSJP/PAMI)', tipo: 'descuento', orden: 7, formula: 'remunerativo_acumulado * 0.03', imprimible: true },
+  { codigo: 'obra_social', nombre: 'Obra social', tipo: 'descuento', orden: 8, formula: '(remunerativo_acumulado + no_remunerativo_acumulado) * 0.03', imprimible: true },
 ]
 
 // Recibos como los de "SAC", "Vacaciones" o un mes de "Sueldo" fuera de

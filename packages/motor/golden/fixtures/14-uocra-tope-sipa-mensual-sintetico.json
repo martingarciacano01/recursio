@@ -1,0 +1,16 @@
+{
+  "descripcion": "SINTÉTICO UOCRA — tope SIPA consolidado por mes en quincena 2 (Task 2.3)",
+  "esReal": false,
+  "regimen": "22250",
+  "consolidadoMensual": true,
+  "variablesBase": { "basico_convenio": 1600000, "basico_periodo": 1600000, "horas_extra_50": 0, "horas_extra_100": 0, "horas_feriado": 0, "tope_sipa": 2800000, "remunerativo_quincena1": 1600000 },
+  "resultadoEsperado": {
+    "items": [
+      { "codigo": "presentismo", "montoEsperado": 320000 },
+      { "codigo": "jubilacion", "montoEsperado": 308000 },
+      { "codigo": "ley_19032", "montoEsperado": 84000 },
+      { "codigo": "obra_social", "montoEsperado": 57600 }
+    ],
+    "neto": null
+  }
+}
