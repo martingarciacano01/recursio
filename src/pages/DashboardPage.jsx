@@ -10,6 +10,7 @@ import { legajoIncompleto } from '../utils/legajoCompletitud'
 import { periodosPendientesDelMes, urgenciaLiquidacion, bajasSinFinal, valorAlerta, DEFAULTS_ALERTAS } from '../utils/alertasDashboard'
 import { repartoLegajos, personalPorConvenio, periodosRecientes, porcentaje } from '../utils/dashboardGraficos'
 import { etiquetaPeriodo } from '../utils/etiquetaPeriodo'
+import { progresoOnboarding } from '../utils/progresoOnboarding'
 import { useTemaStore } from '../store/temaStore'
 import { useAuthStore } from '../store/authStore'
 
@@ -46,6 +47,11 @@ export default function DashboardPage() {
     reparto: { alDia: 0, incompletos: 0, docPendiente: 0, total: 0 },
     porConvenio: [], ultimosPeriodos: [],
   })
+  // Task 4.5: hitos de onboarding (checklist de primeros pasos). Se recalcula
+  // con datos que esta misma pantalla ya trae (convenios, legajos, períodos)
+  // más un par de consultas chicas extra (empresa, categorías, flujos) — no
+  // amerita un store propio, es de una sola pantalla.
+  const [hitosOnboarding, setHitosOnboarding] = useState([])
 
   useEffect(() => {
     let cancelado = false
@@ -65,6 +71,8 @@ export default function DashboardPage() {
         { data: requeridos },
         { data: documentos },
         { data: convenios },
+        { data: empresaRow },
+        { data: flujos },
       ] = await Promise.all([
         supabase.from('nom_v_personal').select('id, estado').eq('estado', 'activo').eq('empresa_id', empresaId),
         supabase.from('nom_legajo').select('personal_id, cuil, cbu, convenio_id, categoria_id, fuera_convenio, sueldo_convenido, fecha_baja, liquidacion_final_id').eq('empresa_id', empresaId),
@@ -73,7 +81,9 @@ export default function DashboardPage() {
         supabase.from('nom_parametros').select('codigo, valor').eq('empresa_id', empresaId),
         supabase.from('nom_documentos_requeridos').select('id, obligatorio').eq('empresa_id', empresaId),
         supabase.from('nom_documentos_legajo').select('personal_id, requerido_id, fecha_vencimiento').eq('empresa_id', empresaId),
-        supabase.from('nom_convenios').select('id, nombre').or(`empresa_id.is.null,empresa_id.eq.${empresaId}`),
+        supabase.from('nom_convenios').select('id, nombre, empresa_id').or(`empresa_id.is.null,empresa_id.eq.${empresaId}`),
+        supabase.from('empresas').select('cuit, domicilio').eq('id', empresaId).maybeSingle(),
+        supabase.from('nom_flujos').select('id').eq('empresa_id', empresaId),
       ])
       if (cancelado) return
       if (errPersonal || errLegajos) {
@@ -111,6 +121,25 @@ export default function DashboardPage() {
       const docsPendientes = (personal || []).filter(tieneDocPendiente).length
 
       const pendientes = periodosPendientesDelMes(periodos, hoy)
+
+      // Categorías (escalas): solo interesan las de convenios propios (no
+      // globales, esos no los edita la empresa) — segunda consulta chica,
+      // no vale la pena meterla en el Promise.all de arriba porque depende
+      // de qué convenios propios devolvió esa misma tanda.
+      const conveniosPropiosIds = (convenios || []).filter((c) => c.empresa_id).map((c) => c.id)
+      const { data: categorias } = conveniosPropiosIds.length
+        ? await supabase.from('nom_categorias').select('id').in('convenio_id', conveniosPropiosIds).limit(1)
+        : { data: [] }
+
+      setHitosOnboarding(progresoOnboarding({
+        empresa: empresaRow,
+        convenios: (convenios || []).map((c) => ({ id: c.id, empresaId: c.empresa_id })),
+        categorias: categorias || [],
+        documentos: requeridos || [],
+        flujos: flujos || [],
+        legajos: legajos || [],
+        periodos: periodos || [],
+      }))
 
       setDatos({
         totalActivo: (personal || []).length,
@@ -167,6 +196,37 @@ export default function DashboardPage() {
       {error && (
         <div className="card" style={{ borderColor: 'rgba(218,54,51,0.4)', color: 'var(--danger)', marginBottom: '1rem' }}>
           Error al cargar datos: {error}
+        </div>
+      )}
+
+      {empresaActiva && !error && !cargando && hitosOnboarding.length > 0 && hitosOnboarding.some((h) => !h.hecho) && (
+        <div className="card card-compacta" style={{ marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+            <strong style={{ fontSize: '0.9rem' }}>Primeros pasos</strong>
+            <span className="texto-secundario" style={{ fontSize: '0.8rem' }}>
+              {hitosOnboarding.filter((h) => h.hecho).length} / {hitosOnboarding.length}
+            </span>
+          </div>
+          <div style={{ height: 6, borderRadius: 999, background: 'var(--border)', overflow: 'hidden', marginBottom: 12 }}>
+            <div
+              style={{
+                height: '100%', borderRadius: 999, background: 'var(--brand-secondary)',
+                width: `${porcentaje(hitosOnboarding.filter((h) => h.hecho).length, hitosOnboarding.length)}%`,
+              }}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {hitosOnboarding.filter((h) => !h.hecho).map((h) => (
+              <button
+                key={h.id}
+                className="btn btn-ghost btn-sm"
+                style={{ justifyContent: 'flex-start', textAlign: 'left' }}
+                onClick={() => navigate(h.ruta)}
+              >
+                <ChevronRight size={14} /> {h.label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
