@@ -1,5 +1,6 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 const FragmentoLiquidacion = Fragment
+import { useSearchParams } from 'react-router-dom'
 import { Lock, Trash2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
@@ -14,6 +15,7 @@ import { etiquetaPeriodo } from '../utils/etiquetaPeriodo'
 import { generarYDescargarRecibo } from '../utils/emitirReciboLegajo'
 import { generarZipRecibos, nombreArchivoZip } from '../utils/reciboZip'
 import LiquidacionesIndividuales from '../components/LiquidacionesIndividuales'
+import Toast from '../components/Toast'
 import { useConveniosStore } from '../store/conveniosStore'
 import { calcularFechasPeriodo } from '../utils/calcularFechasPeriodo'
 import { FUERA_DE_CONVENIO, TIPOS_MANUALES, tiposDisponibles, etiquetaTipo, convenioDelPeriodo, conveniosParaPeriodo } from '../utils/tiposPeriodo'
@@ -50,6 +52,7 @@ export default function LiquidacionPage() {
   const [errorFlujo, setErrorFlujo] = useState('')
   const [periodos, setPeriodos] = useState([])
   const [periodoSeleccionado, setPeriodoSeleccionado] = useState('')
+  const [searchParams] = useSearchParams()
   const [personalPorId, setPersonalPorId] = useState(new Map())
 
   const [mostrarFormNuevo, setMostrarFormNuevo] = useState(false)
@@ -94,23 +97,43 @@ export default function LiquidacionPage() {
     }
   }
 
+  // seqEmpresa (Task 3.4, M2): un Superadmin puede cambiar de empresa
+  // rápido (entrar en A, arrepentirse, entrar en B) — sin guardia, la
+  // respuesta de A podía llegar DESPUÉS que la de B (orden de red no
+  // garantizado) y pisar la pantalla con los períodos/personal de la
+  // empresa vieja mientras se sigue mostrando "empresa B" en el header.
+  const seqEmpresaRef = useRef(0)
+
   const cargarPeriodos = () => {
     if (!empresaId) return
+    const seq = ++seqEmpresaRef.current
     supabase.from('nom_periodos').select('*').eq('empresa_id', empresaId).order('fecha_desde', { ascending: false })
-      .then(({ data }) => setPeriodos(data || []))
+      .then(({ data }) => { if (seqEmpresaRef.current === seq) setPeriodos(data || []) })
   }
 
   useEffect(() => {
+    const seq = ++seqEmpresaRef.current
     cargarPeriodos()
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reset intencional al cambiar de empresa.
     setPeriodoSeleccionado('')
-    if (!empresaId) return
+    if (!empresaId) { setPeriodos([]); setPersonalPorId(new Map()); return }
     supabase.from('nom_v_personal').select('id, nombre').eq('empresa_id', empresaId)
-      .then(({ data }) => setPersonalPorId(new Map((data || []).map((p) => [p.id, p.nombre]))))
+      .then(({ data }) => { if (seqEmpresaRef.current === seq) setPersonalPorId(new Map((data || []).map((p) => [p.id, p.nombre]))) })
     cargarFlujos(empresaId)
   }, [empresaId])
 
   useEffect(() => { if (empresaId) cargarConvenios(empresaId) }, [empresaId])
+
+  // Preselección desde /liquidacion?periodo=<id> (link "Ver detalle" en
+  // AprobacionesPage, Task 4.1). Espera a que `periodos` tenga datos antes
+  // de intentar el match — si se corre en el mismo render que el cambio de
+  // empresa, `periodos` todavía puede estar vacío.
+  useEffect(() => {
+    const periodoParam = searchParams.get('periodo')
+    if (periodoParam && periodos.some((p) => p.id === periodoParam)) {
+      setPeriodoSeleccionado(periodoParam)
+    }
+  }, [searchParams, periodos])
 
   const handleEnviarAFlujo = async () => {
     if (!periodoSeleccionado || !flujoElegido) return
@@ -122,9 +145,11 @@ export default function LiquidacionPage() {
   }
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset intencional al cambiar de período.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset intencional al cambiar de período (Task 3.1, M1: selección y búsqueda no deben sobrevivir el cambio de período).
     setLiqExpandida(null)
     setItemsPorLiq({})
+    setSeleccionadas(new Set())
+    setBusqueda('')
     if (periodoSeleccionado) cargarLiquidaciones(periodoSeleccionado)
   }, [periodoSeleccionado])
 
@@ -136,13 +161,25 @@ export default function LiquidacionPage() {
   const handleEmitirRecibo = async (l) => {
     setErrorRecibo(''); setEmitiendoRecibo(l.id)
     try {
+      // Task 2.6: el hash tiene que autenticar el PDF FINAL, con el número
+      // de recibo ya impreso (reciboPdf.js dibuja "Recibo N°:" en el
+      // documento) — antes se calculaba el hash sobre un PDF sin número
+      // (o con el número viejo, en un regenerar) y recién después se
+      // asignaba/actualizaba el número real, así que el hash guardado
+      // nunca correspondía al PDF que la persona terminaba viendo. Fix:
+      // primero reservar/confirmar el número (emitir_recibo es idempotente
+      // si ya existe), generar el PDF CON ese número, y recién ahí hashear
+      // y guardar el hash definitivo con una segunda llamada (que solo
+      // actualiza el hash, no reasigna número).
+      const numeroReservado = await emitirRecibo(l.id, null)
+      if (!numeroReservado.ok) { setErrorRecibo(numeroReservado.error); setEmitiendoRecibo(null); return }
       const { doc, hash, nombreArchivo } = await generarYDescargarRecibo({
         empresaId,
         personalId: l.personalId,
         nombrePersona: personalPorId.get(l.personalId) || l.personalId,
         periodo: periodoActivo,
         filasItems: itemsPorLiq[l.id] || [],
-        numeroRecibo: l.numeroRecibo,
+        numeroRecibo: numeroReservado.numeroRecibo,
       })
       const r = await emitirRecibo(l.id, hash)
       if (!r.ok) { setErrorRecibo(r.error); setEmitiendoRecibo(null); return }
@@ -176,8 +213,13 @@ export default function LiquidacionPage() {
 
   const handleCalcular = async () => {
     if (!periodoSeleccionado) return
-    const r = await calcularPeriodo(periodoSeleccionado)
-    if (r.ok) cargarLiquidaciones(periodoSeleccionado)
+    const periodoAlPedir = periodoSeleccionado
+    const r = await calcularPeriodo(periodoAlPedir)
+    // Task 3.1: el SelectorPeriodo ya queda disabled mientras calculando,
+    // pero esto es una segunda guarda defensiva — si por lo que sea el
+    // período seleccionado cambió mientras la Edge Function respondía, no
+    // recargar liquidaciones del período viejo sobre la pantalla del nuevo.
+    if (r.ok && periodoSeleccionado === periodoAlPedir) cargarLiquidaciones(periodoAlPedir)
   }
 
   const liquidacionesFiltradas = liquidaciones.filter((l) => {
@@ -265,7 +307,11 @@ export default function LiquidacionPage() {
       a.href = url
       a.download = nombreArchivoZip(periodoActivo)
       a.click()
-      URL.revokeObjectURL(url)
+      // revokeObjectURL diferido (Task 3.4, M5): revocar la URL en el mismo
+      // tick que a.click() es una carrera contra el navegador, que dispara
+      // la descarga de forma asíncrona — en algunos navegadores/ZIPs grandes
+      // la URL quedaba inválida antes de que la descarga arrancara.
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
       if (fallidos.length > 0) { setErroresZip(fallidos); setMostrarErroresZip(true) }
       setSeleccionadas(new Set())
       await cargarLiquidaciones(periodoSeleccionado) // refresca los números de recibo asignados
@@ -391,7 +437,7 @@ export default function LiquidacionPage() {
       {pestana === 'Períodos generales' && (
       <>
       <div className="card card-compacta" style={{ marginBottom: '1rem', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-        <SelectorPeriodo periodos={periodos} value={periodoSeleccionado} onChange={setPeriodoSeleccionado} />
+        <SelectorPeriodo periodos={periodos} value={periodoSeleccionado} onChange={setPeriodoSeleccionado} disabled={calculando} />
         <button
           className="btn btn-primary btn-sm"
           onClick={handleCalcular}
@@ -522,7 +568,7 @@ export default function LiquidacionPage() {
         </div>
       )}
 
-      {error && <div className="card" style={{ color: 'var(--danger)' }}>Error: {error}</div>}
+      <Toast mensaje={error} tipo="error" onClose={() => useLiquidacionStore.setState({ error: null })} />
       {errorRecibo && <div className="card" style={{ color: 'var(--danger)' }}>Error al emitir recibo: {errorRecibo}</div>}
 
       {erroresZip.length > 0 && (
