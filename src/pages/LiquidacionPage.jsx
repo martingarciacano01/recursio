@@ -111,16 +111,24 @@ export default function LiquidacionPage() {
   // empresa vieja mientras se sigue mostrando "empresa B" en el header.
   const seqEmpresaRef = useRef(0)
 
-  const cargarPeriodos = () => {
+  // `seqExistente` (Task 4.6 fix): cuando el efecto de más abajo llama acá
+  // dentro del mismo render, tiene que pasar SU PROPIO `seq` para que la
+  // comparación de "¿sigo siendo la respuesta más reciente?" use el mismo
+  // número que la carga de personal — si esta función incrementaba el
+  // contador por su cuenta (como hacía antes), el `seq` que el efecto
+  // había capturado quedaba viejo antes de que llegara la respuesta de
+  // nom_v_personal, esa comparación fallaba siempre y personalPorId nunca
+  // se llenaba (bug reportado: nombres reemplazados por el UUID crudo).
+  const cargarPeriodos = (seqExistente) => {
     if (!empresaId) return
-    const seq = ++seqEmpresaRef.current
+    const seq = seqExistente ?? ++seqEmpresaRef.current
     supabase.from('nom_periodos').select('*').eq('empresa_id', empresaId).order('fecha_desde', { ascending: false })
       .then(({ data }) => { if (seqEmpresaRef.current === seq) setPeriodos(data || []) })
   }
 
   useEffect(() => {
     const seq = ++seqEmpresaRef.current
-    cargarPeriodos()
+    cargarPeriodos(seq)
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reset intencional al cambiar de empresa.
     setPeriodoSeleccionado('')
     if (!empresaId) { setPeriodos([]); setPersonalPorId(new Map()); return }
