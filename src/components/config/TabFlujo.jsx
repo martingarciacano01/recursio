@@ -20,15 +20,22 @@ export default function TabFlujo({ empresaId }) {
   if (cargando) return <div className="card">Cargando…</div>
   if (error) return <div className="card" style={{ color: 'var(--danger)' }}>Error: {error}</div>
 
-  const filasDe = (flujoId) => filasPorFlujo[flujoId] ?? pasos.filter((p) => p.flujoId === flujoId).map((p) => ({ nombre: p.nombre, rolRequerido: p.rolRequerido, esMasivo: p.esMasivo }))
+  // _key estable por fila (Task 3.4, M4): usa el id real del paso si ya
+  // existe en la base, o uno generado client-side para filas nuevas —
+  // sin esto React reusaba el mismo nodo DOM al reordenar/quitar filas
+  // por índice, pisando el foco/valor del input equivocado a mitad de edición.
+  const filasDe = (flujoId) => filasPorFlujo[flujoId] ?? pasos.filter((p) => p.flujoId === flujoId)
+    .map((p) => ({ _key: p.id, nombre: p.nombre, rolRequerido: p.rolRequerido, esMasivo: p.esMasivo }))
 
   const setFilas = (flujoId, filas) => setFilasPorFlujo((s) => ({ ...s, [flujoId]: filas }))
 
+  const nuevaKey = () => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `tmp-${Date.now()}-${Math.random()}`)
+
   const agregarPaso = (flujoId) => {
-    setFilas(flujoId, [...filasDe(flujoId), { nombre: '', rolRequerido: 'revisor_interno', esMasivo: true }])
+    setFilas(flujoId, [...filasDe(flujoId), { _key: nuevaKey(), nombre: '', rolRequerido: 'revisor_interno', esMasivo: true }])
   }
 
-  const usarDefault = (flujoId) => setFilas(flujoId, PASOS_DEFAULT.map((p) => ({ ...p })))
+  const usarDefault = (flujoId) => setFilas(flujoId, PASOS_DEFAULT.map((p) => ({ ...p, _key: nuevaKey() })))
 
   const guardar = async (flujoId) => {
     const filas = filasDe(flujoId).filter((f) => f.nombre.trim())
@@ -61,7 +68,7 @@ export default function TabFlujo({ empresaId }) {
               <button className="btn btn-ghost btn-sm" onClick={() => usarDefault(f.id)}>Usar flujo piloto (revisión → aprobación → pago)</button>
             )}
             {filas.map((p, i) => (
-              <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+              <div key={p._key ?? i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
                 <span className="badge badge-neutral">{i + 1}</span>
                 <input className="input" placeholder="nombre del paso" style={{ flex: 1 }}
                   value={p.nombre} onChange={(e) => setFilas(f.id, filas.map((x, j) => j === i ? { ...x, nombre: e.target.value } : x))} />

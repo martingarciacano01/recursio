@@ -66,6 +66,10 @@ export default function FichaLegajoPage() {
     setErrorAusencias('')
     setErrorLiquidaciones('')
     useLegajoStore.setState({ familiares: [], sanciones: [] })
+    // Task 3.4, B6: idem para documentosStore — sin este reset, cambiar de
+    // legajo mostraba por un instante (o para siempre, si la carga nueva
+    // fallaba) los documentos del legajo anterior.
+    useDocumentosStore.getState().reset()
 
     let cancelado = false
     // cargarLegajos necesita un empresa_id explícito para filtrar

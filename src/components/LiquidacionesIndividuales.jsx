@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useLiquidacionStore } from '../store/liquidacionStore'
 import { ausenciasVacacionesElegibles } from '../utils/vacacionesElegibles'
@@ -36,18 +36,28 @@ export default function LiquidacionesIndividuales({ empresaId }) {
   const [errorHistorial, setErrorHistorial] = useState('')
   const [descargandoRecibo, setDescargandoRecibo] = useState(null)
 
+  // seqEmpresa/seqPersona (Task 3.4, M2): mismo problema de orden de red
+  // no garantizado que en LiquidacionPage/ReportesPage — acá aplica al
+  // cambio de empresa activa (Superadmin) y al cambio de persona elegida.
+  const seqEmpresaRef = useRef(0)
+  const seqPersonaRef = useRef(0)
+
   useEffect(() => {
-    if (!empresaId) return
+    const seq = ++seqEmpresaRef.current
+    if (!empresaId) { setPersonas([]); return }
     supabase.from('nom_v_personal').select('id, nombre').eq('empresa_id', empresaId).eq('estado', 'activo').order('nombre')
-      .then(({ data }) => setPersonas(data || []))
+      .then(({ data }) => { if (seqEmpresaRef.current === seq) setPersonas(data || []) })
   }, [empresaId])
 
+  const seqHistorialRef = useRef(0)
   const cargarHistorial = () => {
-    if (!empresaId) return
+    const seq = ++seqHistorialRef.current
+    if (!empresaId) { setHistorial([]); return }
     supabase.from('nom_liquidaciones').select('*, nom_periodos!inner(tipo, fecha_desde, fecha_hasta)')
       .eq('empresa_id', empresaId).in('nom_periodos.tipo', ['vacaciones', 'final'])
       .order('created_at', { ascending: false })
       .then(({ data, error }) => {
+        if (seqHistorialRef.current !== seq) return
         if (error) { setErrorHistorial(error.message); return }
         setHistorial(data || [])
       })
@@ -56,17 +66,18 @@ export default function LiquidacionesIndividuales({ empresaId }) {
   useEffect(cargarHistorial, [empresaId])
 
   useEffect(() => {
+    const seq = ++seqPersonaRef.current
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reset intencional al cambiar de persona, antes de disparar las cargas.
     setLegajo(null); setAusencias([]); setVacacionesLiquidadas([])
     setAusenciaElegida(''); setManual(false); setFechaDesde(''); setFechaHasta('')
     setErrorVac(''); setErrorFinal('')
     if (!personaId || !empresaId) return
     supabase.from('nom_legajo').select('*').eq('personal_id', personaId).eq('empresa_id', empresaId).maybeSingle()
-      .then(({ data }) => setLegajo(data))
+      .then(({ data }) => { if (seqPersonaRef.current === seq) setLegajo(data) })
     supabase.from('nom_v_ausencias').select('*').eq('personal_id', personaId)
-      .then(({ data }) => setAusencias(data || []))
+      .then(({ data }) => { if (seqPersonaRef.current === seq) setAusencias(data || []) })
     supabase.from('nom_vacaciones_liquidadas').select('ausencia_id').eq('personal_id', personaId).eq('empresa_id', empresaId)
-      .then(({ data }) => setVacacionesLiquidadas((data || []).map((v) => v.ausencia_id).filter(Boolean)))
+      .then(({ data }) => { if (seqPersonaRef.current === seq) setVacacionesLiquidadas((data || []).map((v) => v.ausencia_id).filter(Boolean)) })
   }, [personaId, empresaId])
 
   const personasFiltradas = personas.filter((p) => p.nombre.toLowerCase().includes(busqueda.toLowerCase()))

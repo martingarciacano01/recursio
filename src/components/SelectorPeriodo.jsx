@@ -10,7 +10,7 @@ import { agruparPorAnio } from '../utils/ordenarPeriodos'
 // El orden dentro de cada año es mes descendente y, dentro del mes, por tipo
 // (ver src/utils/ordenarPeriodos.js). La etiqueta arranca con "Mes Año · tipo"
 // para poder buscar tipeando el mes, y deja las fechas exactas al final.
-export default function SelectorPeriodo({ periodos, value, onChange }) {
+export default function SelectorPeriodo({ periodos, value, onChange, disabled = false }) {
   const grupos = agruparPorAnio(periodos)
 
   return (
@@ -19,6 +19,7 @@ export default function SelectorPeriodo({ periodos, value, onChange }) {
       aria-label="Período"
       style={{ maxWidth: 380 }}
       value={value}
+      disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
     >
       <option value="">Elegir período…</option>

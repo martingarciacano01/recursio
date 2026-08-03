@@ -41,5 +41,9 @@ export function exportarCsv(nombreArchivo, columnas, filas) {
   a.href = url
   a.download = nombreArchivo
   a.click()
-  URL.revokeObjectURL(url)
+  // revokeObjectURL diferido (Task 3.4, M5): ver mismo comentario en
+  // LiquidacionPage.jsx (handleDescargarZip) — revocar en el mismo tick
+  // corre el riesgo de invalidar la URL antes de que el navegador dispare
+  // la descarga.
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
