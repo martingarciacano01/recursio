@@ -1,27 +1,17 @@
 import { useState } from 'react'
+import { evaluar } from '../../../packages/motor/src/interprete.ts'
 
-// Vista previa liviana: reimplementación mínima de comparaciones simples
-// para no importar el paquete completo del motor al bundle del cliente
-// (el motor real corre server-side, Recursio_Diseno.md 4.4). Si la
-// condición usa sintaxis que esta vista previa no soporta, se muestra
-// "no se pudo evaluar" en vez de fallar — no bloquea guardar la regla.
-//
-// SEGURIDAD: `new Function` se usa ACA únicamente para dar feedback visual
-// en el cliente mientras se edita una condición (ej. "tardanzas > 3"). Esto
-// NUNCA se usa para liquidar sueldos de verdad — la liquidación real siempre
-// corre server-side vía la Edge Function `liquidar-periodo`, que usa su
-// propio intérprete controlado (no `new Function`). Este código evalúa una
-// fórmula que el propio usuario autenticado acaba de escribir en este mismo
-// formulario, contra valores de ejemplo hardcodeados en el cliente — no hay
-// input de terceros ni datos remotos involucrados.
+// Vista previa: usa el intérprete REAL del motor (Task 3.4, M7) en vez de
+// `new Function` — antes se traducía el texto de la condición a JS
+// (and→&&, or→||, not→!) y se ejecutaba con `new Function`, evaluando JS
+// arbitrario en el cliente. El intérprete de packages/motor/src/interprete.ts
+// ya entiende and/or/not/comparaciones nativamente (mismo parser que corre
+// server-side en la Edge Function liquidar-periodo) — sin new Function, sin
+// dos implementaciones del mismo lenguaje de condiciones a mantener en
+// paralelo.
 function evaluarPreview(condicion, valoresEjemplo) {
   try {
-    const nombres = Object.keys(valoresEjemplo)
-    const valores = Object.values(valoresEjemplo)
-    const condicionJs = condicion.replace(/\band\b/g, '&&').replace(/\bor\b/g, '||').replace(/\bnot\b/g, '!')
-    // eslint-disable-next-line no-new-func
-    const fn = new Function(...nombres, `return (${condicionJs})`)
-    return { ok: true, resultado: Boolean(fn(...valores)) }
+    return { ok: true, resultado: Boolean(evaluar(condicion, valoresEjemplo)) }
   } catch {
     return { ok: false, resultado: null }
   }
@@ -44,7 +34,7 @@ export default function EditorReglas({ reglas, onChange }) {
       {reglas.map((r, i) => {
         const preview = evaluarPreview(r.condicion, VALORES_EJEMPLO)
         return (
-          <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+          <div key={r.id ?? i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
             <span className="badge badge-neutral">{r.orden}</span>
             <code style={{ flex: 1 }}>{r.condicion}</code>
             <span>→</span>
