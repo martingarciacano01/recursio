@@ -52,6 +52,10 @@ describe('evaluar', () => {
     expect(() => evaluar('round(1.5, 2)', {})).toThrow('round necesita exactamente un argumento numérico')
   })
 
+  it('round(1.005) da 1.01, no 1 (Task 2.10, error de punto flotante)', () => {
+    expect(evaluar('round(1.005)', {})).toBe(1.01)
+  })
+
   it('ceil(71.26) da 72 (redondeo hacia arriba, usado por el básico por hora)', () => {
     expect(evaluar('ceil(71.26)', {})).toBe(72)
   })

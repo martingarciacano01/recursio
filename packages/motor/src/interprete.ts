@@ -371,7 +371,10 @@ function evaluarNodo(nodo: Nodo, vars: Record<string, Valor>): Valor {
           if (args.length !== 1) {
             throw new Error('round necesita exactamente un argumento numérico')
           }
-          return Math.round(args[0] * 100) / 100
+          // Task 2.10: Math.round(1.005*100)/100 da 1 en vez de 1.01 por el
+          // error de representación de punto flotante de 1.005 (en binario
+          // es ligerísimamente menor a 1.005) — el EPSILON lo compensa.
+          return Math.round((args[0] + Number.EPSILON) * 100) / 100
         case 'ceil':
           // Redondeo hacia arriba al entero más próximo (ej. básico por hora:
           // 71,26 horas se liquidan como 72 — ver packages/motor/src/basico.ts).
