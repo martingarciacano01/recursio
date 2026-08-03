@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import LiquidacionPage from '../LiquidacionPage'
 
 function chain(data, error = null) {
@@ -55,7 +56,7 @@ describe('LiquidacionPage — Nuevo período', () => {
   beforeEach(() => { insertPayload = null })
 
   const abrirFormulario = () => {
-    render(<LiquidacionPage />)
+    render(<MemoryRouter><LiquidacionPage /></MemoryRouter>)
     fireEvent.click(screen.getByRole('button', { name: 'Nuevo período' }))
   }
 
