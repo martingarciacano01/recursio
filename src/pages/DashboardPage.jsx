@@ -11,6 +11,7 @@ import { periodosPendientesDelMes, urgenciaLiquidacion, bajasSinFinal, valorAler
 import { repartoLegajos, personalPorConvenio, periodosRecientes, porcentaje } from '../utils/dashboardGraficos'
 import { etiquetaPeriodo } from '../utils/etiquetaPeriodo'
 import { progresoOnboarding } from '../utils/progresoOnboarding'
+import { leerOmitidos, marcarOmitido } from '../utils/onboardingOmitidos'
 import { useTemaStore } from '../store/temaStore'
 import { useAuthStore } from '../store/authStore'
 
@@ -52,6 +53,17 @@ export default function DashboardPage() {
   // más un par de consultas chicas extra (empresa, categorías, flujos) — no
   // amerita un store propio, es de una sola pantalla.
   const [hitosOnboarding, setHitosOnboarding] = useState([])
+  // No todos los hitos aplican a todas las empresas (ej. una PyME chica
+  // puede decidir no pedir documentación al legajo) — "Omitir" los saca de
+  // la checklist sin obligar a configurar algo que no van a usar.
+  const [omitidos, setOmitidos] = useState(() => leerOmitidos(empresaActiva?.id))
+  const handleOmitir = (hitoId) => {
+    marcarOmitido(empresaActiva.id, hitoId)
+    setOmitidos((prev) => [...prev, hitoId])
+  }
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resync intencional al cambiar de empresa (Superadmin puede "entrar" en otra).
+  useEffect(() => { setOmitidos(leerOmitidos(empresaActiva?.id)) }, [empresaActiva?.id])
 
   useEffect(() => {
     let cancelado = false
@@ -82,7 +94,7 @@ export default function DashboardPage() {
         supabase.from('nom_documentos_requeridos').select('id, obligatorio').eq('empresa_id', empresaId),
         supabase.from('nom_documentos_legajo').select('personal_id, requerido_id, fecha_vencimiento').eq('empresa_id', empresaId),
         supabase.from('nom_convenios').select('id, nombre, empresa_id').or(`empresa_id.is.null,empresa_id.eq.${empresaId}`),
-        supabase.from('empresas').select('cuit, domicilio').eq('id', empresaId).maybeSingle(),
+        supabase.from('nom_empresa_config').select('cuit, domicilio').eq('empresa_id', empresaId).maybeSingle(),
         supabase.from('nom_flujos').select('id').eq('empresa_id', empresaId),
       ])
       if (cancelado) return
@@ -199,36 +211,53 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {empresaActiva && !error && !cargando && hitosOnboarding.length > 0 && hitosOnboarding.some((h) => !h.hecho) && (
-        <div className="card card-compacta" style={{ marginBottom: '1rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-            <strong style={{ fontSize: '0.9rem' }}>Primeros pasos</strong>
-            <span className="texto-secundario" style={{ fontSize: '0.8rem' }}>
-              {hitosOnboarding.filter((h) => h.hecho).length} / {hitosOnboarding.length}
-            </span>
+      {(() => {
+        // Un hito "omitido" a mano cuenta como resuelto para la barra de
+        // progreso y desaparece de la lista de pendientes, pero sin tocar
+        // `hecho` (que sigue reflejando el dato real) — así si más adelante
+        // se carga esa configuración, el hito directamente deja de listarse
+        // por estar `hecho`, sin depender de la marca de "omitido".
+        const conOmitidos = hitosOnboarding.map((h) => ({ ...h, resuelto: h.hecho || omitidos.includes(h.id) }))
+        const pendientes = conOmitidos.filter((h) => !h.resuelto)
+        const hechos = conOmitidos.filter((h) => h.resuelto).length
+        if (!empresaActiva || error || cargando || conOmitidos.length === 0 || pendientes.length === 0) return null
+        return (
+          <div className="card card-compacta" style={{ marginBottom: '1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+              <strong style={{ fontSize: '0.9rem' }}>Primeros pasos</strong>
+              <span className="texto-secundario" style={{ fontSize: '0.8rem' }}>{hechos} / {conOmitidos.length}</span>
+            </div>
+            <div style={{ height: 6, borderRadius: 999, background: 'var(--border)', overflow: 'hidden', marginBottom: 12 }}>
+              <div
+                style={{
+                  height: '100%', borderRadius: 999, background: 'var(--brand-secondary)',
+                  width: `${porcentaje(hechos, conOmitidos.length)}%`,
+                }}
+              />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {pendientes.map((h) => (
+                <div key={h.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ justifyContent: 'flex-start', textAlign: 'left', flex: 1 }}
+                    onClick={() => navigate(h.ruta)}
+                  >
+                    <ChevronRight size={14} /> {h.label}
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    title="No quiero configurar esto"
+                    onClick={() => handleOmitir(h.id)}
+                  >
+                    Omitir
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
-          <div style={{ height: 6, borderRadius: 999, background: 'var(--border)', overflow: 'hidden', marginBottom: 12 }}>
-            <div
-              style={{
-                height: '100%', borderRadius: 999, background: 'var(--brand-secondary)',
-                width: `${porcentaje(hitosOnboarding.filter((h) => h.hecho).length, hitosOnboarding.length)}%`,
-              }}
-            />
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {hitosOnboarding.filter((h) => !h.hecho).map((h) => (
-              <button
-                key={h.id}
-                className="btn btn-ghost btn-sm"
-                style={{ justifyContent: 'flex-start', textAlign: 'left' }}
-                onClick={() => navigate(h.ruta)}
-              >
-                <ChevronRight size={14} /> {h.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+        )
+      })()}
 
       {empresaActiva && !error && (
         <>
