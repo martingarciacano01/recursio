@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuthStore } from '../store/authStore'
 import { useConveniosStore } from '../store/conveniosStore'
+import { useToastStore } from '../store/toastStore'
 import { filtrarConveniosVisibles } from '../utils/convenios'
 import { Building2, Scale } from 'lucide-react'
 import TabEscalas from '../components/config/TabEscalas'
@@ -52,6 +53,7 @@ export default function ConfiguracionPage() {
   const [pestana, setPestana] = useState(SECCIONES[0].tabs[0])
   const [clonando, setClonando] = useState(false)
   const [errorClonado, setErrorClonado] = useState(null)
+  const push = useToastStore((s) => s.push)
 
   const seccion = SECCIONES.find((s) => s.id === seccionId) || SECCIONES[0]
 
@@ -86,6 +88,7 @@ export default function ConfiguracionPage() {
     if (!r.ok) { setErrorClonado(r.error); return }
     await cargarConvenios(empresaActiva.id)
     setConvenioId(r.convenioId)
+    push('Convenio clonado: ya podés editarlo.', 'success')
   }
 
   // El selector no aplica a "Mis convenios": ahí se listan todos los propios.

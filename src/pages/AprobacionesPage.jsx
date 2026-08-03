@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAprobacionesStore } from '../store/aprobacionesStore'
 import { useAuthStore } from '../store/authStore'
+import { useToastStore } from '../store/toastStore'
 import { usePaginado } from '../hooks/usePaginado'
 
 const fmt = (n) => (Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -22,9 +23,16 @@ export default function AprobacionesPage() {
   const [seleccion, setSeleccion] = useState([])
   const [seleccionPorPeriodo, setSeleccionPorPeriodo] = useState({})
   const [motivoPorRecibo, setMotivoPorRecibo] = useState({})
+  // rechazando: id del recibo (o `lote-<periodoId>`) cuyo panel de motivo
+  // está abierto. El rechazo es de dos pasos (click "Rechazar" → escribir
+  // motivo → confirmar) para no tener 3 textareas vacías siempre visibles
+  // por fila, que era el principal problema de legibilidad del diseño
+  // anterior (ver crítica 2026-08-03).
+  const [rechazando, setRechazando] = useState(null)
   const [errorAccion, setErrorAccion] = useState(null)
   const [procesando, setProcesando] = useState(false)
   const { pagina, rango, siguientePagina, reset, hayMasPaginas } = usePaginado(TAMANO_PAGINA)
+  const push = useToastStore((s) => s.push)
 
   useEffect(() => { if (empresaActiva?.id) cargarInstancias(empresaActiva.id) }, [empresaActiva?.id])
   useEffect(() => { reset() }, [empresaActiva?.id])
@@ -57,6 +65,9 @@ export default function AprobacionesPage() {
       if (!r.ok) { setErrorAccion(`${id}: ${r.error}`); setProcesando(false); return }
     }
     setProcesando(false); setSeleccion([])
+    push(accion === 'aprobado'
+      ? `${ids.length === 1 ? 'Período aprobado' : `${ids.length} períodos aprobados`}.`
+      : `${ids.length === 1 ? 'Período rechazado' : `${ids.length} períodos rechazados`}.`, 'success')
     await cargarInstancias(empresaActiva?.id)
   }
 
@@ -68,8 +79,15 @@ export default function AprobacionesPage() {
     }
     setProcesando(false)
     setSeleccionPorPeriodo((s) => ({ ...s, [periodoId]: [] }))
+    setRechazando(null)
+    push(accion === 'aprobado'
+      ? `${ids.length === 1 ? 'Recibo aprobado' : `${ids.length} recibos aprobados`}.`
+      : `${ids.length === 1 ? 'Recibo rechazado' : `${ids.length} recibos rechazados`}.`, 'success')
     await cargarInstancias(empresaActiva?.id)
   }
+
+  const abrirRechazo = (id) => setRechazando(id)
+  const cerrarRechazo = () => setRechazando(null)
 
   const instanciasPagina = instancias.slice(rango[0], rango[1] + 1)
 
@@ -124,48 +142,74 @@ export default function AprobacionesPage() {
             </div>
 
             {seleccionRecibos.length > 0 && (
-              <div className="card card-compacta" style={{ marginBottom: 10, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <span>{seleccionRecibos.length} recibos seleccionados</span>
-                <button className="btn btn-primary btn-sm" disabled={procesando}
-                  onClick={() => revisarRecibos(i.periodoId, seleccionRecibos, 'aprobado')}>Aprobar seleccionados</button>
-                <textarea className="input" placeholder="motivo del rechazo" style={{ minWidth: 220 }}
-                  value={motivoLote} onChange={(e) => setMotivoPorRecibo((m) => ({ ...m, [`lote-${i.periodoId}`]: e.target.value }))} />
-                <button className="btn btn-ghost btn-sm" disabled={procesando || !motivoLote.trim()}
-                  onClick={() => revisarRecibos(i.periodoId, seleccionRecibos, 'rechazado', motivoLote)}>Rechazar seleccionados</button>
+              <div className="card card-compacta" style={{ marginBottom: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span>{seleccionRecibos.length} recibos seleccionados</span>
+                  <button className="btn btn-primary btn-sm" disabled={procesando}
+                    onClick={() => revisarRecibos(i.periodoId, seleccionRecibos, 'aprobado')}>Aprobar seleccionados</button>
+                  <button className="btn btn-ghost btn-sm" disabled={procesando}
+                    onClick={() => abrirRechazo(`lote-${i.periodoId}`)}>Rechazar seleccionados</button>
+                </div>
+                {rechazando === `lote-${i.periodoId}` && (
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                    <textarea className="input" placeholder="motivo del rechazo" style={{ flex: '1 1 220px' }} autoFocus
+                      value={motivoLote} onChange={(e) => setMotivoPorRecibo((m) => ({ ...m, [`lote-${i.periodoId}`]: e.target.value }))} />
+                    <button className="btn btn-ghost btn-sm" disabled={procesando || !motivoLote.trim()}
+                      onClick={() => revisarRecibos(i.periodoId, seleccionRecibos, 'rechazado', motivoLote)}>Confirmar rechazo</button>
+                    <button className="btn btn-ghost btn-sm" disabled={procesando} onClick={cerrarRechazo}>Cancelar</button>
+                  </div>
+                )}
               </div>
             )}
 
-            <table className="tabla">
-              <thead>
-                <tr><th></th><th>Persona</th><th>Bruto</th><th>Descuentos</th><th>Neto</th><th>Horas</th><th>Estado</th><th>Motivo</th><th></th></tr>
-              </thead>
-              <tbody>
-                {recibos.map((r) => {
-                  const motivo = motivoPorRecibo[r.id] || ''
-                  return (
-                    <tr key={r.id}>
-                      <td><input type="checkbox" aria-label={`seleccionar recibo de ${personalPorId[r.personalId] || r.personalId}`}
-                        checked={seleccionRecibos.includes(r.id)} onChange={() => toggleSeleccionRecibo(i.periodoId, r.id)} /></td>
-                      <td>{personalPorId[r.personalId] || r.personalId}</td>
-                      <td>${fmt(r.bruto)}</td>
-                      <td>${fmt(r.totalAportes)}</td>
-                      <td>${fmt(r.neto)}</td>
-                      <td>{fmtHs(r.detalleHoras)}</td>
-                      <td><span className={`badge badge-${r.estadoRevision === 'aprobado' ? 'success' : r.estadoRevision === 'rechazado' ? 'danger' : 'neutral'}`}>{r.estadoRevision}</span></td>
-                      <td>{r.motivoRechazo || '—'}</td>
-                      <td style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        <button className="btn btn-primary btn-sm" disabled={procesando}
-                          onClick={() => revisarRecibos(i.periodoId, [r.id], 'aprobado')}>Aprobar</button>
-                        <textarea className="input" placeholder="motivo del rechazo" style={{ minWidth: 160 }}
-                          value={motivo} onChange={(e) => setMotivoPorRecibo((m) => ({ ...m, [r.id]: e.target.value }))} />
-                        <button className="btn btn-ghost btn-sm" disabled={procesando || !motivo.trim()}
-                          onClick={() => revisarRecibos(i.periodoId, [r.id], 'rechazado', motivo)}>Rechazar</button>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+            {/* table-scroll (patrón ya usado en LegajosPage/LiquidacionPage/UsuariosPage):
+                en mobile la tabla no se aplasta, se scrollea horizontalmente. */}
+            <div className="table-scroll">
+              <table className="table">
+                <thead>
+                  <tr><th></th><th>Persona</th><th>Bruto</th><th>Descuentos</th><th>Neto</th><th>Horas</th><th>Estado</th><th>Motivo</th><th>Acciones</th></tr>
+                </thead>
+                <tbody>
+                  {recibos.map((r) => {
+                    const motivo = motivoPorRecibo[r.id] || ''
+                    const nombrePersona = personalPorId[r.personalId] || r.personalId
+                    return (
+                      <tr key={r.id}>
+                        <td><input type="checkbox" aria-label={`seleccionar recibo de ${nombrePersona}`}
+                          checked={seleccionRecibos.includes(r.id)} onChange={() => toggleSeleccionRecibo(i.periodoId, r.id)} /></td>
+                        <td>{nombrePersona}</td>
+                        <td>${fmt(r.bruto)}</td>
+                        <td>${fmt(r.totalAportes)}</td>
+                        <td>${fmt(r.neto)}</td>
+                        <td>{fmtHs(r.detalleHoras)}</td>
+                        <td><span className={`badge badge-${r.estadoRevision === 'aprobado' ? 'success' : r.estadoRevision === 'rechazado' ? 'danger' : 'neutral'}`}>{r.estadoRevision}</span></td>
+                        <td>{r.motivoRechazo || '—'}</td>
+                        <td>
+                          {rechazando === r.id ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 160 }}>
+                              <textarea className="input" placeholder="motivo del rechazo" autoFocus
+                                value={motivo} onChange={(e) => setMotivoPorRecibo((m) => ({ ...m, [r.id]: e.target.value }))} />
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                <button className="btn btn-ghost btn-sm" disabled={procesando || !motivo.trim()}
+                                  onClick={() => revisarRecibos(i.periodoId, [r.id], 'rechazado', motivo)}>Confirmar</button>
+                                <button className="btn btn-ghost btn-sm" disabled={procesando} onClick={cerrarRechazo}>Cancelar</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                              <button className="btn btn-primary btn-sm" disabled={procesando}
+                                onClick={() => revisarRecibos(i.periodoId, [r.id], 'aprobado')}>Aprobar</button>
+                              <button className="btn btn-ghost btn-sm" disabled={procesando}
+                                onClick={() => abrirRechazo(r.id)}>Rechazar</button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         )
       })}

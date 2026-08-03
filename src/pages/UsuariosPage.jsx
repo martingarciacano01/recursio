@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuthStore } from '../store/authStore'
 import { useUsuariosStore } from '../store/usuariosStore'
+import { useToastStore } from '../store/toastStore'
 
 const ROLES = ['admin', 'rrhh', 'revisor_interno', 'aprobador_pagos', 'revisor_externo', 'supervisor', 'consulta']
 
@@ -14,23 +15,25 @@ export default function UsuariosPage() {
   const [rol, setRol] = useState('rrhh')
   const [invitando, setInvitando] = useState(false)
   const [errorInvitar, setErrorInvitar] = useState('')
-  const [mensaje, setMensaje] = useState('')
+  const push = useToastStore((s) => s.push)
 
   useEffect(() => { if (empresaActiva?.id) cargarUsuarios(empresaActiva.id) }, [empresaActiva?.id])
 
   const handleQuitar = async (u) => {
     const etiqueta = u.email || `usuario ${u.usuarioId.slice(0, 8)}`
     if (!window.confirm(`¿Quitar a ${etiqueta} (rol ${u.rol}) de esta empresa?`)) return
-    await quitarRol(u.id)
+    const r = await quitarRol(u.id)
+    if (r && r.ok === false) { push(r.error || 'No se pudo quitar el usuario', 'error'); return }
+    push(`${etiqueta} ya no tiene acceso.`, 'success')
     cargarUsuarios(empresaActiva.id)
   }
 
   const handleInvitar = async () => {
-    setErrorInvitar(''); setMensaje(''); setInvitando(true)
+    setErrorInvitar(''); setInvitando(true)
     const r = await invitarUsuario({ email: email.trim(), empresaId: empresaActiva.id, rol, alcanceTipo: 'empresa', alcanceId: null })
     setInvitando(false)
     if (!r.ok) { setErrorInvitar(r.error); return }
-    setMensaje(r.yaExistia ? 'Usuario vinculado (ya tenía cuenta).' : 'Invitación enviada por email.')
+    push(r.yaExistia ? 'Usuario vinculado (ya tenía cuenta).' : 'Invitación enviada por email.', 'success')
     setEmail('')
     cargarUsuarios(empresaActiva.id)
   }
@@ -56,7 +59,6 @@ export default function UsuariosPage() {
             </button>
           </div>
           {errorInvitar && <div className="card" style={{ color: 'var(--danger)', marginBottom: '1rem' }}>{errorInvitar}</div>}
-          {mensaje && <div className="card" style={{ marginBottom: '1rem' }}>{mensaje}</div>}
           {error && <div className="card" style={{ color: 'var(--danger)', marginBottom: '1rem' }}>Error: {error}</div>}
 
           {cargando ? <div className="card">Cargando…</div> : usuarios.length === 0 ? (

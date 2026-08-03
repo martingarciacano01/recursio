@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import UsuariosPage from '../UsuariosPage'
+import { useToastStore } from '../../store/toastStore'
 
 vi.mock('../../store/authStore', () => ({
   useAuthStore: (selector) => selector({ empresa: { id: 'e1' }, empresaVista: null }),
@@ -17,6 +18,8 @@ vi.mock('../../store/usuariosStore', () => ({
 }))
 
 describe('UsuariosPage', () => {
+  beforeEach(() => { useToastStore.setState({ toasts: [] }) })
+
   it('lista los usuarios vinculados con su email y rol (Task 4.2)', () => {
     render(<UsuariosPage />)
     expect(screen.getByText('ana@empresa.com')).toBeInTheDocument()
@@ -31,6 +34,7 @@ describe('UsuariosPage', () => {
     await waitFor(() => expect(invitarUsuario).toHaveBeenCalledWith(
       expect.objectContaining({ email: 'nuevo@x.com', empresaId: 'e1', rol: 'admin' })
     ))
+    await waitFor(() => expect(useToastStore.getState().toasts[0]).toMatchObject({ tipo: 'success' }))
   })
 
   it('pide confirmacion antes de quitar un usuario y no llama a quitarRol si se cancela', () => {
@@ -42,11 +46,12 @@ describe('UsuariosPage', () => {
     confirmSpy.mockRestore()
   })
 
-  it('llama a quitarRol y recarga si se confirma', async () => {
+  it('llama a quitarRol, muestra un toast y recarga si se confirma', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(<UsuariosPage />)
     fireEvent.click(screen.getByText('Quitar'))
     await waitFor(() => expect(quitarRol).toHaveBeenCalledWith('v1'))
+    await waitFor(() => expect(useToastStore.getState().toasts[0]).toMatchObject({ tipo: 'success' }))
     confirmSpy.mockRestore()
   })
 })

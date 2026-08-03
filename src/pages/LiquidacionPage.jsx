@@ -16,6 +16,7 @@ import { generarYDescargarRecibo } from '../utils/emitirReciboLegajo'
 import { generarZipRecibos, nombreArchivoZip } from '../utils/reciboZip'
 import LiquidacionesIndividuales from '../components/LiquidacionesIndividuales'
 import Toast from '../components/Toast'
+import { useToastStore } from '../store/toastStore'
 import { useConveniosStore } from '../store/conveniosStore'
 import { calcularFechasPeriodo } from '../utils/calcularFechasPeriodo'
 import { FUERA_DE_CONVENIO, TIPOS_MANUALES, tiposDisponibles, etiquetaTipo, convenioDelPeriodo, conveniosParaPeriodo } from '../utils/tiposPeriodo'
@@ -43,6 +44,7 @@ export default function LiquidacionPage() {
   const empresaId = empresaActiva?.id || ''
 
   const { liquidaciones, calculando, error, omitidos, advertencias, sinHoras, calcularPeriodo, cargarLiquidaciones, emitirRecibo } = useLiquidacionStore()
+  const push = useToastStore((s) => s.push)
   const [mostrarAvisos, setMostrarAvisos] = useState(false)
   const [emitiendoRecibo, setEmitiendoRecibo] = useState(null)
   const [errorRecibo, setErrorRecibo] = useState('')
@@ -185,6 +187,7 @@ export default function LiquidacionPage() {
       if (!r.ok) { setErrorRecibo(r.error); setEmitiendoRecibo(null); return }
       doc.save(`${nombreArchivo}-${r.numeroRecibo}.pdf`)
       registrarAcceso(supabase, 'recibo_pdf', l.id, `período ${periodoActivo?.tipo || ''} ${periodoActivo?.fecha_desde || ''}`).catch(() => {})
+      push(`Recibo N° ${r.numeroRecibo} emitido.`, 'success')
       await cargarLiquidaciones(periodoSeleccionado)
     } catch (e) {
       setErrorRecibo(e instanceof Error ? e.message : String(e))
@@ -203,6 +206,7 @@ export default function LiquidacionPage() {
     setCerrando(false)
     if (err) { setErrorCierre(err.message); return }
     setPeriodos((prev) => prev.map((p) => (p.id === periodoActivo.id ? { ...p, estado: 'cerrado' } : p)))
+    push('Período cerrado.', 'success')
   }
 
   const handlePeriodoBorrado = (id) => {

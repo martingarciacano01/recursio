@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom'
 import { Menu } from 'lucide-react'
 import Sidebar from './Sidebar'
 import Logo from './Logo'
+import ToastContainer from './ToastContainer'
 
 // Shell de la app. En escritorio el sidebar es una columna fija; por debajo
 // de 900px se convierte en un drawer que se abre desde una barra superior
@@ -56,6 +57,8 @@ export default function Layout() {
       <main className="app-main">
         <Outlet />
       </main>
+
+      <ToastContainer />
     </div>
   )
 }
