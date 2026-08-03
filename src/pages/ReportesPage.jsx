@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import { exportarCsv } from '../utils/exportCsv'
 import { registrarAcceso } from '../utils/auditoria'
 import { puede } from '../utils/permisos'
+import { verificarEscalaVigente } from '../utils/verificarEscala'
 import SelectorPeriodo from '../components/SelectorPeriodo'
 
 // Reportes de cierre de período (Fase 4, Task 30-32): reporte de pago
@@ -34,13 +35,23 @@ export default function ReportesPage() {
   const [errorCierre, setErrorCierre] = useState('')
   const [alertaEscala, setAlertaEscala] = useState(null)
 
+  // seqEmpresa/seqPeriodo (Task 3.4, M2): mismo problema que en
+  // LiquidacionPage — un Superadmin cambiando de empresa rápido, o el
+  // usuario cambiando de período mientras la consulta anterior sigue en
+  // vuelo, podía terminar mostrando datos de la empresa/período viejo si
+  // esa respuesta llegaba tarde.
+  const seqEmpresaRef = useRef(0)
+  const seqPeriodoRef = useRef(0)
+
   useEffect(() => {
-    if (!empresaId) return
+    const seq = ++seqEmpresaRef.current
+    if (!empresaId) { setPeriodos([]); return }
     supabase.from('nom_periodos').select('*').eq('empresa_id', empresaId).order('fecha_desde', { ascending: false })
-      .then(({ data }) => setPeriodos(data || []))
+      .then(({ data }) => { if (seqEmpresaRef.current === seq) setPeriodos(data || []) })
   }, [empresaId])
 
   useEffect(() => {
+    const seq = ++seqPeriodoRef.current
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reset intencional al no haber período seleccionado.
     if (!periodoId) { setLiquidaciones([]); setItems([]); return }
     setCargando(true)
@@ -49,13 +60,14 @@ export default function ReportesPage() {
       supabase.from('nom_v_personal').select('id, nombre').eq('empresa_id', empresaId),
       supabase.from('nom_legajo').select('personal_id, cuil, cbu, banco, categoria_id').eq('empresa_id', empresaId),
     ]).then(([liqs, personal, legajos]) => {
+      if (seqPeriodoRef.current !== seq) return
       setLiquidaciones(liqs.data || [])
       setPersonalPorId(new Map((personal.data || []).map((p) => [p.id, p.nombre])))
       setLegajoPorPersonal(new Map((legajos.data || []).map((l) => [l.personal_id, l])))
       const ids = (liqs.data || []).map((l) => l.id)
       if (ids.length > 0) {
         supabase.from('nom_liquidacion_items').select('*').in('liquidacion_id', ids)
-          .then(({ data }) => { setItems(data || []); setCargando(false) })
+          .then(({ data }) => { if (seqPeriodoRef.current === seq) { setItems(data || []); setCargando(false) } })
       } else {
         setItems([]); setCargando(false)
       }
@@ -124,31 +136,15 @@ export default function ReportesPage() {
     registrarAcceso(supabase, 'libro_sueldos', null, `libro de sueldos período ${periodo?.tipo || periodoId}`).catch(() => {})
   }
 
-  const verificarEscalaVigente = async () => {
-    // Alerta de escala vencida: para cada categoría usada por los legajos
-    // de este período, la última vigencia_desde cargada debería ser <= a
-    // la fecha de cierre del período. Si la vigencia más reciente es muy
-    // anterior (más de ~90 días antes del cierre), probablemente no se
-    // actualizó la paritaria y conviene confirmar antes de cerrar.
-    const categoriaIds = [...new Set([...legajoPorPersonal.values()].map((l) => l.categoria_id).filter(Boolean))]
-    if (categoriaIds.length === 0) return null
-    const { data: cats } = await supabase.from('nom_categorias').select('id, convenio_id, nombre').in('id', categoriaIds)
-    const vencidas = []
-    for (const cat of cats || []) {
-      const { data: vig } = await supabase.from('nom_categorias').select('vigencia_desde')
-        .eq('convenio_id', cat.convenio_id).eq('nombre', cat.nombre)
-        .order('vigencia_desde', { ascending: false }).limit(1)
-      const ultima = vig?.[0]?.vigencia_desde
-      if (!ultima) { vencidas.push(cat.nombre); continue }
-      const dias = (new Date(periodo.fecha_hasta) - new Date(ultima)) / (1000 * 60 * 60 * 24)
-      if (dias > 90) vencidas.push(cat.nombre)
-    }
-    return vencidas.length > 0 ? vencidas : null
-  }
-
   const handleCerrar = async () => {
     setErrorCierre('')
-    const vencidas = await verificarEscalaVigente()
+    // Alerta de escala vencida (Task 4.6, unificada con LiquidacionPage vía
+    // src/utils/verificarEscala.js): para cada categoría usada por los
+    // legajos de este período, si la última vigencia cargada es de más de
+    // 90 días antes del cierre (o no hay ninguna), probablemente no se
+    // actualizó la paritaria y conviene confirmar antes de cerrar.
+    const categoriaIds = [...new Set([...legajoPorPersonal.values()].map((l) => l.categoria_id).filter(Boolean))]
+    const vencidas = await verificarEscalaVigente(supabase, { categoriaIds, fechaHasta: periodo?.fecha_hasta })
     if (vencidas && !alertaEscala) {
       setAlertaEscala(vencidas)
       return

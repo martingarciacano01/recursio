@@ -9,6 +9,7 @@ import { useFlujosStore } from '../store/flujosStore'
 import { exportarCsv } from '../utils/exportCsv'
 import { registrarAcceso } from '../utils/auditoria'
 import { puede } from '../utils/permisos'
+import { verificarEscalaVigente } from '../utils/verificarEscala'
 import SelectorPeriodo from '../components/SelectorPeriodo'
 import { etiquetaConcepto } from '../utils/etiquetaConcepto'
 import { etiquetaPeriodo } from '../utils/etiquetaPeriodo'
@@ -69,6 +70,10 @@ export default function LiquidacionPage() {
   const [confirmarBorrado, setConfirmarBorrado] = useState(false)
   const [cerrando, setCerrando] = useState(false)
   const [errorCierre, setErrorCierre] = useState('')
+  // Task 4.6: mismo chequeo de escala vencida que ReportesPage, unificado
+  // en src/utils/verificarEscala.js — antes este punto de cierre no
+  // validaba nada.
+  const [alertaEscala, setAlertaEscala] = useState(null)
   const { convenios, cargarConvenios } = useConveniosStore()
 
   const [liqExpandida, setLiqExpandida] = useState(null)
@@ -201,9 +206,21 @@ export default function LiquidacionPage() {
   const handleCerrarPeriodo = async () => {
     if (!periodoActivo) return
     setErrorCierre('')
+
+    if (!alertaEscala) {
+      const personalIds = [...new Set(liquidaciones.map((l) => l.personalId))]
+      const { data: legajosPeriodo } = personalIds.length
+        ? await supabase.from('nom_legajo').select('categoria_id').eq('empresa_id', empresaId).in('personal_id', personalIds)
+        : { data: [] }
+      const categoriaIds = [...new Set((legajosPeriodo || []).map((l) => l.categoria_id).filter(Boolean))]
+      const vencidas = await verificarEscalaVigente(supabase, { categoriaIds, fechaHasta: periodoActivo.fecha_hasta })
+      if (vencidas) { setAlertaEscala(vencidas); return }
+    }
+
     setCerrando(true)
     const { error: err } = await supabase.from('nom_periodos').update({ estado: 'cerrado' }).eq('id', periodoActivo.id)
     setCerrando(false)
+    setAlertaEscala(null)
     if (err) { setErrorCierre(err.message); return }
     setPeriodos((prev) => prev.map((p) => (p.id === periodoActivo.id ? { ...p, estado: 'cerrado' } : p)))
     push('Período cerrado.', 'success')
@@ -441,7 +458,7 @@ export default function LiquidacionPage() {
       {pestana === 'Períodos generales' && (
       <>
       <div className="card card-compacta" style={{ marginBottom: '1rem', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-        <SelectorPeriodo periodos={periodos} value={periodoSeleccionado} onChange={setPeriodoSeleccionado} disabled={calculando} />
+        <SelectorPeriodo periodos={periodos} value={periodoSeleccionado} onChange={(v) => { setPeriodoSeleccionado(v); setAlertaEscala(null); setErrorCierre('') }} disabled={calculando} />
         <button
           className="btn btn-primary btn-sm"
           onClick={handleCalcular}
@@ -467,7 +484,7 @@ export default function LiquidacionPage() {
         {/* Cerrar y borrar solo aplican al período que se está mirando */}
         {periodoActivo && periodoActivo.estado !== 'cerrado' && (
           <button className="btn btn-ghost btn-sm" onClick={handleCerrarPeriodo} disabled={cerrando}>
-            <Lock size={14} /> {cerrando ? 'Cerrando…' : 'Cerrar período'}
+            <Lock size={14} /> {cerrando ? 'Cerrando…' : alertaEscala ? 'Cerrar de todos modos' : 'Cerrar período'}
           </button>
         )}
         {periodoActivo?.estado === 'cerrado' && (
@@ -479,6 +496,12 @@ export default function LiquidacionPage() {
           </button>
         )}
         {errorCierre && <span style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{errorCierre}</span>}
+        {alertaEscala && (
+          <div className="card card-compacta" style={{ background: 'rgba(200,168,75,0.08)', border: '1px solid var(--brand-secondary)', width: '100%' }}>
+            La escala de estas categorías no se actualizó hace más de 90 días respecto al cierre del período: {alertaEscala.join(', ')}.
+            Verificá si corresponde cargar una paritaria nueva antes de cerrar.
+          </div>
+        )}
         {periodoActivo?.estado === 'abierto' && flujos.length > 0 && (
           <>
             <select className="input" style={{ maxWidth: 220 }} value={flujoElegido} onChange={(e) => setFlujoElegido(e.target.value)}>
