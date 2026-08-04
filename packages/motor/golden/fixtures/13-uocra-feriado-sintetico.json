@@ -6,10 +6,10 @@
   "resultadoEsperado": {
     "items": [
       { "codigo": "hs_feriado", "montoEsperado": 10000 },
-      { "codigo": "presentismo", "montoEsperado": 82000 },
-      { "codigo": "jubilacion", "montoEsperado": 54120 },
-      { "codigo": "ley_19032", "montoEsperado": 14760 },
-      { "codigo": "obra_social", "montoEsperado": 14760 }
+      { "codigo": "presentismo", "montoEsperado": 80000 },
+      { "codigo": "jubilacion", "montoEsperado": 53900 },
+      { "codigo": "ley_19032", "montoEsperado": 14700 },
+      { "codigo": "obra_social", "montoEsperado": 14700 }
     ],
     "neto": null
   }

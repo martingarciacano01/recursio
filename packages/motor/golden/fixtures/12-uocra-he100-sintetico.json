@@ -6,10 +6,10 @@
   "resultadoEsperado": {
     "items": [
       { "codigo": "hora_extra_100", "montoEsperado": 30000 },
-      { "codigo": "presentismo", "montoEsperado": 86000 },
-      { "codigo": "jubilacion", "montoEsperado": 56760 },
-      { "codigo": "ley_19032", "montoEsperado": 15480 },
-      { "codigo": "obra_social", "montoEsperado": 15480 }
+      { "codigo": "presentismo", "montoEsperado": 80000 },
+      { "codigo": "jubilacion", "montoEsperado": 56100 },
+      { "codigo": "ley_19032", "montoEsperado": 15300 },
+      { "codigo": "obra_social", "montoEsperado": 15300 }
     ],
     "neto": null
   }

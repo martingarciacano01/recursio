@@ -56,9 +56,14 @@ export const CONCEPTOS_UOCRA: Concepto[] = [
     },
   },
   {
+    // Presentismo = 20% del SUELDO BÁSICO del período (basico_periodo), NO
+    // del remunerativo_acumulado: como este concepto tiene orden posterior a
+    // las horas extra (16-17) y feriado (15), 'remunerativo_acumulado' ya
+    // incluía HE/feriado y pagaba de más. Confirmado con el usuario
+    // (migración 0057_presentismo_base_basico_uocra.sql).
     codigo: 'presentismo', nombre: 'Presentismo', tipo: 'remunerativo', orden: 18,
-    formula: 'remunerativo_acumulado * 0.20', imprimible: true,
-    config: { modo: 'porcentaje', porcentaje: 20, base: 'remunerativo', recibo: { grupo: 'remunerativo', detalle: null } },
+    formula: 'basico_periodo * 0.20', imprimible: true,
+    config: { modo: 'porcentaje', porcentaje: 20, base: 'basico', recibo: { grupo: 'remunerativo', detalle: null } },
   },
   { codigo: 'jubilacion', nombre: 'Jubilación', tipo: 'descuento', orden: 100, formula: 'min(remunerativo_acumulado, tope_sipa) * 0.11', imprimible: true },
   { codigo: 'ley_19032', nombre: 'Ley 19.032 (INSSJP/PAMI)', tipo: 'descuento', orden: 101, formula: 'remunerativo_acumulado * 0.03', imprimible: true },
