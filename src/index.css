@@ -295,7 +295,10 @@ select.input { cursor: pointer; }
 }
 .stat-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, var(--brand-secondary), transparent); }
 [data-theme="claro"] .stat-card::before { background: linear-gradient(90deg, var(--brand-blue), transparent); }
-.stat-card-accion { cursor: pointer; }
+.stat-card-accion {
+  cursor: pointer; width: 100%; text-align: left; display: block;
+  font: inherit; color: inherit; appearance: none;
+}
 .stat-card-accion:hover { transform: translateY(-2px); border-color: var(--border-strong); box-shadow: var(--shadow); }
 .stat-value { font-family: var(--font-display); font-size: 2.2rem; font-weight: 800; line-height: 1; margin-bottom: 0.25rem; }
 .stat-label { font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }

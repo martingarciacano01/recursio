@@ -9,9 +9,25 @@ import ToastContainer from './ToastContainer'
 // de 900px se convierte en un drawer que se abre desde una barra superior
 // (patrón estándar de PWA en móvil). El contenido va dentro de .app-main,
 // que centra y limita el ancho para que nada se estire en monitores anchos.
+const MEDIA_MOVIL = '(max-width: 900px)'
+
 export default function Layout() {
   const [menuAbierto, setMenuAbierto] = useState(false)
+  // Task 4.7: el sidebar en móvil es un drawer oculto por transform (CSS,
+  // ver index.css ~509-520) pero seguía siendo focusable/leído por lectores
+  // de pantalla mientras estaba "cerrado" — inert lo saca del árbol de
+  // accesibilidad y del tab order. En desktop el sidebar es fijo y siempre
+  // visible, así que inert nunca debe aplicarse ahí (de ahí el media query
+  // en JS, calcado del breakpoint de CSS).
+  const [esMovil, setEsMovil] = useState(() => typeof window !== 'undefined' && window.matchMedia(MEDIA_MOVIL).matches)
   const { pathname } = useLocation()
+
+  useEffect(() => {
+    const mq = window.matchMedia(MEDIA_MOVIL)
+    const onChange = (e) => setEsMovil(e.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
 
   // Al navegar se cierra el drawer.
   // eslint-disable-next-line react-hooks/set-state-in-effect -- resync intencional del estado UI local al cambiar de ruta.
@@ -52,7 +68,9 @@ export default function Layout() {
         <div className="drawer-fondo" onClick={() => setMenuAbierto(false)} aria-hidden="true" />
       )}
 
-      <Sidebar onNavegar={() => setMenuAbierto(false)} />
+      <div inert={esMovil && !menuAbierto ? '' : undefined} style={{ flexShrink: 0 }}>
+        <Sidebar onNavegar={() => setMenuAbierto(false)} />
+      </div>
 
       <main className="app-main">
         <Outlet />

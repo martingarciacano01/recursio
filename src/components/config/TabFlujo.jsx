@@ -62,17 +62,17 @@ export default function TabFlujo({ empresaId }) {
       {flujos.map((f) => {
         const filas = filasDe(f.id)
         return (
-          <div key={f.id} className="card" style={{ marginBottom: '1rem' }}>
+          <form key={f.id} className="card" style={{ marginBottom: '1rem' }} onSubmit={(e) => { e.preventDefault(); guardar(f.id) }}>
             <h3>{f.nombre} {!f.activo && <span className="badge badge-neutral">inactivo</span>}</h3>
             {filas.length === 0 && (
-              <button className="btn btn-ghost btn-sm" onClick={() => usarDefault(f.id)}>Usar flujo piloto (revisión → aprobación → pago)</button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => usarDefault(f.id)}>Usar flujo piloto (revisión → aprobación → pago)</button>
             )}
             {filas.map((p, i) => (
               <div key={p._key ?? i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
                 <span className="badge badge-neutral">{i + 1}</span>
-                <input className="input" placeholder="nombre del paso" style={{ flex: 1 }}
+                <input className="input" placeholder="nombre del paso" aria-label={`Nombre del paso ${i + 1}`} style={{ flex: 1 }}
                   value={p.nombre} onChange={(e) => setFilas(f.id, filas.map((x, j) => j === i ? { ...x, nombre: e.target.value } : x))} />
-                <select className="input" style={{ width: 220 }} value={p.rolRequerido}
+                <select className="input" aria-label={`Rol requerido del paso ${i + 1}`} style={{ width: 220 }} value={p.rolRequerido}
                   onChange={(e) => setFilas(f.id, filas.map((x, j) => j === i ? { ...x, rolRequerido: e.target.value } : x))}>
                   {ROLES_PASO.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
@@ -81,24 +81,24 @@ export default function TabFlujo({ empresaId }) {
                     onChange={(e) => setFilas(f.id, filas.map((x, j) => j === i ? { ...x, esMasivo: e.target.checked } : x))} />
                   masivo
                 </label>
-                <button className="btn btn-ghost btn-sm" onClick={() => setFilas(f.id, filas.filter((_, j) => j !== i))}>quitar</button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFilas(f.id, filas.filter((_, j) => j !== i))}>quitar</button>
               </div>
             ))}
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-              <button className="btn btn-ghost btn-sm" onClick={() => agregarPaso(f.id)}>Agregar paso</button>
-              <button className="btn btn-primary btn-sm" onClick={() => guardar(f.id)}>Guardar pasos</button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => agregarPaso(f.id)}>Agregar paso</button>
+              <button type="submit" className="btn btn-primary btn-sm">Guardar pasos</button>
             </div>
-          </div>
+          </form>
         )
       })}
 
-      <div className="card">
+      <form className="card" onSubmit={(e) => { e.preventDefault(); crear() }}>
         <div style={{ display: 'flex', gap: 8 }}>
-          <input className="input" placeholder="nombre del flujo (ej: Flujo estándar)" value={nombreNuevo}
+          <input className="input" placeholder="nombre del flujo (ej: Flujo estándar)" aria-label="Nombre del flujo nuevo" value={nombreNuevo}
             onChange={(e) => setNombreNuevo(e.target.value)} />
-          <button className="btn btn-primary btn-sm" onClick={crear}>Nuevo flujo</button>
+          <button type="submit" className="btn btn-primary btn-sm">Nuevo flujo</button>
         </div>
-      </div>
+      </form>
     </div>
   )
 }

@@ -144,7 +144,7 @@ export default function TabEmpresa({ empresaId }) {
         {errorLogo && <p style={{ color: 'var(--danger)', marginTop: 10, fontSize: '0.85rem' }}>{errorLogo}</p>}
       </div>
 
-      <div className="card">
+      <form className="card" onSubmit={(e) => { e.preventDefault(); handleGuardar() }}>
         <h3 style={{ fontSize: '1rem', marginBottom: 4 }}>Datos fiscales</h3>
         <p className="texto-secundario" style={{ fontSize: '0.85rem', marginBottom: 14 }}>
           {nombre} — aparecen en la cabecera del recibo.
@@ -162,13 +162,13 @@ export default function TabEmpresa({ empresaId }) {
           </div>
         </div>
         <div className="acciones">
-          <button className="btn btn-primary btn-sm" onClick={handleGuardar}>Guardar</button>
+          <button type="submit" className="btn btn-primary btn-sm">Guardar</button>
           {guardado && <span className="badge badge-success">guardado</span>}
         </div>
         {errorGuardado && <p style={{ color: 'var(--danger)', marginTop: 10 }}>{errorGuardado}</p>}
-      </div>
+      </form>
 
-      <div className="card">
+      <form className="card" onSubmit={(e) => { e.preventDefault(); handleGuardarHoras() }}>
         <h3 style={{ fontSize: '1rem', marginBottom: 4 }}>Horas extra y jornada</h3>
         <p className="texto-secundario" style={{ fontSize: '0.85rem', marginBottom: 14 }}>
           Sin cambios acá, se liquida como siempre: horas extra pagadas, jornada de 8h (4h si es parcial).
@@ -201,14 +201,14 @@ export default function TabEmpresa({ empresaId }) {
               </div>
             </div>
             <div className="acciones">
-              <button className="btn btn-primary btn-sm" onClick={handleGuardarHoras}>Guardar</button>
+              <button type="submit" className="btn btn-primary btn-sm">Guardar</button>
               {guardadoHoras && <span className="badge badge-success">guardado</span>}
             </div>
             {errorGuardadoHoras && <p style={{ color: 'var(--danger)', marginTop: 10 }}>{errorGuardadoHoras}</p>}
             {errorHoras && <p style={{ color: 'var(--danger)', marginTop: 10 }}>{errorHoras}</p>}
           </>
         )}
-      </div>
+      </form>
     </div>
   )
 }

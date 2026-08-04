@@ -498,11 +498,6 @@ export default function LiquidacionPage() {
         {periodoActivo?.estado === 'cerrado' && (
           <span className="badge badge-success"><Lock size={12} /> período cerrado</span>
         )}
-        {periodoActivo && (
-          <button className="btn btn-danger btn-sm" onClick={() => setConfirmarBorrado(true)}>
-            <Trash2 size={14} /> Borrar período
-          </button>
-        )}
         {errorCierre && <span style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{errorCierre}</span>}
         {alertaEscala && (
           <div className="card card-compacta" style={{ background: 'rgba(200,168,75,0.08)', border: '1px solid var(--brand-secondary)', width: '100%' }}>
@@ -523,6 +518,22 @@ export default function LiquidacionPage() {
         )}
         {errorFlujo && <span style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{errorFlujo}</span>}
       </div>
+
+      {/* Zona de riesgo, separada del resto de acciones para que no se toque
+          por error junto con Calcular/Cerrar (Task 4.7). */}
+      {periodoActivo && (
+        <div
+          aria-label="Zona de riesgo"
+          style={{
+            marginBottom: '1rem', borderLeft: '3px solid var(--danger)',
+            paddingLeft: 12, display: 'flex', justifyContent: 'flex-end',
+          }}
+        >
+          <button className="btn btn-danger btn-sm" onClick={() => setConfirmarBorrado(true)}>
+            <Trash2 size={14} /> Borrar período
+          </button>
+        </div>
+      )}
 
       {mostrarFormNuevo && (
         <div className="card max-900" style={{ marginBottom: '1rem' }}>
@@ -676,6 +687,12 @@ export default function LiquidacionPage() {
         </div>
       )}
 
+      {!calculando && liquidaciones.length === 0 && periodoSeleccionado && (
+        <div className="card" style={{ marginBottom: '1rem', color: 'var(--text-secondary)' }}>
+          Todavía no hay liquidaciones para este período. Usá "Calcular" para generarlas.
+        </div>
+      )}
+
       {!calculando && liquidaciones.length > 0 && (
         <div className="card table-scroll">
           <table className="table">
@@ -714,7 +731,15 @@ export default function LiquidacionPage() {
                 ]
                 return (
                   <FragmentoLiquidacion key={l.id}>
-                    <tr onClick={() => toggleDetalle(l.id)} style={{ cursor: 'pointer' }}>
+                    <tr
+                      onClick={() => toggleDetalle(l.id)}
+                      onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggleDetalle(l.id) } }}
+                      style={{ cursor: 'pointer' }}
+                      role="button"
+                      tabIndex={0}
+                      aria-expanded={liqExpandida === l.id}
+                      aria-controls={`liq-detalle-${l.id}`}
+                    >
                       <td onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
@@ -743,7 +768,7 @@ export default function LiquidacionPage() {
                       <td>{liqExpandida === l.id ? '▾' : '▸'}</td>
                     </tr>
                     {liqExpandida === l.id && (
-                      <tr>
+                      <tr id={`liq-detalle-${l.id}`}>
                         <td colSpan={14} style={{ background: 'var(--bg-subtle, rgba(255,255,255,0.03))' }}>
                           {items.length > 0 && !l.anulado && puedeEmitirRecibos && (
                             <button className="btn btn-primary btn-sm" style={{ marginBottom: 8 }}

@@ -262,22 +262,26 @@ export default function DashboardPage() {
       {empresaActiva && !error && (
         <>
           <div className="stats-grid">
-            <div className="stat-card stat-card-accion" onClick={() => navigate('/aprobaciones')}>
+            <button type="button" className="stat-card stat-card-accion" onClick={() => navigate('/aprobaciones')}>
               <CheckSquare size={18} color="var(--brand-secondary)" style={{ marginBottom: 8 }} />
               <div className="stat-value">{val(datos.aprobaciones)}</div>
               <div className="stat-label">Aprobaciones pendientes</div>
-            </div>
+            </button>
 
-            <div className="stat-card stat-card-accion" onClick={() => navigate('/liquidacion')}>
+            <button
+              type="button"
+              className="stat-card stat-card-accion"
+              onClick={() => navigate(datos.periodosPendientes[0] ? `/liquidacion?periodo=${datos.periodosPendientes[0].id}` : '/liquidacion')}
+            >
               <Calculator size={18} color={colorUrgencia} style={{ marginBottom: 8 }} />
               <div className="stat-value">{val(datos.periodosPendientes.length)}</div>
               <div className="stat-label">
                 Liquidaciones a realizar
                 {datos.urgencia === 'urgente' && <span className="badge badge-danger" style={{ marginLeft: 6 }}>urgente</span>}
               </div>
-            </div>
+            </button>
 
-            <div className="stat-card stat-card-accion" onClick={() => navigate('/legajos')}>
+            <button type="button" className="stat-card stat-card-accion" onClick={() => navigate('/legajos')}>
               <AlertTriangle size={18} color="var(--warning)" style={{ marginBottom: 8 }} />
               <div className="stat-value">{val(datos.incompletos + datos.docsPendientes)}</div>
               <div className="stat-label">
@@ -288,13 +292,13 @@ export default function DashboardPage() {
                   </span>
                 )}
               </div>
-            </div>
+            </button>
 
-            <div className="stat-card stat-card-accion" onClick={() => navigate('/legajos')}>
+            <button type="button" className="stat-card stat-card-accion" onClick={() => navigate('/legajos')}>
               <UserMinus size={18} color="var(--warning)" style={{ marginBottom: 8 }} />
               <div className="stat-value">{val(datos.bajas)}</div>
               <div className="stat-label">Bajas sin liquidación final</div>
-            </div>
+            </button>
 
             <div className="stat-card">
               <Users size={18} color="var(--brand-secondary)" style={{ marginBottom: 8 }} />
@@ -411,7 +415,7 @@ export default function DashboardPage() {
                   {datos.ultimosPeriodos.map((p) => (
                     <button
                       key={p.id}
-                      onClick={() => navigate('/liquidacion')}
+                      onClick={() => navigate(`/liquidacion?periodo=${p.id}`)}
                       className="ficha"
                       style={{ cursor: 'pointer', textAlign: 'left', padding: '0.7rem 0.9rem', width: '100%' }}
                     >
@@ -432,7 +436,7 @@ export default function DashboardPage() {
               <strong style={{ fontSize: '0.9rem' }}>Períodos abiertos este mes</strong>
               <div className="acciones" style={{ marginTop: 10 }}>
                 {datos.periodosPendientes.map((p) => (
-                  <button key={p.id} className="btn btn-ghost btn-sm" onClick={() => navigate('/liquidacion')}>
+                  <button key={p.id} className="btn btn-ghost btn-sm" onClick={() => navigate(`/liquidacion?periodo=${p.id}`)}>
                     {etiquetaPeriodo(p)}
                     <span className="badge badge-neutral">
                       {p.calculo_estado === 'completo' ? 'calculado' : 'sin calcular'}
