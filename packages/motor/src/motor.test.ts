@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { liquidarConceptos, filtrarPorCategoria, filtrarAsignados, type Concepto } from './motor'
+import { liquidarConceptos, filtrarPorCategoria, filtrarAsignados, excluirHorasExtra, type Concepto } from './motor'
 import { generarFormula } from './formulas'
 
 const presentismoEscalonado = {
@@ -324,5 +324,26 @@ describe('unidad y base en ítems (recibo costo laboral)', () => {
     const item = r.items[0]
     expect(item.unidadTexto).toBe('30')
     expect(item.baseCalculo).toBeCloseTo(36541.6)
+  })
+})
+
+describe('excluirHorasExtra — flag contabilizar_horas_extras=false (Task 2.12)', () => {
+  const conceptos = [
+    { codigo: 'basico', nombre: 'Básico' },
+    { codigo: 'hs_feriado', nombre: 'Recargo feriado' },
+    { codigo: 'hora_extra_50', nombre: 'Hora extra 50%' },
+    { codigo: 'hora_extra_100', nombre: 'Hora extra 100%' },
+    { codigo: 'presentismo', nombre: 'Presentismo' },
+    { codigo: 'jubilacion', nombre: 'Jubilación' },
+  ]
+
+  it('con contabilizarHorasExtras=false quita hora_extra_50/100 y conserva el resto', () => {
+    const r = excluirHorasExtra(conceptos, false)
+    expect(r.map((c) => c.codigo)).toEqual(['basico', 'hs_feriado', 'presentismo', 'jubilacion'])
+  })
+
+  it('con contabilizarHorasExtras=true (default) no toca nada', () => {
+    const r = excluirHorasExtra(conceptos, true)
+    expect(r.map((c) => c.codigo)).toEqual(conceptos.map((c) => c.codigo))
   })
 })

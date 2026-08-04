@@ -1,6 +1,6 @@
 // supabase/functions/liquidar-periodo/index.ts
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { liquidarConceptos, filtrarPorCategoria, filtrarAsignados, type Concepto } from '../../../packages/motor/src/motor.ts'
+import { liquidarConceptos, filtrarPorCategoria, filtrarAsignados, excluirHorasExtra, type Concepto } from '../../../packages/motor/src/motor.ts'
 import { calcularAsistencia, construirDiasPeriodo } from '../../../packages/motor/src/asistencia.ts'
 import { calcularBasicoPeriodo } from '../../../packages/motor/src/basico.ts'
 import { partirEnLotes, agruparPorPersonalId } from '../../../packages/motor/src/lotes.ts'
@@ -452,7 +452,8 @@ Deno.serve(async (req) => {
   async function resolverBasicoYConceptos(
     legajo: any,
     asistencia: { horasTrabajadas: number; faltasInjustificadas: number },
-    personaId: string
+    personaId: string,
+    contabilizarHorasExtras: boolean
   ): Promise<{
     basicoPeriodo: number; basicoConvenio: number; noRem: number; conceptosLegajo: ConceptoConConvenio[]
     horasLiquidadas: number; unidadBasico: number; baseBasico: number
@@ -488,7 +489,10 @@ Deno.serve(async (req) => {
         basicoPeriodo,
         basicoConvenio,
         noRem: 0,
-        conceptosLegajo: aplicarOverridesAdicionales(conceptosLegajoFC, adicionalesPorLegajo.get(legajo.id) ?? new Map()),
+        conceptosLegajo: excluirHorasExtra(
+          aplicarOverridesAdicionales(conceptosLegajoFC, adicionalesPorLegajo.get(legajo.id) ?? new Map()),
+          contabilizarHorasExtras
+        ),
         horasLiquidadas, unidadBasico, baseBasico,
       }
     }
@@ -533,12 +537,15 @@ Deno.serve(async (req) => {
     // 0040), que ignoran la categoría y solo entran si este legajo puntual
     // los tiene asignados vigentes (filtrarAsignados).
     const asignadosDeLegajo = new Set(adicionalesPorLegajo.get(legajo.id)?.keys() ?? [])
-    const conceptosLegajo = aplicarOverridesAdicionales(
-      filtrarAsignados(
-        conceptosMotor.filter((c) => c.convenioId === legajo.convenio_id),
-        nombreCategoria, asignadosDeLegajo
+    const conceptosLegajo = excluirHorasExtra(
+      aplicarOverridesAdicionales(
+        filtrarAsignados(
+          conceptosMotor.filter((c) => c.convenioId === legajo.convenio_id),
+          nombreCategoria, asignadosDeLegajo
+        ),
+        adicionalesPorLegajo.get(legajo.id) ?? new Map()
       ),
-      adicionalesPorLegajo.get(legajo.id) ?? new Map()
+      contabilizarHorasExtras
     )
 
     return {
@@ -663,7 +670,7 @@ Deno.serve(async (req) => {
     // MONTO sea verificable en el PDF, para cualquier modalidad — ver
     // unidadYBaseBasico más arriba.
     const { basicoPeriodo, basicoConvenio, noRem, conceptosLegajo, horasLiquidadas, unidadBasico, baseBasico } =
-      await resolverBasicoYConceptos(legajo, asistencia, persona.id)
+      await resolverBasicoYConceptos(legajo, asistencia, persona.id, cfgHoras?.contabilizar_horas_extras ?? true)
 
     const variablesBase = {
       basico_convenio: basicoConvenio,

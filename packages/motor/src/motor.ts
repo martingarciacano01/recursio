@@ -266,3 +266,20 @@ export function filtrarAsignados<T extends { codigo: string; categorias?: string
     return !c.categorias || c.categorias.length === 0 || c.categorias.includes(categoriaNombre)
   })
 }
+
+// Códigos de los conceptos de horas extra con recargo. Cuando la empresa
+// decide NO contabilizar horas extra (nom_config_horas.contabilizar_horas_extras
+// = false, Task 2.12), estos conceptos se excluyen de la liquidación: las
+// horas trabajadas de más se pagan como horas normales vía el básico (el
+// acumulado de horas siempre incluye el exceso) y NO aparecen como línea de
+// recargo en el recibo. `hs_feriado` NO va acá: es recargo por trabajar un
+// feriado, un concepto distinto de la hora extra.
+export const CODIGOS_HORAS_EXTRA = ['hora_extra_50', 'hora_extra_100']
+
+export function excluirHorasExtra<T extends { codigo: string }>(
+  conceptos: T[],
+  contabilizarHorasExtras: boolean
+): T[] {
+  if (contabilizarHorasExtras) return conceptos
+  return conceptos.filter((c) => !CODIGOS_HORAS_EXTRA.includes(c.codigo))
+}
