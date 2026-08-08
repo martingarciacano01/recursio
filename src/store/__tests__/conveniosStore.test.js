@@ -25,6 +25,36 @@ describe('convenioFromDB', () => {
   })
 })
 
+describe('clonarConvenio — convenio por obra (Task 4.2)', () => {
+  beforeEach(() => { vi.clearAllMocks() })
+
+  it('sin obraId manda p_obra_id null (comportamiento previo)', async () => {
+    supabase.rpc.mockResolvedValue({ data: 'nuevo-id', error: null })
+    const r = await useConveniosStore.getState().clonarConvenio('global-1', 'e1')
+    expect(r.ok).toBe(true)
+    expect(r.convenioId).toBe('nuevo-id')
+    expect(supabase.rpc).toHaveBeenCalledWith('clonar_convenio', {
+      convenio_global_id: 'global-1', p_empresa_id: 'e1', p_obra_id: null,
+    })
+  })
+
+  it('con obraId lo manda como p_obra_id', async () => {
+    supabase.rpc.mockResolvedValue({ data: 'nuevo-id-obra', error: null })
+    const r = await useConveniosStore.getState().clonarConvenio('global-1', 'e1', 'obra-a')
+    expect(r.ok).toBe(true)
+    expect(supabase.rpc).toHaveBeenCalledWith('clonar_convenio', {
+      convenio_global_id: 'global-1', p_empresa_id: 'e1', p_obra_id: 'obra-a',
+    })
+  })
+
+  it('propaga el error de la RPC', async () => {
+    supabase.rpc.mockResolvedValue({ data: null, error: { message: 'sin permiso' } })
+    const r = await useConveniosStore.getState().clonarConvenio('global-1', 'e1')
+    expect(r.ok).toBe(false)
+    expect(r.error).toBe('sin permiso')
+  })
+})
+
 describe('crearConvenio', () => {
   beforeEach(() => { vi.clearAllMocks() })
 

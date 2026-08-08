@@ -19,7 +19,12 @@ export interface ConfigConceptoMotor {
 export interface Concepto {
   codigo: string
   nombre: string
-  tipo: 'remunerativo' | 'no_remunerativo' | 'descuento' | 'aporte_patronal' | 'informativo'
+  // 'bono': no remunerativo AISLADO (bonos superadmin/empresa, plan
+  // convenios-por-obra 2026-08-07). Se paga y suma a bruto/neto, pero NO
+  // alimenta remunerativo_acumulado ni no_remunerativo_acumulado (no
+  // integra base de ningún aporte/descuento) y NUNCA se imprime en el
+  // recibo (grupoRecibo forzado a null más abajo).
+  tipo: 'remunerativo' | 'no_remunerativo' | 'descuento' | 'aporte_patronal' | 'informativo' | 'bono'
   orden: number
   formula: string
   reglas?: Array<{ orden: number; condicion: string; formula: string }>
@@ -198,6 +203,10 @@ export function liquidarConceptos(
     ) {
       grupoRecibo = concepto.tipo
     }
+    // El bono NUNCA se imprime en el recibo (decisión del usuario, plan
+    // convenios-por-obra): reciboLayout.js filtra por grupoRecibo, así que
+    // forzarlo a null lo excluye del PDF sin tocar ese archivo.
+    if (concepto.tipo === 'bono') grupoRecibo = null
 
     items.push({
       codigo: concepto.codigo,
@@ -222,6 +231,11 @@ export function liquidarConceptos(
         break
       case 'descuento':
         totalDescuentos += monto
+        break
+      case 'bono':
+        // Se paga (suma a bruto/neto) pero queda fuera de
+        // remunerativoAcumulado/noRemunerativoAcumulado: no integra base.
+        bruto += monto
         break
       case 'aporte_patronal':
       case 'informativo':

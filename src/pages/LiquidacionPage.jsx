@@ -80,6 +80,38 @@ export default function LiquidacionPage() {
   const [itemsPorLiq, setItemsPorLiq] = useState({})
   const [busqueda, setBusqueda] = useState('')
 
+  // Ajuste GLOBAL de horas por persona y período (Task 4.3, plan
+  // convenios-por-obra 2026-08-07): un delta único (puede ser negativo)
+  // que se aplica sobre horasTrabajadas antes de calcular el básico —
+  // nom_ajustes_horas, migración 0061. Se precarga junto a las
+  // liquidaciones del período y se guarda con upsert por
+  // (empresa, período, personal).
+  const [ajustesHoras, setAjustesHoras] = useState({}) // personalId -> horas_globales guardadas
+  const [ajustesHorasForm, setAjustesHorasForm] = useState({}) // personalId -> valor en edición (string)
+  const [guardandoAjuste, setGuardandoAjuste] = useState(null) // personalId en curso
+  const [errorAjuste, setErrorAjuste] = useState(null)
+
+  const cargarAjustesHoras = async (periodoId) => {
+    const { data } = await supabase.from('nom_ajustes_horas').select('personal_id, horas_globales').eq('periodo_id', periodoId)
+    const mapa = Object.fromEntries((data || []).map((a) => [a.personal_id, Number(a.horas_globales)]))
+    setAjustesHoras(mapa)
+    setAjustesHorasForm(Object.fromEntries(Object.entries(mapa).map(([k, v]) => [k, String(v)])))
+  }
+
+  const guardarAjusteHoras = async (personalId) => {
+    if (!periodoSeleccionado || !empresaId) return
+    const valor = Number(ajustesHorasForm[personalId])
+    if (Number.isNaN(valor)) { setErrorAjuste('El ajuste de horas tiene que ser un número.'); return }
+    setGuardandoAjuste(personalId); setErrorAjuste(null)
+    const { error } = await supabase.from('nom_ajustes_horas').upsert(
+      { empresa_id: empresaId, periodo_id: periodoSeleccionado, personal_id: personalId, horas_globales: valor },
+      { onConflict: 'empresa_id,periodo_id,personal_id' }
+    )
+    setGuardandoAjuste(null)
+    if (error) { setErrorAjuste(error.message); return }
+    setAjustesHoras((prev) => ({ ...prev, [personalId]: valor }))
+  }
+
   // Selección múltiple para el ZIP de recibos (plan 2026-07-29 §1).
   const [seleccionadas, setSeleccionadas] = useState(new Set())
   const [generandoZip, setGenerandoZip] = useState(false)
@@ -165,7 +197,8 @@ export default function LiquidacionPage() {
     setItemsPorLiq({})
     setSeleccionadas(new Set())
     setBusqueda('')
-    if (periodoSeleccionado) cargarLiquidaciones(periodoSeleccionado)
+    setAjustesHoras({}); setAjustesHorasForm({}); setErrorAjuste(null)
+    if (periodoSeleccionado) { cargarLiquidaciones(periodoSeleccionado); cargarAjustesHoras(periodoSeleccionado) }
   }, [periodoSeleccionado])
 
   // Genera el PDF real (art. 140 LCT, src/utils/reciboPdf.js), calcula su
@@ -770,6 +803,35 @@ export default function LiquidacionPage() {
                     {liqExpandida === l.id && (
                       <tr id={`liq-detalle-${l.id}`}>
                         <td colSpan={14} style={{ background: 'var(--bg-subtle, rgba(255,255,255,0.03))' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }} onClick={(e) => e.stopPropagation()}>
+                            <label className="input-label" htmlFor={`ajuste-hs-${l.personalId}`} style={{ margin: 0 }}>
+                              Ajuste hs. (global, este período)
+                            </label>
+                            <input
+                              id={`ajuste-hs-${l.personalId}`}
+                              className="input input-sm"
+                              type="number"
+                              step="0.5"
+                              style={{ width: 90 }}
+                              placeholder="0"
+                              value={ajustesHorasForm[l.personalId] ?? String(ajustesHoras[l.personalId] ?? 0)}
+                              onChange={(e) => setAjustesHorasForm((f) => ({ ...f, [l.personalId]: e.target.value }))}
+                            />
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => guardarAjusteHoras(l.personalId)}
+                              disabled={guardandoAjuste === l.personalId}
+                            >
+                              {guardandoAjuste === l.personalId ? 'Guardando…' : 'Guardar ajuste'}
+                            </button>
+                            {ajustesHoras[l.personalId] ? (
+                              <span className="texto-muted" style={{ fontSize: '0.8rem' }}>
+                                aplicado: {ajustesHoras[l.personalId] > 0 ? '+' : ''}{ajustesHoras[l.personalId]} h (recalculá el período para verlo reflejado)
+                              </span>
+                            ) : null}
+                          </div>
+                          {errorAjuste && <p style={{ color: 'var(--danger)', fontSize: '0.85rem', marginBottom: 8 }}>{errorAjuste}</p>}
                           {items.length > 0 && !l.anulado && puedeEmitirRecibos && (
                             <button className="btn btn-primary btn-sm" style={{ marginBottom: 8 }}
                               onClick={(e) => { e.stopPropagation(); handleEmitirRecibo(l) }} disabled={emitiendoRecibo === l.id}>

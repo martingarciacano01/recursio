@@ -24,10 +24,26 @@ vi.mock('../../components/config/TabParametros', () => ({ default: () => <div>ta
 vi.mock('../../components/config/TabDocumentacion', () => ({ default: () => <div>tab</div> }))
 vi.mock('../../components/config/TabAlertas', () => ({ default: () => <div>tab</div> }))
 vi.mock('../../components/config/TabFlujo', () => ({ default: () => <div>tab</div> }))
+vi.mock('../../components/config/TabBonos', () => ({ default: () => <div>tab</div> }))
 
 let estadoConvenios
 vi.mock('../../store/conveniosStore', () => ({
   useConveniosStore: () => estadoConvenios,
+}))
+
+// Task 4.2 (convenio por obra): ConfiguracionPage carga nom_v_obras para el
+// selector de "Personalizar convenio → por obra". Se mockea vacío: no es
+// lo que este archivo testea (el chrome de la página).
+vi.mock('../../lib/supabase', () => ({
+  supabase: {
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          order: () => Promise.resolve({ data: [], error: null }),
+        }),
+      }),
+    }),
+  },
 }))
 
 const base = {

@@ -64,3 +64,31 @@ describe('armarRecibo', () => {
     expect(sumaTorta).toBeCloseTo(r.costoTotalEmpleador)
   })
 })
+
+// Task 4.5 (plan convenios-por-obra 2026-08-07): el bono no remunerativo se
+// graba con grupoRecibo: null (motor.ts lo fuerza) — no debe aparecer en
+// NINGUNA sección del recibo ni sumar a sueldoBruto/costoTotalEmpleador,
+// aunque sí sume a bruto/neto de la liquidación (eso lo hace el motor, no
+// reciboLayout — ver motor.test.ts).
+describe('armarRecibo — bono no remunerativo (grupoRecibo null) no se imprime', () => {
+  const itemsConBono = [
+    ...items,
+    { codigo: 'bono_x', nombre: 'Bono X', tipo: 'bono', monto: 50000, unidadTexto: null, baseCalculo: null, grupoRecibo: null, detalleRecibo: null },
+  ]
+  const r = armarRecibo(itemsConBono)
+  const rSinBono = armarRecibo(items)
+
+  it('el bono no aparece en ninguna sección', () => {
+    expect(r.contribuciones.map((i) => i.codigo)).not.toContain('bono_x')
+    expect(r.cct.map((i) => i.codigo)).not.toContain('bono_x')
+    expect(r.remunerativos.map((i) => i.codigo)).not.toContain('bono_x')
+    expect(r.noRemunerativos.map((i) => i.codigo)).not.toContain('bono_x')
+    expect(r.descuentos.map((i) => i.codigo)).not.toContain('bono_x')
+  })
+
+  it('el bono no altera sueldoBruto/sueldoNeto/costoTotalEmpleador del recibo', () => {
+    expect(r.sueldoBruto).toBeCloseTo(rSinBono.sueldoBruto)
+    expect(r.sueldoNeto).toBeCloseTo(rSinBono.sueldoNeto)
+    expect(r.costoTotalEmpleador).toBeCloseTo(rSinBono.costoTotalEmpleador)
+  })
+})

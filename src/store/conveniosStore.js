@@ -22,13 +22,17 @@ export const useConveniosStore = create((set, get) => ({
   },
 
   // Clona un convenio global a la empresa (función SQL SECURITY DEFINER,
-  // migración 0012/0013). Devuelve el id del convenio propio. empresaId es
-  // necesario cuando lo ejecuta un Superadmin "viendo como" una empresa
-  // (auth_empresa_id() da NULL para él); para un usuario normal se ignora
-  // del lado del servidor.
-  clonarConvenio: async (convenioGlobalId, empresaId) => {
+  // migración 0012/0013, extendida por 0059 con p_obra_id — plan
+  // convenios-por-obra 2026-08-07). Devuelve el id del convenio propio.
+  // empresaId es necesario cuando lo ejecuta un Superadmin "viendo como"
+  // una empresa (auth_empresa_id() da NULL para él); para un usuario
+  // normal se ignora del lado del servidor. obraId opcional: si se pasa,
+  // el clon queda atado a esa obra (nom_convenios.obra_id) y solo
+  // re-apunta los legajos de esa obra; sin obraId, comportamiento previo
+  // (clon genérico de empresa).
+  clonarConvenio: async (convenioGlobalId, empresaId, obraId) => {
     const { data, error } = await supabase.rpc('clonar_convenio', {
-      convenio_global_id: convenioGlobalId, p_empresa_id: empresaId ?? null,
+      convenio_global_id: convenioGlobalId, p_empresa_id: empresaId ?? null, p_obra_id: obraId ?? null,
     })
     if (error) return { ok: false, error: error.message }
     return { ok: true, convenioId: data }

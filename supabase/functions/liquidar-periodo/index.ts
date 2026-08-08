@@ -32,6 +32,45 @@ const corsHeaders = {
 // como en el de períodos especiales — ver liquidarPeriodoEspecial).
 type ConceptoConConvenio = Concepto & { convenioId: string | null; config: any }
 
+// ─── Bonos no remunerativos (plan convenios-por-obra 2026-08-07) ────────
+// Resuelve, para una persona de una obra puntual, qué bonos globales
+// (nom_bonos, catálogo superadmin) le corresponden: se aplican por
+// aplicación empresa/obra (obra_id NULL = toda la empresa) y pueden tener
+// una excepción por persona (monto distinto, o desactivado si monto es
+// null). Función pura — exportada para poder testearla sin levantar todo
+// el handler de la Edge Function.
+export interface BonoCatalogo { id: string; nombre: string; activo?: boolean }
+export interface BonoAplicacion { bono_id: string; obra_id: string | null; monto: number | string }
+export interface BonoExcepcion { bono_id: string; personal_id: string; monto: number | string | null }
+
+export function resolverBonosPersona(
+  personalId: string,
+  obraId: string | null,
+  bonos: BonoCatalogo[],
+  aplicaciones: BonoAplicacion[],
+  excepciones: BonoExcepcion[]
+): { codigo: string; nombre: string; monto: number }[] {
+  // Por bono, se prioriza la aplicación específica de la obra sobre la
+  // genérica de toda la empresa (obra_id NULL) si ambas existiesen.
+  const porBono = new Map<string, { nombre: string; monto: number }>()
+  for (const ap of aplicaciones) {
+    if (ap.obra_id !== null && ap.obra_id !== obraId) continue
+    const yaHayEspecifica = porBono.has(ap.bono_id) && ap.obra_id === null
+    if (yaHayEspecifica) continue
+    const nombre = bonos.find((b) => b.id === ap.bono_id)?.nombre ?? 'Bono'
+    porBono.set(ap.bono_id, { nombre, monto: Number(ap.monto) })
+  }
+  const result: { codigo: string; nombre: string; monto: number }[] = []
+  for (const [bonoId, cfg] of porBono) {
+    const ex = excepciones.find((e) => e.bono_id === bonoId && e.personal_id === personalId)
+    if (ex && ex.monto == null) continue // excepción "desactivado" para esta persona
+    const monto = ex && ex.monto != null ? Number(ex.monto) : cfg.monto
+    if (monto === 0) continue
+    result.push({ codigo: `bono_${bonoId}`, nombre: cfg.nombre, monto })
+  }
+  return result
+}
+
 // clave de escala: convenio + nombre de la categoría, vigente al cierre del
 // período. Se prueba primero contra el convenio del LEGAJO (si el legajo
 // quedó apuntando a la fila de categoría del convenio global tras
@@ -191,7 +230,7 @@ Deno.serve(async (req) => {
     return await liquidarPeriodoEspecial(supabase, periodo, personalIds, conceptosMotor)
   }
 
-  let queryPersonal = supabase.from('nom_v_personal').select('id, nombre, fecha_ingreso').eq('empresa_id', periodo.empresa_id).eq('estado', 'activo')
+  let queryPersonal = supabase.from('nom_v_personal').select('id, nombre, fecha_ingreso, obra_id').eq('empresa_id', periodo.empresa_id).eq('estado', 'activo')
   if (Array.isArray(personalIds) && personalIds.length > 0) queryPersonal = queryPersonal.in('id', personalIds)
   const { data: personal, error: errPersonal } = await queryPersonal
   const { data: legajos, error: errLegajos } = await supabase.from('nom_legajo').select('*').eq('empresa_id', periodo.empresa_id)
@@ -614,6 +653,31 @@ Deno.serve(async (req) => {
     ? Number(cfgHoras.jornada_horas)
     : null
 
+  // ─── Convenios por obra, ajustes de horas y bonos (plan 2026-08-07) ───
+  // Ajuste GLOBAL de horas por persona y período (0061): un delta único,
+  // no día a día — se aplica sobre horasTrabajadas antes de resolver el
+  // básico, para que el básico por hora también lo refleje.
+  const { data: ajustesHoras } = await supabase.from('nom_ajustes_horas')
+    .select('personal_id, horas_globales').eq('periodo_id', periodoId)
+  const ajusteHorasPorPersonal = new Map<string, number>(
+    (ajustesHoras || []).map((a: any) => [a.personal_id, Number(a.horas_globales)])
+  )
+
+  // Tope de horas y jornada por OBRA (0060): resolución en el loop es
+  // obra → empresa (cfgHoras) → default. Sin config de obra, se cae al
+  // comportamiento de siempre.
+  const { data: cfgsObra } = await supabase.from('nom_config_obras')
+    .select('*').eq('empresa_id', periodo.empresa_id)
+  const configObraPorObraId = new Map<string, any>((cfgsObra || []).map((c: any) => [c.obra_id, c]))
+
+  // Bonos no remunerativos (0062): catálogo global activo + aplicaciones y
+  // excepciones de esta empresa. Ver resolverBonosPersona más arriba.
+  const { data: bonosCatalogo } = await supabase.from('nom_bonos').select('id, nombre, activo').eq('activo', true)
+  const { data: bonoAplicaciones } = await supabase.from('nom_bono_aplicaciones')
+    .select('bono_id, obra_id, monto').eq('empresa_id', periodo.empresa_id)
+  const { data: bonoExcepciones } = await supabase.from('nom_bono_excepciones')
+    .select('bono_id, personal_id, monto').eq('empresa_id', periodo.empresa_id)
+
   const resultados = []
   for (const persona of personalAProcesar) {
     const legajo = legajoPorPersonal.get(persona.id)
@@ -646,17 +710,35 @@ Deno.serve(async (req) => {
       periodo.fecha_hasta,
       { fechaIngreso: fechaIngresoEfectiva, fechaBaja: legajo?.fecha_baja, feriados: feriadosSet }
     )
-    const jornadaHoras = jornadaHorasConfig ?? (legajo.jornada === 'parcial' ? 4 : 8)
+    // Obra del personal (Presencio, vía nom_v_obras/nom_v_personal) → tope
+    // de horas y jornada resueltos obra → empresa → default 8h/4h.
+    const obraId: string | null = persona.obra_id ?? null
+    const cfgObra = obraId ? configObraPorObraId.get(obraId) : null
+    const topeHorasDiarias = cfgObra?.tope_horas_diarias != null
+      ? Number(cfgObra.tope_horas_diarias)
+      : (cfgHoras?.tope_horas_diarias != null ? Number(cfgHoras.tope_horas_diarias) : undefined)
+    const jornadaHoras = cfgObra?.jornada_horas != null
+      ? Number(cfgObra.jornada_horas)
+      : jornadaHorasConfig ?? (legajo.jornada === 'parcial' ? 4 : 8)
     const asistencia = calcularAsistencia(dias, 15, jornadaHoras, {
       contabilizarHorasExtras: cfgHoras?.contabilizar_horas_extras ?? true,
-      topeHorasDiarias: cfgHoras?.tope_horas_diarias != null ? Number(cfgHoras.tope_horas_diarias) : undefined,
+      topeHorasDiarias,
     })
     if (cfgHoras?.contabilizar_horas_extras === false && asistencia.horasTrabajadas > jornadaHoras * dias.filter((d) => d.horaEntradaEsperada !== null).length) {
       advertencias.push({ personal_id: persona.id, mensaje: 'la persona supera las horas topadas: se paga sin recargo' })
     }
 
+    // Ajuste GLOBAL de horas del período (0061): delta único por persona,
+    // aplicado ANTES de resolver el básico para que el básico por hora ya
+    // lo refleje. No puede dejar las horas trabajadas en negativo.
+    const ajusteHoras = ajusteHorasPorPersonal.get(persona.id) ?? 0
+    if (ajusteHoras !== 0) {
+      asistencia.horasTrabajadas = Math.max(0, asistencia.horasTrabajadas + ajusteHoras)
+    }
+
     // Sin ningún fichaje y sin ningún día cubierto por ausencia aprobada:
-    // no liquidar en $0 silenciosamente, listar aparte.
+    // no liquidar en $0 silenciosamente, listar aparte. Un ajuste positivo
+    // de horas cuenta como "tiene horas" aunque no haya fichaje.
     const diasConAusenciaAprobada = dias.filter((d) => d.ausenciaAprobada).length
     if (asistencia.horasTrabajadas === 0 && diasConAusenciaAprobada === 0) {
       sinHoras.push({ personal_id: persona.id, nombre: persona.nombre })
@@ -671,6 +753,22 @@ Deno.serve(async (req) => {
     // unidadYBaseBasico más arriba.
     const { basicoPeriodo, basicoConvenio, noRem, conceptosLegajo, horasLiquidadas, unidadBasico, baseBasico } =
       await resolverBasicoYConceptos(legajo, asistencia, persona.id, cfgHoras?.contabilizar_horas_extras ?? true)
+
+    // Bonos no remunerativos aplicables a esta persona (obra + excepción,
+    // 0062): se agregan como conceptos sintéticos tipo 'bono' — motor.ts
+    // los suma a bruto/neto sin tocar ninguna base y sin imprimirlos en el
+    // recibo (grupoRecibo forzado a null). orden 999+ para que queden
+    // después de los conceptos del convenio (no afecta bases por diseño).
+    const bonosPersona = resolverBonosPersona(
+      persona.id, obraId, bonosCatalogo || [], bonoAplicaciones || [], bonoExcepciones || []
+    )
+    const conceptosLegajoConBonos: ConceptoConConvenio[] = [
+      ...conceptosLegajo,
+      ...bonosPersona.map((b, idx) => ({
+        codigo: b.codigo, nombre: b.nombre, tipo: 'bono' as const, orden: 999 + idx,
+        formula: String(b.monto), imprimible: false, config: null, convenioId: null,
+      })),
+    ]
 
     const variablesBase = {
       basico_convenio: basicoConvenio,
@@ -691,7 +789,7 @@ Deno.serve(async (req) => {
       remunerativo_quincena1: remunerativoQuincena1PorPersona.get(persona.id) ?? 0,
     }
 
-    const resultado = liquidarConceptos(conceptosLegajo, variablesBase)
+    const resultado = liquidarConceptos(conceptosLegajoConBonos, variablesBase)
 
     // Ajuste de consolidación quincenal: los conceptos con base
     // 'acumulado_mensual' calcularon sobre remunerativo_acumulado +

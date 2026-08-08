@@ -3,6 +3,7 @@ import { useAuthStore } from '../store/authStore'
 import { useConveniosStore } from '../store/conveniosStore'
 import { useToastStore } from '../store/toastStore'
 import { filtrarConveniosVisibles } from '../utils/convenios'
+import { supabase } from '../lib/supabase'
 import { Building2, Scale } from 'lucide-react'
 import TabEscalas from '../components/config/TabEscalas'
 import TabNoRemunerativos from '../components/config/TabNoRemunerativos'
@@ -14,6 +15,7 @@ import TabEmpresa from '../components/config/TabEmpresa'
 import TabDocumentacion from '../components/config/TabDocumentacion'
 import TabAlertas from '../components/config/TabAlertas'
 import TabConvenios from '../components/config/TabConvenios'
+import TabBonos from '../components/config/TabBonos'
 
 // La configuración tiene dos naturalezas distintas y mezclarlas en una sola
 // fila de 10 pestañas era confuso:
@@ -36,7 +38,7 @@ const SECCIONES = [
     label: 'Empresa',
     icono: Building2,
     porConvenio: false,
-    tabs: ['Datos de la empresa', 'Parámetros', 'Documentación', 'Alertas', 'Flujo de aprobación'],
+    tabs: ['Datos de la empresa', 'Parámetros', 'Documentación', 'Alertas', 'Flujo de aprobación', 'Bonos no remunerativos'],
   },
 ]
 
@@ -53,11 +55,24 @@ export default function ConfiguracionPage() {
   const [pestana, setPestana] = useState(SECCIONES[0].tabs[0])
   const [clonando, setClonando] = useState(false)
   const [errorClonado, setErrorClonado] = useState(null)
+  const [obras, setObras] = useState([])
+  const [obraIdParaClonar, setObraIdParaClonar] = useState('')
   const push = useToastStore((s) => s.push)
 
   const seccion = SECCIONES.find((s) => s.id === seccionId) || SECCIONES[0]
 
   useEffect(() => { if (empresaActiva?.id) cargarConvenios(empresaActiva.id) }, [empresaActiva?.id])
+  // Obras de la empresa (Presencio, vía nom_v_obras — migración 0058) para
+  // "Personalizar convenio → por obra" (Task 4.2, plan convenios-por-obra
+  // 2026-08-07). Sin obras o con error, el selector de obra simplemente no
+  // aparece: clonar sigue funcionando como convenio genérico de empresa.
+  useEffect(() => {
+    if (!empresaActiva?.id) return
+    let cancelado = false
+    supabase.from('nom_v_obras').select('id, nombre').eq('empresa_id', empresaActiva.id).order('nombre')
+      .then(({ data }) => { if (!cancelado) setObras(data || []) })
+    return () => { cancelado = true }
+  }, [empresaActiva?.id])
   // Selección por defecto: el primer convenio propio; si no hay, el primero global.
   useEffect(() => {
     if (!convenioId && convenios.length > 0) {
@@ -83,12 +98,15 @@ export default function ConfiguracionPage() {
 
   const personalizar = async () => {
     setClonando(true); setErrorClonado(null)
-    const r = await clonarConvenio(convenio.id, empresaActiva.id)
+    const r = await clonarConvenio(convenio.id, empresaActiva.id, obraIdParaClonar || undefined)
     setClonando(false)
     if (!r.ok) { setErrorClonado(r.error); return }
     await cargarConvenios(empresaActiva.id)
     setConvenioId(r.convenioId)
-    push('Convenio clonado: ya podés editarlo.', 'success')
+    push(
+      obraIdParaClonar ? 'Convenio de obra clonado: ya podés editarlo.' : 'Convenio clonado: ya podés editarlo.',
+      'success'
+    )
   }
 
   // El selector no aplica a "Mis convenios": ahí se listan todos los propios.
@@ -177,6 +195,20 @@ export default function ConfiguracionPage() {
                     <option key={c.id} value={c.id}>{c.nombre}{c.empresaId === null ? ' (plantilla)' : ''}</option>
                   ))}
                 </select>
+                {esGlobal && obras.length > 0 && (
+                  <select
+                    id="selector-obra-clonar"
+                    className="input input-medio"
+                    value={obraIdParaClonar}
+                    onChange={(e) => setObraIdParaClonar(e.target.value)}
+                    aria-label="Obra para el convenio clonado"
+                  >
+                    <option value="">Toda la empresa</option>
+                    {obras.map((o) => (
+                      <option key={o.id} value={o.id}>{o.nombre}</option>
+                    ))}
+                  </select>
+                )}
                 {esGlobal && (
                   <button className="btn btn-primary btn-sm" onClick={personalizar} disabled={clonando}>
                     {clonando ? 'Clonando…' : 'Personalizar convenio'}
@@ -188,6 +220,7 @@ export default function ConfiguracionPage() {
                 <div className="card card-compacta max-900" style={{ marginBottom: 12, fontSize: '0.86rem' }}>
                   Este convenio es una plantilla de solo lectura. "Personalizar convenio" crea una copia propia de tu empresa
                   (categorías, conceptos y reglas incluidos) y re-apunta tus legajos para poder editarla.
+                  {obras.length > 0 && ' Elegí una obra para clonarlo solo a esa obra, o dejá "Toda la empresa" para el comportamiento genérico.'}
                 </div>
               )}
               {errorClonado && (
@@ -204,6 +237,7 @@ export default function ConfiguracionPage() {
           {pestana === 'Adicionales' && <TabAdicionales convenio={convenio} empresaId={empresaActiva.id} soloLectura={esGlobal} />}
           {pestana === 'Mis convenios' && <TabConvenios empresaId={empresaActiva.id} />}
 
+          {pestana === 'Bonos no remunerativos' && <TabBonos empresaId={empresaActiva.id} />}
           {pestana === 'Datos de la empresa' && <TabEmpresa empresaId={empresaActiva.id} />}
           {pestana === 'Parámetros' && <TabParametros empresaId={empresaActiva.id} />}
           {pestana === 'Documentación' && <TabDocumentacion empresaId={empresaActiva.id} />}

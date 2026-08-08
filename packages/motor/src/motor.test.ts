@@ -347,3 +347,36 @@ describe('excluirHorasExtra — flag contabilizar_horas_extras=false (Task 2.12)
     expect(r.map((c) => c.codigo)).toEqual(conceptos.map((c) => c.codigo))
   })
 })
+
+describe('bono no remunerativo aislado (Task 2.1)', () => {
+  it('el bono suma a bruto y neto pero NO alimenta remunerativo_acumulado', () => {
+    const conceptos: Concepto[] = [
+      { codigo: 'basico', nombre: 'Básico', tipo: 'remunerativo', orden: 1, formula: '1000000', imprimible: true },
+      { codigo: 'bono_x', nombre: 'Bono X', tipo: 'bono', orden: 50, formula: '50000', imprimible: false },
+      { codigo: 'jubilacion', nombre: 'Jubilación', tipo: 'descuento', orden: 100,
+        formula: 'min(remunerativo_acumulado, tope_sipa) * 0.11', imprimible: true },
+    ]
+    const r = liquidarConceptos(conceptos, { tope_sipa: 999999999 })
+    expect(r.bruto).toBeCloseTo(1050000, 2)
+    expect(r.neto).toBeCloseTo(1050000 - 110000, 2)
+    // la jubilación se calcula SOLO sobre el básico (1.000.000), no sobre el bono
+    const jub = r.items.find((i) => i.codigo === 'jubilacion')!
+    expect(jub.monto).toBeCloseTo(110000, 2)
+    expect(r.remunerativoAcumulado).toBeCloseTo(1000000, 2)
+  })
+
+  it('el bono no entra en ninguna base y lleva grupoRecibo null', () => {
+    const conceptos: Concepto[] = [
+      { codigo: 'basico', nombre: 'Básico', tipo: 'remunerativo', orden: 1, formula: '1000000', imprimible: true },
+      { codigo: 'bono_x', nombre: 'Bono X', tipo: 'bono', orden: 50, formula: '25000', imprimible: false },
+      { codigo: 'os', nombre: 'Obra social', tipo: 'descuento', orden: 101,
+        formula: '(remunerativo_acumulado + no_remunerativo_acumulado) * 0.03', imprimible: true },
+    ]
+    const r = liquidarConceptos(conceptos, {})
+    const bono = r.items.find((i) => i.codigo === 'bono_x')!
+    expect(bono.grupoRecibo).toBeNull()
+    expect(bono.detalleRecibo).toBeNull()
+    const os = r.items.find((i) => i.codigo === 'os')!
+    expect(os.monto).toBeCloseTo(30000, 2) // 3% de 1.000.000, sin bono
+  })
+})
