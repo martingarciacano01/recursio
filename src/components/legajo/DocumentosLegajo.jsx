@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useDocumentosStore, estadoDocumento, faltantes } from '../../store/documentosStore'
+import { useToastStore } from '../../store/toastStore'
 
 const FORM_VACIO = { nombre: '', requeridoId: '', fechaEmision: '', fechaVencimiento: '', observaciones: '', archivo: null }
 
@@ -17,6 +18,7 @@ export default function DocumentosLegajo({ personalId, empresaId }) {
   const subirDocumento = useDocumentosStore((s) => s.subirDocumento)
   const eliminarDocumento = useDocumentosStore((s) => s.eliminarDocumento)
   const urlFirmada = useDocumentosStore((s) => s.urlFirmada)
+  const push = useToastStore((s) => s.push)
 
   const [form, setForm] = useState(FORM_VACIO)
   const [guardando, setGuardando] = useState(false)
@@ -54,8 +56,16 @@ export default function DocumentosLegajo({ personalId, empresaId }) {
 
   const handleEliminar = async (doc) => {
     setError('')
+    // Task 6.1 (plan 2026-08-11): un click borraba registro + archivo del
+    // bucket, irreversible, sin aviso. Ahora confirmación explícita + toast.
+    if (!window.confirm(`¿Eliminar el documento "${doc.nombre}"? Se borra también el archivo.`)) return
     const r = await eliminarDocumento(doc.id, personalId)
-    if (!r.ok) setError(r.error)
+    if (!r.ok) {
+      setError(r.error)
+      push('No se pudo eliminar el documento', 'error')
+      return
+    }
+    push('Documento eliminado.', 'success')
   }
 
   return (

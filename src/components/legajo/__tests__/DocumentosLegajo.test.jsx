@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import DocumentosLegajo from '../DocumentosLegajo'
 
@@ -25,8 +25,19 @@ vi.mock('../../../store/documentosStore', async (importOriginal) => {
   return { ...real, useDocumentosStore: (selector) => (selector ? selector(estado) : estado) }
 })
 
+const pushMock = vi.fn()
+vi.mock('../../../store/toastStore', () => ({
+  useToastStore: (sel) => sel({ push: pushMock }),
+}))
+
 describe('DocumentosLegajo', () => {
-  beforeEach(() => { subirDocumentoMock.mockClear() })
+  beforeEach(() => {
+    subirDocumentoMock.mockClear()
+    estado.eliminarDocumento.mockClear()
+    pushMock.mockClear()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+  })
+  afterEach(() => vi.restoreAllMocks())
 
   it('lista documentos de ambos origenes', () => {
     render(<DocumentosLegajo personalId="p1" empresaId="e1" />)
@@ -51,5 +62,23 @@ describe('DocumentosLegajo', () => {
         'p1', 'e1'
       )
     })
+  })
+
+  it('eliminar un documento pide confirmación y avisa por toast', async () => {
+    render(<DocumentosLegajo personalId="p1" empresaId="e1" />)
+    const boton = screen.getAllByRole('button', { name: 'Eliminar' })[0]
+    fireEvent.click(boton)
+    expect(window.confirm).toHaveBeenCalled()
+    expect(estado.eliminarDocumento).toHaveBeenCalledWith('d1', 'p1')
+    await waitFor(() => {
+      expect(pushMock).toHaveBeenCalledWith('Documento eliminado.', 'success')
+    })
+  })
+
+  it('si el usuario cancela la confirmación no se elimina', () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<DocumentosLegajo personalId="p1" empresaId="e1" />)
+    fireEvent.click(screen.getAllByRole('button', { name: 'Eliminar' })[0])
+    expect(estado.eliminarDocumento).not.toHaveBeenCalled()
   })
 })
