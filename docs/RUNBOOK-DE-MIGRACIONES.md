@@ -35,6 +35,8 @@ Las migraciones 0037, 0038, 0039, 0041 y 0042 se aplicaron el 2026-08-01 en un s
 cd supabase && supabase functions deploy liquidar-periodo --project-ref <ref-de-presencio-dev>
 ```
 
+> **Último deploy: 2026-08-11 (version 23, `--use-api`).** Incluye el fix del tope de horas diarias (`b18eab6`): recorta las horas trabajadas y no solo la extra. Antes (version 22, deploy 2026-08-04) la extra se cortaba pero el básico pagaba las horas completas — por eso "el tope no modificaba nada". Ver `docs/TOPE-HORAS-POR-OBRA.md`.
+
 | Versión | Nombre | Notas |
 |---|---|---|
 | 0066 | schemas_pendientes (consolidado 0058–0065) | Un solo archivo con diagnóstico + todo el schema del plan. Reemplaza la necesidad de aplicar 0064/0065 por separado. |
