@@ -7,8 +7,9 @@ import ConfiguracionPage from '../ConfiguracionPage'
 // Diagnosticar eso costó una sesión entera de debugging, así que el estado
 // vacío y el error ahora son visibles y están cubiertos por estos tests.
 
+let estadoAuth
 vi.mock('../../store/authStore', () => ({
-  useAuthStore: (selector) => selector({ empresa: { id: 'e1' }, empresaVista: null }),
+  useAuthStore: (selector) => selector(estadoAuth),
 }))
 
 // Los tabs traen sus propios stores; acá solo importa el chrome de la página
@@ -54,7 +55,10 @@ const base = {
   clonarConvenio: vi.fn(),
 }
 
-beforeEach(() => { estadoConvenios = { ...base } })
+beforeEach(() => {
+  estadoConvenios = { ...base }
+  estadoAuth = { empresa: { id: 'e1' }, empresaVista: null }
+})
 
 describe('ConfiguracionPage — convenios que no cargan', () => {
   it('muestra el mensaje de error cuando la consulta de convenios falla', () => {
@@ -84,5 +88,29 @@ describe('ConfiguracionPage — convenios que no cargan', () => {
     render(<ConfiguracionPage />)
     expect(screen.getByLabelText('Convenio')).toBeInTheDocument()
     expect(screen.queryByText(/no hay convenios/i)).not.toBeInTheDocument()
+  })
+
+  // Task 6.3 (plan 2026-08-11): al cambiar de empresa (Superadmin), el
+  // convenioId de la empresa anterior quedaba set, convenios.find daba null y
+  // las pestañas por convenio se veían en blanco. El efecto de preselección
+  // ahora vuelve a correr y el <select> vuelve a tener valor.
+  it('al cambiar de empresa re-preselecciona un convenio de la nueva empresa', () => {
+    // Primera carga: empresa e1, convenio propio c1 → se preselecciona c1.
+    estadoConvenios = {
+      ...base,
+      convenios: [{ id: 'c1', nombre: 'UOCRA', empresaId: 'e1', regimen: 'ley_22250' }],
+    }
+    render(<ConfiguracionPage />)
+    expect(screen.getByLabelText('Convenio').value).toBe('c1')
+
+    // El superadmin cambia a la empresa e2: los convenios cambian (c1 ya no
+    // existe en la lista) y debe preseleccionarse el primero de e2 (c2).
+    estadoAuth = { empresa: null, empresaVista: { id: 'e2' } }
+    estadoConvenios = {
+      ...base,
+      convenios: [{ id: 'c2', nombre: 'UOCRA', empresaId: 'e2', regimen: 'ley_22250' }],
+    }
+    render(<ConfiguracionPage />)
+    expect(screen.getByLabelText('Convenio').value).toBe('c2')
   })
 })

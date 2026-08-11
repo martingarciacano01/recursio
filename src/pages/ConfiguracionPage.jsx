@@ -100,12 +100,17 @@ export default function ConfiguracionPage() {
     return () => { cancelado = true }
   }, [empresaActiva?.id])
   // Selección por defecto: el primer convenio propio; si no hay, el primero global.
+  // Task 6.3 (plan 2026-08-11): al cambiar de empresa (Superadmin), el
+  // convenioId de la empresa anterior quedaba set, `convenios.find` daba null
+  // y las pestañas por convenio (TabEscalas/TabNoRemunerativos) se veían en
+  // blanco. Ahora el efecto corre también cuando el convenio activo ya no está
+  // en la lista de la nueva empresa y vuelve a preseleccionar.
   useEffect(() => {
-    if (!convenioId && convenios.length > 0) {
-      const propio = convenios.find((c) => c.empresaId === empresaActiva?.id)
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- selección por defecto intencional cuando llegan los convenios.
-      setConvenioId((propio || convenios[0]).id)
-    }
+    if (convenios.length === 0) return
+    if (convenios.some((c) => c.id === convenioId)) return
+    const propio = convenios.find((c) => c.empresaId === empresaActiva?.id)
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- preselección intencional cuando llegan los convenios o cambia la empresa.
+    setConvenioId((propio || convenios[0]).id)
   }, [convenios, convenioId, empresaActiva?.id])
 
   const cambiarSeccion = (s) => {
