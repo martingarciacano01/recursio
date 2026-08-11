@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useDocumentosStore } from '../../store/documentosStore'
+import { useToastStore } from '../../store/toastStore'
 
 const FORM_VACIO = { id: null, codigo: '', nombre: '', obligatorio: true, vence: false, diasAviso: 30, orden: 100 }
 
@@ -11,6 +12,7 @@ export default function TabDocumentacion({ empresaId }) {
   const cargarRequeridos = useDocumentosStore((s) => s.cargarRequeridos)
   const guardarRequerido = useDocumentosStore((s) => s.guardarRequerido)
   const eliminarRequerido = useDocumentosStore((s) => s.eliminarRequerido)
+  const push = useToastStore((s) => s.push)
 
   const [form, setForm] = useState(FORM_VACIO)
   const [guardando, setGuardando] = useState(false)
@@ -28,6 +30,22 @@ export default function TabDocumentacion({ empresaId }) {
     setGuardando(false)
     if (!r.ok) { setError(r.error); return }
     setForm(FORM_VACIO)
+    push(editando ? 'Tipo de documento actualizado.' : 'Tipo de documento agregado.', 'success')
+  }
+
+  // Task 6.8 (plan 2026-08-11): un click borraba el tipo de documento que
+  // muchos legajos usan, sin aviso. Ahora confirmación (avisa el impacto) +
+  // toast, y se maneja el { ok:false } del store.
+  const handleEliminar = async (r) => {
+    setError('')
+    if (!window.confirm(`¿Eliminar el tipo de documento "${r.nombre}"? Los legajos que lo usan quedarán sin clasificar.`)) return
+    const res = await eliminarRequerido(r.id, empresaId)
+    if (!res.ok) {
+      setError(res.error)
+      push('No se pudo eliminar el tipo de documento', 'error')
+      return
+    }
+    push('Tipo de documento eliminado.', 'success')
   }
 
   return (
@@ -51,7 +69,7 @@ export default function TabDocumentacion({ empresaId }) {
               <td>{r.vence ? `${r.diasAviso} días` : '—'}</td>
               <td style={{ display: 'flex', gap: 4 }}>
                 <button className="btn btn-ghost btn-sm" onClick={() => setForm({ ...r })}>Editar</button>
-                <button className="btn btn-ghost btn-sm" onClick={() => eliminarRequerido(r.id, empresaId)}>Eliminar</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => handleEliminar(r)}>Eliminar</button>
               </td>
             </tr>
           ))}
