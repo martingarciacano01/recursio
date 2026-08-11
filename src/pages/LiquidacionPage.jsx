@@ -568,13 +568,18 @@ export default function LiquidacionPage() {
     }).select().single()
     setCreandoPeriodo(false)
     if (error) { setErrorCrearPeriodo(error.message); return }
+    // Task 6.7 (plan 2026-08-11): antes solo limpiaba el form — el usuario
+    // creía que no pasó nada. Ahora toast de éxito + navegación a la pestaña
+    // donde se ve el período y los botones de acción (Calcular/Cerrar/etc.).
     setPeriodos((prev) => [data, ...prev])
     setPeriodoSeleccionado(data.id)
+    setPestana('Períodos')
     setNuevoDesde('')
     setNuevoHasta('')
     setNuevoConvenioId('')
     setNuevoObraId('')
     setNuevoTipo('')
+    push(`Período ${etiquetaTipo(data.tipo)} creado (${data.fecha_desde} → ${data.fecha_hasta}).`, 'success')
   }
 
   return (

@@ -62,7 +62,11 @@ vi.mock('../../lib/supabase', () => ({
 // El alta de período va convenio → tipo: primero se elige el convenio y su
 // modalidad filtra los tipos posibles (src/utils/tiposPeriodo.js).
 describe('LiquidacionPage — Nuevo período', () => {
-  beforeEach(() => { insertPayload = null })
+  beforeEach(() => {
+    insertPayload = null
+    calcularPeriodoMock.mockReset().mockResolvedValue({ ok: true })
+    pushMock.mockClear()
+  })
 
   const abrirFormulario = () => {
     render(<MemoryRouter><LiquidacionPage /></MemoryRouter>)
@@ -81,6 +85,8 @@ describe('LiquidacionPage — Nuevo período', () => {
         tipo: 'quincena_1', fecha_desde: '2026-07-01', fecha_hasta: '2026-07-15', convenio_id: 'conv-uocra',
       })
     })
+    // Task 6.7: tras crear, feedback (toast) + navegación a la pestaña Períodos.
+    expect(pushMock).toHaveBeenCalledWith(expect.stringContaining('Período 1ra quincena creado'), 'success')
   })
 
   it('un convenio quincenal no ofrece el tipo mensual', () => {
