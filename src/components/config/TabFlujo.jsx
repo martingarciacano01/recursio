@@ -29,6 +29,7 @@ export default function TabFlujo({ empresaId }) {
 
   const setFilas = (flujoId, filas) => setFilasPorFlujo((s) => ({ ...s, [flujoId]: filas }))
 
+  // eslint-disable-next-line react-hooks/purity -- generador de keys temporales solo usado en handlers (agregar/quitar pasos), nunca en render.
   const nuevaKey = () => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `tmp-${Date.now()}-${Math.random()}`)
 
   const agregarPaso = (flujoId) => {

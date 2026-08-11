@@ -28,10 +28,15 @@ describe('mappers de liquidacion', () => {
   it('liquidacionFromDB mapea snake_case a camelCase', () => {
     const row = { id: 'l1', empresa_id: 'e1', periodo_id: 'p1', personal_id: 'per1', bruto: 1000, neto: 800, estado: 'preliminar' }
     expect(liquidacionFromDB(row)).toEqual({
-      id: 'l1', empresaId: 'e1', periodoId: 'p1', personalId: 'per1', bruto: 1000, neto: 800, estado: 'preliminar',
+      id: 'l1', empresaId: 'e1', periodoId: 'p1', personalId: 'per1', obraId: null, bruto: 1000, neto: 800, estado: 'preliminar',
       totalAportes: 0, totalContribuciones: 0, detalleHoras: null,
       numeroRecibo: null, hashPdf: null, version: 1, anulado: false, motivoAnulacion: null,
     })
+  })
+
+  it('liquidacionFromDB mapea obra_id a obraId', () => {
+    const row = { id: 'l2', empresa_id: 'e1', periodo_id: 'p1', personal_id: 'per2', obra_id: 'obra-1', bruto: 2000, neto: 1600, estado: 'preliminar' }
+    expect(liquidacionFromDB(row).obraId).toBe('obra-1')
   })
 
   it('itemFromDB mapea snake_case a camelCase', () => {
@@ -271,7 +276,7 @@ describe('cargarLiquidaciones — guardia de secuencia (Task 3.1, race condition
     // responde ultimo" (A) y pisaba los datos correctos de B.
     let resolverA
     const promesaA = new Promise((resolve) => { resolverA = resolve })
-    supabase.from = vi.fn((tabla) => ({
+    supabase.from = vi.fn(() => ({
       select: vi.fn().mockReturnThis(),
       eq: vi.fn((_col, periodoId) => (periodoId === 'periodo-A' ? promesaA : Promise.resolve({ data: [{ id: 'liq-B', periodo_id: 'periodo-B' }], error: null }))),
     }))

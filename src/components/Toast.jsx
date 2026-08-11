@@ -29,7 +29,7 @@ export default function Toast({ mensaje, tipo = 'error', onClose, duracionMs = 6
         background: tipo === 'error' ? 'var(--danger-bg, #3a1a1a)' : 'var(--success-bg, #123a1a)',
         border: `1px solid ${tipo === 'error' ? 'var(--danger)' : 'var(--success)'}`,
         boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
-        color: 'var(--texto)',
+        color: 'var(--text-primary)',
       }}
     >
       <Icono size={18} color={tipo === 'error' ? 'var(--danger)' : 'var(--success)'} style={{ flexShrink: 0, marginTop: 1 }} />
@@ -37,7 +37,7 @@ export default function Toast({ mensaje, tipo = 'error', onClose, duracionMs = 6
       <button
         onClick={onClose}
         aria-label="Cerrar"
-        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--texto-secundario)', marginLeft: 4, flexShrink: 0 }}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', marginLeft: 4, flexShrink: 0 }}
       >
         <X size={16} />
       </button>

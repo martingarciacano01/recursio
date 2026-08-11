@@ -4,6 +4,7 @@ import { diasEnRango } from '../utils/agruparAusencias'
 
 export const liquidacionFromDB = (r) => ({
   id: r.id, empresaId: r.empresa_id, periodoId: r.periodo_id, personalId: r.personal_id,
+  obraId: r.obra_id ?? null,
   // bruto/neto ?? 0 (Task 3.2, mappers defensivos): fila inesperada (o un
   // shape futuro que los omita) no debe filtrar undefined hacia formateos
   // de moneda río abajo (.toFixed(), etc.) que tirarían y romperían el

@@ -91,6 +91,18 @@ export const useAuthStore = create((set, get) => ({
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) return { ok: false, error: error.message }
+      // MFA (mismo patrón que Presencio, appStore.js login()): si la cuenta
+      // tiene un segundo factor TOTP enrolado, signInWithPassword deja la
+      // sesión en aal1 — is_superadmin() server-side exige aal2 (migración
+      // 037_mfa_guard_superadmin.sql, compartida con Presencio). Sin este
+      // chequeo, un superadmin con MFA enrolado quedaba "logueado" pero sin
+      // ver nada de lo que is_superadmin() protege, sin ningún aviso.
+      try {
+        const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+        if (aal?.nextLevel === 'aal2' && aal?.currentLevel !== 'aal2') {
+          return { ok: true, mfaRequired: true }
+        }
+      } catch { /* sin soporte MFA en esta sesión: seguir como login normal */ }
       const perfil = await get()._resolverPerfil(data.user)
       set({ session: data.session, ...perfil, cargando: false })
       return { ok: true }
@@ -98,6 +110,30 @@ export const useAuthStore = create((set, get) => ({
       // Caída de red antes de llegar a Supabase Auth (Task 3.3): sin este
       // catch, LoginPage quedaba con el botón en "Ingresando…" para siempre.
       return { ok: false, error: 'no se pudo contactar el servidor' }
+    }
+  },
+
+  // Paso 2 del login cuando la cuenta tiene MFA (TOTP) enrolado — ver el
+  // comentario en login() de arriba. Idéntico a Presencio (appStore.js
+  // verifyMfa()): completa el challenge del factor y recién ahí resuelve
+  // rol/empresa (is_superadmin() ya ve la sesión en aal2 en ese momento).
+  verifyMfa: async (code) => {
+    try {
+      const { data: factors, error: errFactors } = await supabase.auth.mfa.listFactors()
+      if (errFactors) return { ok: false, error: errFactors.message }
+      const factor = factors?.totp?.[0]
+      if (!factor) return { ok: false, error: 'No se encontró un factor MFA configurado.' }
+      const { data: challenge, error: errChallenge } = await supabase.auth.mfa.challenge({ factorId: factor.id })
+      if (errChallenge) return { ok: false, error: errChallenge.message }
+      const { error: errVerify } = await supabase.auth.mfa.verify({ factorId: factor.id, challengeId: challenge.id, code })
+      if (errVerify) return { ok: false, error: errVerify.message }
+      const { data: { session } } = await supabase.auth.getSession()
+      const { data: { user } } = await supabase.auth.getUser()
+      const perfil = await get()._resolverPerfil(user)
+      set({ session, ...perfil, cargando: false })
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: e?.message || 'No se pudo verificar el código.' }
     }
   },
 

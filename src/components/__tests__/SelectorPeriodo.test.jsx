@@ -9,19 +9,33 @@ const periodos = [
 ]
 
 describe('SelectorPeriodo', () => {
-  it('agrupa las opciones por año en optgroups', () => {
+  it('muestra los años disponibles como chips y el seleccionado primero resalta el mes', () => {
     render(<SelectorPeriodo periodos={periodos} value="" onChange={vi.fn()} />)
-    const select = screen.getByLabelText('Período')
-    const grupos = select.querySelectorAll('optgroup')
-    expect(grupos).toHaveLength(1)
-    expect(grupos[0].label).toBe('2026')
-    expect(select.querySelectorAll('option')).toHaveLength(4) // "Elegir período…" + 3
+    // Chips de año: 2026 es el único año presente.
+    expect(screen.getByRole('button', { name: 'Año 2026' })).toBeInTheDocument()
+    // Meses y sus períodos se dibujan como tarjetitas, no como <select>.
+    expect(screen.getByText('Junio')).toBeInTheDocument()
+    expect(screen.getByText('Julio')).toBeInTheDocument()
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
   })
 
-  it('llama a onChange con el id del periodo elegido', () => {
+  it('mostrar períodos agrupados por tipo dentro de cada mes', () => {
+    render(<SelectorPeriodo periodos={periodos} value="" onChange={vi.fn()} />)
+    expect(screen.getByText('1ra quincena')).toBeInTheDocument()
+    expect(screen.getByText('2da quincena')).toBeInTheDocument()
+    expect(screen.getByText('Mensual')).toBeInTheDocument()
+  })
+
+  it('llama a onChange con el id del período elegido', () => {
     const onChange = vi.fn()
     render(<SelectorPeriodo periodos={periodos} value="" onChange={onChange} />)
-    fireEvent.change(screen.getByLabelText('Período'), { target: { value: 'p2' } })
+    // "1ra quincena" aparece una sola vez (Julio); el botón padre la contiene.
+    fireEvent.click(screen.getByText('1ra quincena').closest('button'))
     expect(onChange).toHaveBeenCalledWith('p2')
+  })
+
+  it('cuando no hay períodos muestra un aviso y no rompe', () => {
+    render(<SelectorPeriodo periodos={[]} value="" onChange={vi.fn()} />)
+    expect(screen.getByText(/Todavía no hay períodos cargados/)).toBeInTheDocument()
   })
 })

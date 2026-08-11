@@ -12,6 +12,9 @@ export const bonoFromDB = (r) => ({
 
 export const aplicacionFromDB = (r) => ({
   id: r.id, empresaId: r.empresa_id, obraId: r.obra_id, bonoId: r.bono_id, monto: Number(r.monto),
+  // 'fijo' (0062) = el monto se paga tal cual; 'por_horas' (0064) = el monto
+  // es el valor por hora trabajada y se multiplica por las horas del período.
+  tipoMonto: r.tipo_monto ?? 'fijo',
 })
 
 export const excepcionFromDB = (r) => ({
@@ -24,17 +27,27 @@ export const useBonosStore = create((set) => ({
 
   cargarBonos: async (empresaId) => {
     set({ cargando: true, error: null })
-    const [{ data: bonos, error: errBonos }, { data: aplic, error: errAplic }, { data: excep, error: errExcep }] = await Promise.all([
+    const [bonosR, aplicR, excepR] = await Promise.all([
       supabase.from('nom_bonos').select('*').order('nombre'),
       supabase.from('nom_bono_aplicaciones').select('*').eq('empresa_id', empresaId),
       supabase.from('nom_bono_excepciones').select('*').eq('empresa_id', empresaId),
     ])
-    const err = errBonos || errAplic || errExcep
+    const err = bonosR.error || aplicR.error || excepR.error
     if (err) { set({ error: err.message, cargando: false }); return }
+    // Resuelve el nombre de cada persona excepcionada en la carga (antes se
+    // mostraba el UUID en la tabla cuando nom_v_personal todavía no cargaba o
+    // no incluía a la persona — ver crítica Liquidaciones 2026-08-09, item 13).
+    let excepciones = (excepR.data || []).map(excepcionFromDB)
+    if (excepciones.length) {
+      const ids = [...new Set(excepciones.map((e) => e.personalId))]
+      const { data: pers } = await supabase.from('nom_v_personal').select('id, nombre').in('id', ids)
+      const nombrePorId = new Map((pers || []).map((p) => [p.id, p.nombre]))
+      excepciones = excepciones.map((e) => ({ ...e, personalNombre: nombrePorId.get(e.personalId) || null }))
+    }
     set({
-      bonos: (bonos || []).map(bonoFromDB),
-      aplicaciones: (aplic || []).map(aplicacionFromDB),
-      excepciones: (excep || []).map(excepcionFromDB),
+      bonos: (bonosR.data || []).map(bonoFromDB),
+      aplicaciones: (aplicR.data || []).map(aplicacionFromDB),
+      excepciones,
       cargando: false,
     })
   },
@@ -50,10 +63,11 @@ export const useBonosStore = create((set) => ({
   },
 
   // Aplica (o actualiza) un bono a una obra puntual (obraId null = toda la
-  // empresa) con un monto. Upsert por (empresa, obra, bono) — UNIQUE de 0062.
-  aplicarBono: async ({ empresaId, obraId, bonoId, monto }) => {
+  // empresa) con un monto fijo o por hora. Upsert por (empresa, obra, bono) —
+  // UNIQUE de 0062; tipo_monto se copia con el resto (0064).
+  aplicarBono: async ({ empresaId, obraId, bonoId, monto, tipoMonto }) => {
     const { data, error } = await supabase.from('nom_bono_aplicaciones')
-      .upsert({ empresa_id: empresaId, obra_id: obraId ?? null, bono_id: bonoId, monto }, { onConflict: 'empresa_id,obra_id,bono_id' })
+      .upsert({ empresa_id: empresaId, obra_id: obraId ?? null, bono_id: bonoId, monto, tipo_monto: tipoMonto ?? 'fijo' }, { onConflict: 'empresa_id,obra_id,bono_id' })
       .select().single()
     if (error) return { ok: false, error: error.message }
     set((s) => ({

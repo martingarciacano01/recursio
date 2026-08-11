@@ -18,12 +18,22 @@ import { generarZipRecibos, nombreArchivoZip } from '../utils/reciboZip'
 import LiquidacionesIndividuales from '../components/LiquidacionesIndividuales'
 import Toast from '../components/Toast'
 import { useToastStore } from '../store/toastStore'
+import { useEmpresaFeaturesStore, FEATURES } from '../store/empresaFeaturesStore'
 import { useConveniosStore } from '../store/conveniosStore'
 import { calcularFechasPeriodo } from '../utils/calcularFechasPeriodo'
 import { FUERA_DE_CONVENIO, TIPOS_MANUALES, tiposDisponibles, etiquetaTipo, convenioDelPeriodo, conveniosParaPeriodo } from '../utils/tiposPeriodo'
 import BorrarPeriodo from '../components/BorrarPeriodo'
 
-const PESTANAS = ['Períodos generales', 'Liquidaciones individuales']
+const PESTANAS = ['Nueva liquidación', 'Períodos', 'Liquidaciones individuales']
+
+// Filtros por estado sobre el selector de períodos (Item 6, sesión
+// 2026-08-08): el estado es abierto / en_flujo / cerrado (migración 0007).
+const FILTROS_ESTADO = [
+  { id: 'todos', label: 'Todos' },
+  { id: 'abierto', label: 'Abiertos' },
+  { id: 'en_flujo', label: 'En aprobación' },
+  { id: 'cerrado', label: 'Cerrados' },
+]
 
 export default function LiquidacionPage() {
   const [pestana, setPestana] = useState(PESTANAS[0])
@@ -55,20 +65,38 @@ export default function LiquidacionPage() {
   const [errorFlujo, setErrorFlujo] = useState('')
   const [periodos, setPeriodos] = useState([])
   const [periodoSeleccionado, setPeriodoSeleccionado] = useState('')
+  // Item 6 (sesión 2026-08-08): filtro por estado sobre el selector de
+  // períodos — "Todos / Abiertos / En aprobación / Cerrados". Ver
+  // SelectorPeriodo y los chips que arma con los períodos recibidos.
+  const [filtroEstado, setFiltroEstado] = useState('todos')
   const [searchParams] = useSearchParams()
   const [personalPorId, setPersonalPorId] = useState(new Map())
+  // Obra ACTUAL de cada persona (nom_v_personal.obra_id, Presencio). Se usa
+  // como fallback en la grilla/CSV cuando la liquidación es anterior a la
+  // migración 0064 (obra_id NULL en la fila) — el dato de Presencio siempre
+  // está fresco, aunque el histórico preserve el de la fecha de liquidación.
+  const [obraActualPorPersonal, setObraActualPorPersonal] = useState(new Map())
+  // Obras de la empresa (Presencio, vía nom_v_obras) para mostrar la obra de
+  // cada liquidación (Task 3.1, plan convenios-por-obra: obra_id persistida
+  // en nom_liquidaciones por la migración 0064).
+  const [obrasPorId, setObrasPorId] = useState(new Map())
 
-  const [mostrarFormNuevo, setMostrarFormNuevo] = useState(false)
   const [nuevoTipo, setNuevoTipo] = useState('')
   const [nuevoAnio, setNuevoAnio] = useState(new Date().getFullYear())
   const [nuevoMes, setNuevoMes] = useState(new Date().getMonth() + 1)
   const [nuevoConvenioId, setNuevoConvenioId] = useState('')
+  const [nuevoObraId, setNuevoObraId] = useState('')
   const [nuevoDesde, setNuevoDesde] = useState('')
   const [nuevoHasta, setNuevoHasta] = useState('')
   const [creandoPeriodo, setCreandoPeriodo] = useState(false)
   const [errorCrearPeriodo, setErrorCrearPeriodo] = useState('')
   const [confirmarBorrado, setConfirmarBorrado] = useState(false)
   const [cerrando, setCerrando] = useState(false)
+  // Critique 2026-08-09 (P1): cerrar el período y enviar a aprobación son
+  // irreversibles y no mostraban ninguna confirmación. Reutilizan el patrón
+  // de BorrarPeríodo: pedir un segundo click explícito antes de ejecutar.
+  const [confirmarCierre, setConfirmarCierre] = useState(false)
+  const [confirmarFlujo, setConfirmarFlujo] = useState(false)
   const [errorCierre, setErrorCierre] = useState('')
   // Task 4.6: mismo chequeo de escala vencida que ReportesPage, unificado
   // en src/utils/verificarEscala.js — antes este punto de cierre no
@@ -79,6 +107,33 @@ export default function LiquidacionPage() {
   const [liqExpandida, setLiqExpandida] = useState(null)
   const [itemsPorLiq, setItemsPorLiq] = useState({})
   const [busqueda, setBusqueda] = useState('')
+
+  // Feature por empresa (migración 0063, Superadmin → Features): el panel
+  // de ajuste de horas solo se muestra si el cliente lo tiene habilitado.
+  const { tieneFeature, cargarFeatures } = useEmpresaFeaturesStore()
+  useEffect(() => { if (empresaId) cargarFeatures(empresaId) }, [empresaId])
+  const ajusteHorasHabilitado = tieneFeature(empresaId, FEATURES.AJUSTE_HORAS_PERIODO)
+  const bonosHabilitados = tieneFeature(empresaId, FEATURES.BONOS_NO_REMUNERATIVOS)
+
+  // Item 6 (sesión 2026-08-08): columna "Bono especial" en la grilla cuando
+  // la feature de bonos está encendida. Los bonos se persisten como items
+  // tipo 'bono' (código sintético bono_{bonoId}); se agregan por liquidación
+  // en una consulta única y se muestran como columna, sin tener que expandir
+  // cada fila para saber cuánto bono cobra cada persona.
+  const [bonosPorLiq, setBonosPorLiq] = useState({})
+  useEffect(() => {
+    if (!periodoSeleccionado || !bonosHabilitados || liquidaciones.length === 0) return
+    let cancelado = false
+    const ids = liquidaciones.map((l) => l.id)
+    supabase.from('nom_liquidacion_items').select('liquidacion_id, monto').eq('tipo', 'bono').in('liquidacion_id', ids)
+      .then(({ data }) => {
+        if (cancelado) return
+        const porLiq = {}
+        for (const i of data || []) porLiq[i.liquidacion_id] = (porLiq[i.liquidacion_id] ?? 0) + (Number(i.monto) || 0)
+        setBonosPorLiq(porLiq)
+      })
+    return () => { cancelado = true }
+  }, [periodoSeleccionado, bonosHabilitados, liquidaciones])
 
   // Ajuste GLOBAL de horas por persona y período (Task 4.3, plan
   // convenios-por-obra 2026-08-07): un delta único (puede ser negativo)
@@ -120,8 +175,21 @@ export default function LiquidacionPage() {
   const [mostrarErroresZip, setMostrarErroresZip] = useState(false)
 
   const periodoActivo = periodos.find((p) => p.id === periodoSeleccionado)
+  // Selector: solo los períodos que pasan el filtro de estado. El seleccionado
+  // no se esconde aunque no pase el filtro — la grilla sigue mostrando el que
+  // se está mirando.
+  const periodosFiltrados = filtroEstado === 'todos'
+    ? periodos
+    : periodos.filter((p) => p.estado === filtroEstado)
   const fmt = (n) => (Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   const fmtHs = (n) => `${(Number(n) || 0).toLocaleString('es-AR', { maximumFractionDigits: 2 })} h`
+  // Obra de una liquidación: la persistida en la fila (0064) y, si la fila
+  // es anterior a esa migración (obra_id NULL), la obra ACTUAL de la persona
+  // en Presencio como fallback.
+  const nombreObraLiquidacion = (l) => {
+    const obraId = l.obraId || obraActualPorPersonal.get(l.personalId)
+    return obraId ? (obrasPorId.get(obraId) || obraId.slice(0, 8)) : null
+  }
 
   const toggleDetalle = async (liqId) => {
     if (liqExpandida === liqId) { setLiqExpandida(null); return }
@@ -163,9 +231,16 @@ export default function LiquidacionPage() {
     cargarPeriodos(seq)
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reset intencional al cambiar de empresa.
     setPeriodoSeleccionado('')
-    if (!empresaId) { setPeriodos([]); setPersonalPorId(new Map()); return }
-    supabase.from('nom_v_personal').select('id, nombre').eq('empresa_id', empresaId)
-      .then(({ data }) => { if (seqEmpresaRef.current === seq) setPersonalPorId(new Map((data || []).map((p) => [p.id, p.nombre]))) })
+    if (!empresaId) { setPeriodos([]); setPersonalPorId(new Map()); setObraActualPorPersonal(new Map()); setObrasPorId(new Map()); return }
+    supabase.from('nom_v_personal').select('id, nombre, obra_id').eq('empresa_id', empresaId)
+      .then(({ data }) => {
+        if (seqEmpresaRef.current !== seq) return
+        const personas = data || []
+        setPersonalPorId(new Map(personas.map((p) => [p.id, p.nombre])))
+        setObraActualPorPersonal(new Map(personas.filter((p) => p.obra_id).map((p) => [p.id, p.obra_id])))
+      })
+    supabase.from('nom_v_obras').select('id, nombre').eq('empresa_id', empresaId)
+      .then(({ data }) => { if (seqEmpresaRef.current === seq) setObrasPorId(new Map((data || []).map((o) => [o.id, o.nombre]))) })
     cargarFlujos(empresaId)
   }, [empresaId])
 
@@ -178,12 +253,14 @@ export default function LiquidacionPage() {
   useEffect(() => {
     const periodoParam = searchParams.get('periodo')
     if (periodoParam && periodos.some((p) => p.id === periodoParam)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- preselección intencional por query param / periodo navegado.
       setPeriodoSeleccionado(periodoParam)
     }
   }, [searchParams, periodos])
 
   const handleEnviarAFlujo = async () => {
     if (!periodoSeleccionado || !flujoElegido) return
+    setConfirmarFlujo(false)
     setEnviandoFlujo(true); setErrorFlujo('')
     const r = await iniciarFlujo(periodoSeleccionado, flujoElegido)
     setEnviandoFlujo(false)
@@ -248,6 +325,18 @@ export default function LiquidacionPage() {
     if (!periodoActivo) return
     setErrorCierre('')
 
+    if (confirmarCierre) {
+      setConfirmarCierre(false)
+      setCerrando(true)
+      const { error: err } = await supabase.from('nom_periodos').update({ estado: 'cerrado' }).eq('id', periodoActivo.id)
+      setCerrando(false)
+      setAlertaEscala(null)
+      if (err) { setErrorCierre(err.message); return }
+      setPeriodos((prev) => prev.map((p) => (p.id === periodoActivo.id ? { ...p, estado: 'cerrado' } : p)))
+      push('Período cerrado.', 'success')
+      return
+    }
+
     if (!alertaEscala) {
       const personalIds = [...new Set(liquidaciones.map((l) => l.personalId))]
       const { data: legajosPeriodo } = personalIds.length
@@ -258,13 +347,9 @@ export default function LiquidacionPage() {
       if (vencidas) { setAlertaEscala(vencidas); return }
     }
 
-    setCerrando(true)
-    const { error: err } = await supabase.from('nom_periodos').update({ estado: 'cerrado' }).eq('id', periodoActivo.id)
-    setCerrando(false)
-    setAlertaEscala(null)
-    if (err) { setErrorCierre(err.message); return }
-    setPeriodos((prev) => prev.map((p) => (p.id === periodoActivo.id ? { ...p, estado: 'cerrado' } : p)))
-    push('Período cerrado.', 'success')
+    // Segundo click confirma: re-ejecuta este mismo handler con
+    // confirmarCierre === true y ejecuta el cierre.
+    setConfirmarCierre(true)
   }
 
   const handlePeriodoBorrado = (id) => {
@@ -298,6 +383,7 @@ export default function LiquidacionPage() {
     exportarCsv(`liquidacion-${periodoActivo?.tipo}-${periodoActivo?.fecha_desde}.csv`, [
       { titulo: 'Legajo', valor: (l) => l.personalId.slice(0, 8) },
       { titulo: 'Nombre', valor: (l) => personalPorId.get(l.personalId) || l.personalId },
+      { titulo: 'Obra', valor: (l) => nombreObraLiquidacion(l) || '' },
       { titulo: 'Horas', valor: (l) => l.detalleHoras?.horasTrabajadas ?? 0, tipo: 'numero' },
       { titulo: 'HE 50%', valor: (l) => l.detalleHoras?.horasExtra50 ?? 0, tipo: 'numero' },
       { titulo: 'HE 100%', valor: (l) => l.detalleHoras?.horasExtra100 ?? 0, tipo: 'numero' },
@@ -308,6 +394,7 @@ export default function LiquidacionPage() {
       { titulo: 'Aportes', valor: (l) => l.totalAportes, tipo: 'numero' },
       { titulo: 'Contribuciones', valor: (l) => l.totalContribuciones, tipo: 'numero' },
       { titulo: 'Neto', valor: (l) => l.neto, tipo: 'numero' },
+      ...(bonosHabilitados ? [{ titulo: 'Bono especial', valor: (l) => bonosPorLiq[l.id] ?? 0, tipo: 'numero' }] : []),
     ], liquidacionesFiltradas)
     registrarAcceso(supabase, 'export_csv', null, `liquidacion ${periodoActivo?.tipo || ''} ${periodoActivo?.fecha_desde || ''}`).catch(() => {})
   }
@@ -412,6 +499,34 @@ export default function LiquidacionPage() {
     }
   }
 
+  // Feedback 2026-08-09: antes se podía crear un período que ya existía y
+  // recién se notaba mezclado en la lista. Acá se compara la combinación
+  // convenio + tipo + fechas + obra contra los períodos ya creados y se
+  // avisa (bloqueando el alta duplicada) antes del insert.
+  let candidatoFechas = null
+  if (nuevoTipo) {
+    if (ES_MANUAL.has(nuevoTipo)) {
+      if (nuevoDesde && nuevoHasta) candidatoFechas = { fechaDesde: nuevoDesde, fechaHasta: nuevoHasta }
+    } else if (fechasCalculadas) {
+      candidatoFechas = fechasCalculadas
+    }
+  }
+  const convenioIdNuevo = convenioElegido?.id ?? null
+  const duplicado = candidatoFechas
+    ? (periodos || []).find((p) =>
+        String(p.convenio_id ?? '') === String(convenioIdNuevo ?? '') &&
+        String(p.tipo) === String(nuevoTipo) &&
+        String(p.fecha_desde) === String(candidatoFechas.fechaDesde) &&
+        String(p.fecha_hasta) === String(candidatoFechas.fechaHasta) &&
+        (nuevoObraId
+          ? String(p.obra_id ?? '') === String(nuevoObraId)
+          : !p.obra_id)
+      ) || null
+    : null
+  const advertenciaDuplicado = duplicado
+    ? `Ya existe un período ${etiquetaTipo(duplicado.tipo)} del ${duplicado.fecha_desde} al ${duplicado.fecha_hasta}${duplicado.obra_id ? ` para la obra ${obrasPorId.get(duplicado.obra_id) || duplicado.obra_id}` : ' para toda la empresa'}, ${duplicado.convenio_id ? 'para este convenio' : 'fuera de convenio'}. Revisalo en la pestaña "Períodos".`
+    : ''
+
   const handleCrearPeriodo = async () => {
     setErrorCrearPeriodo('')
     if (!empresaId) {
@@ -442,24 +557,77 @@ export default function LiquidacionPage() {
       fecha_desde: fechaDesde,
       fecha_hasta: fechaHasta,
       estado: 'abierto',
+      obra_id: nuevoObraId || null,
       ...(convenioElegido && { convenio_id: convenioElegido.id }),
     }).select().single()
     setCreandoPeriodo(false)
     if (error) { setErrorCrearPeriodo(error.message); return }
     setPeriodos((prev) => [data, ...prev])
     setPeriodoSeleccionado(data.id)
-    setMostrarFormNuevo(false)
     setNuevoDesde('')
     setNuevoHasta('')
     setNuevoConvenioId('')
+    setNuevoObraId('')
     setNuevoTipo('')
   }
 
   return (
     <div className="page">
-      <div className="page-header">
-        <h1 className="page-title">Liquidaciones</h1>
-        <p className="page-subtitle">Calcular y revisar liquidaciones por período</p>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1 className="page-title">Liquidaciones</h1>
+          <p className="page-subtitle">Calcular y revisar liquidaciones por período</p>
+        </div>
+        {/* Acciones principales siempre a la derecha, no abajo perdidas: Nuevo
+            período abre la vista de alta; Calcular/CSV/recibos/Cerrar/Borrar
+            operan sobre el período que se está mirando en la vista Períodos. */}
+        {empresaActiva && (
+          <div className="acciones" style={{ flexWrap: 'wrap' }}>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={() => setPestana('Nueva liquidación')}
+              disabled={pestana === 'Nueva liquidación'}
+            >
+              Nuevo período
+            </button>
+            {pestana === 'Períodos' && (              <>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={handleCalcular}
+                  disabled={!periodoSeleccionado || calculando || periodoActivo?.estado === 'cerrado'}
+                  title={periodoActivo?.estado === 'cerrado' ? 'período cerrado: no se puede recalcular' : undefined}
+                >
+                  {calculando ? 'Calculando…' : 'Calcular'}
+                </button>
+                {puedeExportar && (
+                  <button className="btn btn-ghost btn-sm" onClick={descargarCsv} disabled={liquidacionesFiltradas.length === 0}>
+                    Descargar CSV
+                  </button>
+                )}
+                <button className="btn btn-ghost btn-sm" onClick={handleDescargarZip} disabled={!puedeEmitirRecibos || seleccionadas.size === 0 || generandoZip}>
+                  {generandoZip
+                    ? `Generando… (${progresoZip?.procesados ?? 0} de ${progresoZip?.total ?? 0})`
+                    : `Descargar recibos (${seleccionadas.size})`}
+                </button>
+                {periodoActivo && periodoActivo.estado !== 'cerrado' && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={handleCerrarPeriodo}
+                    disabled={cerrando}
+                    aria-label="Cerrar período"
+                  >
+                    <Lock size={14} /> {cerrando ? 'Cerrando…' : alertaEscala ? 'Cerrar de todos modos' : 'Cerrar período'}
+                  </button>
+                )}
+                {periodoActivo && (
+                  <button className="btn btn-danger btn-sm" onClick={() => setConfirmarBorrado(true)}>
+                    <Trash2 size={14} /> Borrar período
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {!empresaActiva && (
@@ -496,86 +664,16 @@ export default function LiquidacionPage() {
         />
       )}
 
-      {pestana === 'Períodos generales' && (
-      <>
-      <div className="card card-compacta" style={{ marginBottom: '1rem', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-        <SelectorPeriodo periodos={periodos} value={periodoSeleccionado} onChange={(v) => { setPeriodoSeleccionado(v); setAlertaEscala(null); setErrorCierre('') }} disabled={calculando} />
-        <button
-          className="btn btn-primary btn-sm"
-          onClick={handleCalcular}
-          disabled={!periodoSeleccionado || calculando || periodoActivo?.estado === 'cerrado'}
-          title={periodoActivo?.estado === 'cerrado' ? 'período cerrado: no se puede recalcular' : undefined}
-        >
-          {calculando ? 'Calculando…' : 'Calcular'}
-        </button>
-        <button className="btn btn-ghost btn-sm" onClick={() => setMostrarFormNuevo((v) => !v)} disabled={!empresaId}>
-          {mostrarFormNuevo ? 'Cancelar' : 'Nuevo período'}
-        </button>
-        {puedeExportar && (
-          <button className="btn btn-ghost btn-sm" onClick={descargarCsv} disabled={liquidacionesFiltradas.length === 0}>
-            Descargar CSV
-          </button>
-        )}
-        <button className="btn btn-ghost btn-sm" onClick={handleDescargarZip} disabled={!puedeEmitirRecibos || seleccionadas.size === 0 || generandoZip}>
-          {generandoZip
-            ? `Generando… (${progresoZip?.procesados ?? 0} de ${progresoZip?.total ?? 0})`
-            : `Descargar recibos (${seleccionadas.size})`}
-        </button>
+      {empresaActiva && pestana === 'Nueva liquidación' && (
+        <div className="card max-900">
+          <h3 style={{ fontSize: '1rem', marginBottom: 4 }}>Nueva liquidación</h3>
+          <p className="texto-secundario" style={{ fontSize: '0.85rem', marginBottom: 14 }}>
+            Elegí el convenio, la obra (opcional) y el período a liquidar. Se crea un período abierto; después
+            entrá a "Períodos" para calcularlo.
+          </p>
 
-        {/* Cerrar y borrar solo aplican al período que se está mirando */}
-        {periodoActivo && periodoActivo.estado !== 'cerrado' && (
-          <button className="btn btn-ghost btn-sm" onClick={handleCerrarPeriodo} disabled={cerrando}>
-            <Lock size={14} /> {cerrando ? 'Cerrando…' : alertaEscala ? 'Cerrar de todos modos' : 'Cerrar período'}
-          </button>
-        )}
-        {periodoActivo?.estado === 'cerrado' && (
-          <span className="badge badge-success"><Lock size={12} /> período cerrado</span>
-        )}
-        {errorCierre && <span style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{errorCierre}</span>}
-        {alertaEscala && (
-          <div className="card card-compacta" style={{ background: 'rgba(200,168,75,0.08)', border: '1px solid var(--brand-secondary)', width: '100%' }}>
-            La escala de estas categorías no se actualizó hace más de 90 días respecto al cierre del período: {alertaEscala.join(', ')}.
-            Verificá si corresponde cargar una paritaria nueva antes de cerrar.
-          </div>
-        )}
-        {periodoActivo?.estado === 'abierto' && flujos.length > 0 && (
-          <>
-            <select className="input" style={{ maxWidth: 220 }} value={flujoElegido} onChange={(e) => setFlujoElegido(e.target.value)}>
-              <option value="">Elegir flujo…</option>
-              {flujos.map((f) => <option key={f.id} value={f.id}>{f.nombre}</option>)}
-            </select>
-            <button className="btn btn-ghost btn-sm" onClick={handleEnviarAFlujo} disabled={!flujoElegido || enviandoFlujo}>
-              {enviandoFlujo ? 'Enviando…' : 'Enviar a aprobación'}
-            </button>
-          </>
-        )}
-        {errorFlujo && <span style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{errorFlujo}</span>}
-      </div>
-
-      {/* Zona de riesgo, separada del resto de acciones para que no se toque
-          por error junto con Calcular/Cerrar (Task 4.7). */}
-      {periodoActivo && (
-        <div
-          aria-label="Zona de riesgo"
-          style={{
-            marginBottom: '1rem', borderLeft: '3px solid var(--danger)',
-            paddingLeft: 12, display: 'flex', justifyContent: 'flex-end',
-          }}
-        >
-          <button className="btn btn-danger btn-sm" onClick={() => setConfirmarBorrado(true)}>
-            <Trash2 size={14} /> Borrar período
-          </button>
-        </div>
-      )}
-
-      {mostrarFormNuevo && (
-        <div className="card max-900" style={{ marginBottom: '1rem' }}>
-          <h3 style={{ fontSize: '1rem', marginBottom: 12 }}>Nuevo período</h3>
-
-          {/* Paso 1: convenio. Es lo que define si se liquida por quincena o
-              por mes, así que va primero y filtra el resto del formulario. */}
-          <div className="form-grid" style={{ marginBottom: 12 }}>
-            <div className="input-group">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end', marginBottom: 12 }}>
+            <div className="input-group" style={{ minWidth: 200, flex: '1 1 200px' }}>
               <label className="input-label" htmlFor="np-convenio">Convenio</label>
               <select id="np-convenio" className="input" value={nuevoConvenioId} onChange={(e) => elegirConvenio(e.target.value)}>
                 <option value="">Elegir convenio…</option>
@@ -586,7 +684,7 @@ export default function LiquidacionPage() {
               </select>
             </div>
 
-            <div className="input-group">
+            <div className="input-group" style={{ minWidth: 190, flex: '1 1 190px' }}>
               <label className="input-label" htmlFor="np-tipo">Tipo de período</label>
               <select
                 id="np-tipo"
@@ -602,11 +700,11 @@ export default function LiquidacionPage() {
 
             {nuevoTipo && !ES_MANUAL.has(nuevoTipo) && (
               <>
-                <div className="input-group">
+                <div className="input-group" style={{ minWidth: 90 }}>
                   <label className="input-label" htmlFor="np-anio">Año</label>
                   <input id="np-anio" className="input" type="number" value={nuevoAnio} onChange={(e) => setNuevoAnio(e.target.value)} />
                 </div>
-                <div className="input-group">
+                <div className="input-group" style={{ minWidth: 140, flex: '1 1 140px' }}>
                   <label className="input-label" htmlFor="np-mes">Mes</label>
                   <select id="np-mes" className="input" value={nuevoMes} onChange={(e) => setNuevoMes(e.target.value)}>
                     {['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'].map((m, i) => (
@@ -619,22 +717,32 @@ export default function LiquidacionPage() {
 
             {nuevoTipo && ES_MANUAL.has(nuevoTipo) && (
               <>
-                <div className="input-group">
+                <div className="input-group" style={{ minWidth: 150 }}>
                   <label className="input-label" htmlFor="np-desde">Desde</label>
                   <input id="np-desde" type="date" className="input" value={nuevoDesde} onChange={(e) => setNuevoDesde(e.target.value)} />
                 </div>
-                <div className="input-group">
+                <div className="input-group" style={{ minWidth: 150 }}>
                   <label className="input-label" htmlFor="np-hasta">Hasta</label>
                   <input id="np-hasta" type="date" className="input" value={nuevoHasta} onChange={(e) => setNuevoHasta(e.target.value)} />
                 </div>
               </>
             )}
+
+            {obrasPorId.size > 0 && (
+              <div className="input-group" style={{ minWidth: 180, flex: '1 1 180px' }}>
+                <label className="input-label" htmlFor="np-obra">Obra / sitio (opcional)</label>
+                <select id="np-obra" className="input" value={nuevoObraId} onChange={(e) => { setNuevoObraId(e.target.value); setErrorCrearPeriodo('') }}>
+                  <option value="">Toda la empresa</option>
+                  {[...obrasPorId.entries()].map(([id, nombre]) => (
+                    <option key={id} value={id}>{nombre}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
-          {/* Fila de acciones propia: el botón no se corre de lugar cuando
-              aparecen o desaparecen campos según el tipo elegido. */}
           <div className="acciones" style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-            <button className="btn btn-primary btn-sm" onClick={handleCrearPeriodo} disabled={creandoPeriodo || !nuevoConvenioId || !nuevoTipo}>
+            <button className="btn btn-primary btn-sm" onClick={handleCrearPeriodo} disabled={creandoPeriodo || !nuevoConvenioId || !nuevoTipo || !!duplicado}>
               {creandoPeriodo ? 'Creando…' : 'Crear período'}
             </button>
             {fechasCalculadas && (
@@ -642,8 +750,104 @@ export default function LiquidacionPage() {
                 Del {fechasCalculadas.fechaDesde} al {fechasCalculadas.fechaHasta}
               </span>
             )}
+            {advertenciaDuplicado && (
+              <span role="alert" style={{ color: 'var(--warning, #eab308)', fontSize: '0.85rem', fontWeight: 600 }}>
+                ⚠ {advertenciaDuplicado}
+              </span>
+            )}
             {errorCrearPeriodo && <span style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{errorCrearPeriodo}</span>}
           </div>
+        </div>
+      )}
+
+      {pestana === 'Períodos' && (
+      <>
+      {/* Tarjeta 1 — Período: selector + filtro de estado.
+          La acción principal (Calcular) vive arriba a la derecha, junto al
+          resto de acciones del período. */}
+      <div className="card card-compacta" style={{ marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+          <strong style={{ fontSize: '0.9rem' }}>Período</strong>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }} role="group" aria-label="Filtrar períodos por estado">
+            {FILTROS_ESTADO.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                className={`btn-chip${filtroEstado === f.id ? ' chip-activo' : ''}`}
+                aria-pressed={filtroEstado === f.id}
+                onClick={() => setFiltroEstado(f.id)}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <SelectorPeriodo periodos={periodosFiltrados} value={periodoSeleccionado} onChange={(v) => { setPeriodoSeleccionado(v); setAlertaEscala(null); setErrorCierre('') }} disabled={calculando} obrasPorId={obrasPorId} />
+
+        {periodoActivo?.estado === 'cerrado' && (
+          <div style={{ marginTop: 10 }}>
+            <span className="badge badge-success"><Lock size={12} /> período cerrado</span>
+          </div>
+        )}
+        {errorCierre && <span style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{errorCierre}</span>}
+      </div>
+
+      {/* Acciones del período que necesitan más lugar que el header: enviar a
+          aprobación (flujo) y los paneles de confirmación. */}
+      {periodoActivo && (
+        <div className="card card-compacta" style={{ marginBottom: '1rem', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          {periodoActivo?.estado === 'abierto' && flujos.length > 0 && (
+            <>
+              <select className="input" style={{ maxWidth: 220 }} value={flujoElegido} onChange={(e) => { setFlujoElegido(e.target.value); setConfirmarFlujo(false) }}>
+                <option value="">Elegir flujo…</option>
+                {flujos.map((f) => <option key={f.id} value={f.id}>{f.nombre}</option>)}
+              </select>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setConfirmarFlujo(true)}
+                disabled={!flujoElegido || enviandoFlujo}
+              >
+                {enviandoFlujo ? 'Enviando…' : 'Enviar a aprobación'}
+              </button>
+            </>
+          )}
+          {errorFlujo && <span style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{errorFlujo}</span>}
+        </div>
+      )}
+
+      {confirmarCierre && periodoActivo && periodoActivo.estado !== 'cerrado' && (
+        <div className="card card-compacta" style={{ marginBottom: '1rem', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', background: 'var(--warning-bg, rgba(234,179,8,0.12))', border: '1px solid var(--warning, #eab308)' }}>
+          <strong style={{ fontSize: '0.85rem' }}>
+            ¿Cerrar el período? {liquidaciones.length > 0 && `Quedan ${liquidaciones.length} liquidación(es) en solo lectura y no se podrá recalcular.`}
+          </strong>
+          <button className="btn btn-primary btn-sm" onClick={handleCerrarPeriodo} disabled={cerrando}>
+            {cerrando ? 'Cerrando…' : 'Sí, cerrar período'}
+          </button>
+          <button className="btn btn-ghost btn-sm" onClick={() => setConfirmarCierre(false)} disabled={cerrando}>
+            Cancelar
+          </button>
+        </div>
+      )}
+
+      {confirmarFlujo && periodoActivo?.estado === 'abierto' && (
+        <div className="card card-compacta" style={{ marginBottom: '1rem', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', background: 'var(--warning-bg, rgba(234,179,8,0.12))', border: '1px solid var(--warning, #eab308)' }}>
+          <strong style={{ fontSize: '0.85rem' }}>
+            ¿Enviar a aprobación? Se envía el período al flujo "{flujos.find((f) => f.id === flujoElegido)?.nombre || ''}" y deja de poder editarse desde acá.
+          </strong>
+          <button className="btn btn-primary btn-sm" onClick={handleEnviarAFlujo} disabled={enviandoFlujo}>
+            {enviandoFlujo ? 'Enviando…' : 'Sí, enviar a aprobación'}
+          </button>
+          <button className="btn btn-ghost btn-sm" onClick={() => setConfirmarFlujo(false)} disabled={enviandoFlujo}>
+            Cancelar
+          </button>
+        </div>
+      )}
+
+      {alertaEscala && (
+        <div className="card card-compacta" style={{ background: 'rgba(200,168,75,0.08)', border: '1px solid var(--brand-secondary)', marginBottom: '1rem' }}>
+          La escala de estas categorías no se actualizó hace más de 90 días respecto al cierre del período: {alertaEscala.join(', ')}.
+          Verificá si corresponde cargar una paritaria nueva antes de cerrar.
         </div>
       )}
 
@@ -664,13 +868,19 @@ export default function LiquidacionPage() {
         </div>
       )}
 
-      {(omitidos.length > 0 || advertencias.length > 0) && (
+      {(omitidos.length > 0 || advertencias.length > 0 || sinHoras.length > 0) && (
         <div className="card" style={{ marginBottom: '1rem', background: 'var(--warning-bg, rgba(234,179,8,0.12))', border: '1px solid var(--warning, #eab308)' }}>
           <div
             style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
             onClick={() => setMostrarAvisos((v) => !v)}
           >
-            <strong>⚠ {omitidos.length} persona(s) no liquidada(s) / {advertencias.length} advertencia(s)</strong>
+            <strong>
+              {omitidos.length > 0 && `${omitidos.length} persona(s) no liquidada(s)`}
+              {omitidos.length > 0 && advertencias.length > 0 && ' · '}
+              {advertencias.length > 0 && `${advertencias.length} advertencia(s)`}
+              {(omitidos.length > 0 || advertencias.length > 0) && sinHoras.length > 0 && ' · '}
+              {sinHoras.length > 0 && `${sinHoras.length} sin horas`}
+            </strong>
             <span style={{ marginLeft: 'auto' }}>{mostrarAvisos ? '▾' : '▸'}</span>
           </div>
           {mostrarAvisos && (
@@ -681,20 +891,19 @@ export default function LiquidacionPage() {
               {advertencias.map((a, i) => (
                 <div key={`${a.personal_id}-${i}`}>• {personalPorId.get(a.personal_id) || a.personal_id}: {a.mensaje}</div>
               ))}
+              {sinHoras.length > 0 && (
+                <>
+                  <div style={{ marginTop: 6 }}>
+                    <strong>Personal sin horas en el período</strong>
+                  </div>
+                  <p className="texto-secundario" style={{ fontSize: '0.85rem', marginTop: 4 }}>
+                    No tienen fichajes ni ausencias aprobadas cargadas en este período — no se liquidaron. Revisar si falta cargar asistencia en Presencio o si corresponde una licencia.
+                  </p>
+                  {sinHoras.map((p) => <div key={p.personal_id}>• {p.nombre}</div>)}
+                </>
+              )}
             </div>
           )}
-        </div>
-      )}
-
-      {sinHoras.length > 0 && (
-        <div className="card" style={{ marginBottom: '1rem', background: 'var(--warning-bg, rgba(234,179,8,0.12))', border: '1px solid var(--warning, #eab308)' }}>
-          <strong>👤 Personal sin horas en el período ({sinHoras.length})</strong>
-          <p className="texto-secundario" style={{ fontSize: '0.85rem', marginTop: 4 }}>
-            No tienen fichajes ni ausencias aprobadas cargadas en este período — no se liquidaron. Revisar si falta cargar asistencia en Presencio o si corresponde una licencia.
-          </p>
-          <div style={{ marginTop: 8, fontSize: '0.85rem' }}>
-            {sinHoras.map((p) => <div key={p.personal_id}>• {p.nombre}</div>)}
-          </div>
         </div>
       )}
 
@@ -702,15 +911,11 @@ export default function LiquidacionPage() {
         <div className="card" style={{ marginBottom: '1rem', display: 'flex', gap: 16, alignItems: 'baseline', flexWrap: 'wrap' }}>
           <strong>Período calculado:</strong>
           <span>{etiquetaPeriodo(periodoActivo)}</span>
+          {periodoActivo.obra_id && (
+            <span className="badge badge-neutral">obra: {obrasPorId.get(periodoActivo.obra_id) || periodoActivo.obra_id.slice(0, 8)}</span>
+          )}
           <span className="badge badge-neutral">{periodoActivo.estado}</span>
           <span style={{ opacity: 0.7, fontSize: '0.85rem' }}>{liquidaciones.length} liquidación(es)</span>
-        </div>
-      )}
-
-      {liquidaciones.length > 0 && (
-        <div className="card" style={{ marginBottom: '1rem' }}>
-          <input className="input" placeholder="Buscar por nombre…" value={busqueda}
-            onChange={(e) => setBusqueda(e.target.value)} style={{ maxWidth: 260 }} />
         </div>
       )}
 
@@ -728,6 +933,8 @@ export default function LiquidacionPage() {
 
       {!calculando && liquidaciones.length > 0 && (
         <div className="card table-scroll">
+          <input className="input" placeholder="Buscar por nombre…" aria-label="Buscar por nombre" value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)} style={{ maxWidth: 260, marginBottom: 12 }} />
           <table className="table">
             <thead>
               <tr>
@@ -746,9 +953,11 @@ export default function LiquidacionPage() {
                     disabled={seleccionablesFiltradas.length === 0}
                   />
                 </th>
-                <th>Persona</th><th>Horas</th><th>HE 50%</th><th>HE 100%</th>
+                <th>Persona</th><th>Obra</th>
+                <th>Horas</th><th>HE 50%</th><th>HE 100%</th>
                 <th>Tardanzas</th><th>Faltas inj.</th><th>Faltas just.</th>
-                <th>Bruto</th><th>Aportes</th><th>Contribuciones</th><th>Neto</th><th>Estado</th><th></th>
+                <th>Bruto</th><th>Aportes</th><th>Contribuciones</th><th>Neto</th>
+                {bonosHabilitados && <th>Bono especial</th>}<th>Estado</th><th></th>
               </tr>
             </thead>
             <tbody>
@@ -783,6 +992,7 @@ export default function LiquidacionPage() {
                         />
                       </td>
                       <td>{personalPorId.get(l.personalId) || l.personalId}</td>
+                      <td>{nombreObraLiquidacion(l) || '—'}</td>
                       <td>{fmtHs(dh.horasTrabajadas)}</td>
                       <td>{fmtHs(dh.horasExtra50)}</td>
                       <td>{fmtHs(dh.horasExtra100)}</td>
@@ -793,6 +1003,7 @@ export default function LiquidacionPage() {
                       <td>${fmt(l.totalAportes)}</td>
                       <td>${fmt(l.totalContribuciones)}</td>
                       <td><strong>${fmt(l.neto)}</strong></td>
+                      {bonosHabilitados && <td style={{ color: 'var(--text-secondary)' }}>{bonosPorLiq[l.id] ? `+$${fmt(bonosPorLiq[l.id])}` : '—'}</td>}
                       <td>
                         <span className="badge badge-neutral">{l.estado}</span>
                         {l.numeroRecibo && <span className="badge badge-neutral" style={{ marginLeft: 4 }}>recibo #{l.numeroRecibo}{l.version > 1 ? ` v${l.version}` : ''}</span>}
@@ -802,36 +1013,48 @@ export default function LiquidacionPage() {
                     </tr>
                     {liqExpandida === l.id && (
                       <tr id={`liq-detalle-${l.id}`}>
-                        <td colSpan={14} style={{ background: 'var(--bg-subtle, rgba(255,255,255,0.03))' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }} onClick={(e) => e.stopPropagation()}>
-                            <label className="input-label" htmlFor={`ajuste-hs-${l.personalId}`} style={{ margin: 0 }}>
-                              Ajuste hs. (global, este período)
-                            </label>
-                            <input
-                              id={`ajuste-hs-${l.personalId}`}
-                              className="input input-sm"
-                              type="number"
-                              step="0.5"
-                              style={{ width: 90 }}
-                              placeholder="0"
-                              value={ajustesHorasForm[l.personalId] ?? String(ajustesHoras[l.personalId] ?? 0)}
-                              onChange={(e) => setAjustesHorasForm((f) => ({ ...f, [l.personalId]: e.target.value }))}
-                            />
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => guardarAjusteHoras(l.personalId)}
-                              disabled={guardandoAjuste === l.personalId}
-                            >
-                              {guardandoAjuste === l.personalId ? 'Guardando…' : 'Guardar ajuste'}
-                            </button>
-                            {ajustesHoras[l.personalId] ? (
+                        <td colSpan={bonosHabilitados ? 16 : 15} style={{ background: 'var(--bg-overlay)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 8, flexWrap: 'wrap' }} onClick={(e) => e.stopPropagation()}>
+                            <span className="texto-muted" style={{ fontSize: '0.8rem' }}>
+                              Obra: <strong>{nombreObraLiquidacion(l) || '—'}</strong>
+                            </span>
+                            {dh.topeHorasDiarias != null && (
                               <span className="texto-muted" style={{ fontSize: '0.8rem' }}>
-                                aplicado: {ajustesHoras[l.personalId] > 0 ? '+' : ''}{ajustesHoras[l.personalId]} h (recalculá el período para verlo reflejado)
+                                Tope horas/día: <strong>{dh.topeHorasDiarias} h</strong>
                               </span>
-                            ) : null}
+                            )}
                           </div>
-                          {errorAjuste && <p style={{ color: 'var(--danger)', fontSize: '0.85rem', marginBottom: 8 }}>{errorAjuste}</p>}
+                          {ajusteHorasHabilitado && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }} onClick={(e) => e.stopPropagation()}>
+                              <label className="input-label" htmlFor={`ajuste-hs-${l.personalId}`} style={{ margin: 0 }}>
+                                Ajuste hs. (global, este período)
+                              </label>
+                              <input
+                                id={`ajuste-hs-${l.personalId}`}
+                                className="input input-sm"
+                                type="number"
+                                step="0.5"
+                                style={{ width: 90 }}
+                                placeholder="0"
+                                value={ajustesHorasForm[l.personalId] ?? String(ajustesHoras[l.personalId] ?? 0)}
+                                onChange={(e) => setAjustesHorasForm((f) => ({ ...f, [l.personalId]: e.target.value }))}
+                              />
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => guardarAjusteHoras(l.personalId)}
+                                disabled={guardandoAjuste === l.personalId}
+                              >
+                                {guardandoAjuste === l.personalId ? 'Guardando…' : 'Guardar ajuste'}
+                              </button>
+                              {ajustesHoras[l.personalId] ? (
+                                <span className="texto-muted" style={{ fontSize: '0.8rem' }}>
+                                  aplicado: {ajustesHoras[l.personalId] > 0 ? '+' : ''}{ajustesHoras[l.personalId]} h (recalculá el período para verlo reflejado)
+                                </span>
+                              ) : null}
+                            </div>
+                          )}
+                          {ajusteHorasHabilitado && errorAjuste && <p style={{ color: 'var(--danger)', fontSize: '0.85rem', marginBottom: 8 }}>{errorAjuste}</p>}
                           {items.length > 0 && !l.anulado && puedeEmitirRecibos && (
                             <button className="btn btn-primary btn-sm" style={{ marginBottom: 8 }}
                               onClick={(e) => { e.stopPropagation(); handleEmitirRecibo(l) }} disabled={emitiendoRecibo === l.id}>

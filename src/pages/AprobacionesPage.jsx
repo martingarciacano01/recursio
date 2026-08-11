@@ -127,14 +127,14 @@ export default function AprobacionesPage() {
               <Link to={`/liquidacion?periodo=${i.periodoId}`}>Ver detalle</Link>
             </div>
 
-            <div style={{ display: 'flex', gap: 16, marginBottom: 10, flexWrap: 'wrap', color: 'var(--texto-secundario)' }}>
+            <div style={{ display: 'flex', gap: 16, marginBottom: 10, flexWrap: 'wrap', color: 'var(--text-secondary)' }}>
               <span>Bruto total: ${fmt(agregados.bruto)}</span>
               <span>Descuentos: ${fmt(agregados.totalAportes)}</span>
               <span>Neto total: ${fmt(agregados.neto)}</span>
               <span>{agregados.cantidad} recibos</span>
             </div>
 
-            <textarea className="input" placeholder="comentario (opcional)" style={{ width: '100%', marginBottom: 8 }}
+            <textarea className="input" placeholder="comentario (opcional)" aria-label="Comentario del período" style={{ width: '100%', marginBottom: 8 }}
               value={comentarios[i.id] || ''} onChange={(e) => setComentarios((c) => ({ ...c, [i.id]: e.target.value }))} />
             <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
               <button className="btn btn-primary btn-sm" disabled={procesando} onClick={() => accionar([i.id], 'aprobado')}>Aprobar período</button>
@@ -152,7 +152,7 @@ export default function AprobacionesPage() {
                 </div>
                 {rechazando === `lote-${i.periodoId}` && (
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-                    <textarea className="input" placeholder="motivo del rechazo" style={{ flex: '1 1 220px' }} autoFocus
+                    <textarea className="input" placeholder="motivo del rechazo" aria-label="Motivo del rechazo" style={{ flex: '1 1 220px' }} autoFocus
                       value={motivoLote} onChange={(e) => setMotivoPorRecibo((m) => ({ ...m, [`lote-${i.periodoId}`]: e.target.value }))} />
                     <button className="btn btn-ghost btn-sm" disabled={procesando || !motivoLote.trim()}
                       onClick={() => revisarRecibos(i.periodoId, seleccionRecibos, 'rechazado', motivoLote)}>Confirmar rechazo</button>
@@ -187,7 +187,7 @@ export default function AprobacionesPage() {
                         <td>
                           {rechazando === r.id ? (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 160 }}>
-                              <textarea className="input" placeholder="motivo del rechazo" autoFocus
+                              <textarea className="input" placeholder="motivo del rechazo" aria-label="Motivo del rechazo" autoFocus
                                 value={motivo} onChange={(e) => setMotivoPorRecibo((m) => ({ ...m, [r.id]: e.target.value }))} />
                               <div style={{ display: 'flex', gap: 6 }}>
                                 <button className="btn btn-ghost btn-sm" disabled={procesando || !motivo.trim()}

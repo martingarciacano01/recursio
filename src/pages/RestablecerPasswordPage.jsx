@@ -39,6 +39,7 @@ export default function RestablecerPasswordPage() {
         </div>
 
         <div className="card" style={{ borderColor: 'var(--border-strong)' }}>
+          <h1 className="sr-only">Restablecer contraseña</h1>
           <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', marginBottom: '1.5rem' }}>Restablecer contraseña</h2>
 
           {listo ? (

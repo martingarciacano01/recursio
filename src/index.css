@@ -71,6 +71,16 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { font-size: 16px; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+/* Visible solo para lectores de pantalla (heading oculto de páginas). */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 body {
   font-family: var(--font-body);
   background: var(--bg-base);
@@ -208,6 +218,27 @@ h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 700; line-height
 .badge-info { background: var(--info-bg); color: var(--info); }
 .badge-neutral { background: var(--bg-overlay); color: var(--text-secondary); }
 
+/* Chips de filtro/año (filtros de estado, selector de año, selector de
+   período). El activo se marca con el acento de marca en vez de solo
+   aria-pressed — si el estado visual depende del tema, se define acá y no
+   inline (estado del chip vs estado del badge, ver critique 2026-08-09). */
+.btn-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 12px; border-radius: 99px;
+  border: 1px solid var(--border);
+  background: transparent; color: var(--text-secondary);
+  font-family: var(--font-body); font-size: 0.78rem; font-weight: 500;
+  cursor: pointer; white-space: nowrap;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.btn-chip:hover { border-color: var(--acento-borde); color: var(--text-primary); }
+.btn-chip.chip-activo {
+  background: var(--acento-suave);
+  border-color: var(--acento-borde);
+  color: var(--brand-secondary);
+  font-weight: 600;
+}
+
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   padding: 0.55rem 1.2rem; border-radius: var(--radius);
@@ -253,6 +284,8 @@ select.input { cursor: pointer; }
 /* Un input suelto no debería ocupar el ancho de un monitor de 27" */
 .input-corto { max-width: 220px; }
 .input-medio { max-width: 340px; }
+/* Input compacto para grillas de configuración (jornada/tope por obra, etc.) */
+.input-sm { padding: 0.35rem 0.6rem; font-size: 0.82rem; border-radius: var(--radius-sm); }
 
 .form-grid {
   display: grid;

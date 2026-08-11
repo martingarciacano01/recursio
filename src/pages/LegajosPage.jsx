@@ -14,6 +14,7 @@ export default function LegajosPage() {
   // mezclado, no solo el de la empresa que eligió en /superadmin.
   const empresaActiva = empresa || empresaVista
   const [filas, setFilas] = useState([])
+  const [obrasPorId, setObrasPorId] = useState(new Map())
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState('')
   const [total, setTotal] = useState(0)
@@ -41,7 +42,7 @@ export default function LegajosPage() {
       // aplica después, en memoria, solo sobre lo ya cargado en `filas`.
       let qPersonal = supabase
         .from('nom_v_personal')
-        .select('id, nombre, dni, puesto, estado', { count: 'estimated' })
+        .select('id, nombre, dni, puesto, estado, obra_id', { count: 'estimated' })
         .order('nombre')
         .range(rango[0], rango[1])
       // nom_legajo NO se pagina: sigue trayendo TODOS los legajos de la
@@ -64,11 +65,20 @@ export default function LegajosPage() {
       }]))
       const nuevasFilas = (personal || []).map((p) => ({ ...p, legajo: porPersonal.get(p.id) || null }))
       setFilas((prev) => (rango[0] === 0 ? nuevasFilas : [...prev, ...nuevasFilas]))
+      supabase.from('nom_v_obras').select('id, nombre').eq('empresa_id', empresaActiva.id).order('nombre')
+        .then(({ data: obras }) => { if (!cancelado) setObrasPorId(new Map((obras || []).map((o) => [o.id, o.nombre]))) })
       setCargando(false)
     }
     cargar()
     return () => { cancelado = true }
   }, [empresaActiva?.id, rango[1]])
+
+  // El filtro de estado y la búsqueda se aplican en memoria sobre lo ya
+  // paginado (`filas`), no sobre el total de la empresa. Si hay más páginas
+  // sin cargar, el resultado puede estar incompleto: se comunica en la UI.
+  const visibles = filtrarLegajos(filas, busqueda, filtroEstado)
+  const filtroActivo = busqueda.trim() !== '' || filtroEstado !== 'activo'
+  const puedeHaberMasCoincidencias = filtroActivo && hayMasPaginas(total)
 
   return (
     <div className="page">
@@ -104,18 +114,26 @@ export default function LegajosPage() {
               <option value="todos">Todos</option>
             </select>
           </div>
+          {puedeHaberMasCoincidencias && (
+            <p className="texto-secundario" style={{ fontSize: '0.8rem', marginBottom: '0.5rem' }}>
+              El filtro se aplica sobre lo ya cargado (resultados en {filas.length} de {total} personas) — usá "Cargar más" para incluir el resto.
+            </p>
+          )}
           <table className="table">
             <thead>
-              <tr><th>Nombre</th><th>DNI</th><th>Puesto</th><th>Legajo</th><th aria-label="Acciones"></th></tr>
+              <tr><th>Nombre</th><th>DNI</th><th>Puesto</th><th>Obra</th><th>Legajo</th><th aria-label="Acciones"></th></tr>
             </thead>
             <tbody>
-              {cargando && <tr><td colSpan={5}>Cargando…</td></tr>}
-              {!cargando && filtrarLegajos(filas, busqueda, filtroEstado).length === 0 && <tr><td colSpan={5}>No hay personal para mostrar.</td></tr>}
-              {filtrarLegajos(filas, busqueda, filtroEstado).map((f) => (
+              {cargando && <tr><td colSpan={6}>Cargando…</td></tr>}
+              {!cargando && visibles.length === 0 && (
+                <tr><td colSpan={6}>{puedeHaberMasCoincidencias ? 'Sin coincidencias en lo cargado hasta ahora — cargá más o ajustá el filtro.' : 'No hay personal para mostrar.'}</td></tr>
+              )}
+              {visibles.map((f) => (
                 <tr key={f.id}>
                   <td>{f.nombre}</td>
                   <td>{f.dni || '—'}</td>
                   <td>{f.puesto || '—'}</td>
+                  <td>{f.obra_id ? (obrasPorId.get(f.obra_id) || '—') : '—'}</td>
                   <td><SemaforoLegajo legajo={f.legajo} /></td>
                   <td><Link to={`/legajos/${f.id}`} className="btn btn-ghost btn-sm">Ver ficha</Link></td>
                 </tr>

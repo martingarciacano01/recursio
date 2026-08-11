@@ -1,12 +1,62 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LogIn, RefreshCw, FlaskConical, Mail } from 'lucide-react'
+import { LogIn, RefreshCw, FlaskConical, Mail, Settings2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
+import { useEmpresaFeaturesStore, FEATURES } from '../store/empresaFeaturesStore'
 
 const fmtFecha = (iso) => iso ? new Date(iso).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
 const PLAN_LABEL = { basico: 'Básico', profesional: 'Profesional', enterprise: 'Enterprise' }
 const PLAN_COLOR = { basico: 'var(--text-secondary)', profesional: 'var(--info, #3b82f6)', enterprise: 'var(--brand-secondary)' }
+const FragmentoEmpresa = Fragment
+
+// Features del plan convenios-por-obra (2026-08-07, migración 0063): no
+// todos los clientes las necesitan, así que se habilitan por empresa desde
+// acá en vez de estar prendidas para todo el mundo.
+const FEATURES_TOGGLEABLES = [
+  { key: FEATURES.CONVENIOS_POR_OBRA, label: 'Convenios por obra' },
+  { key: FEATURES.TOPES_HORAS_POR_OBRA, label: 'Topes de horas por obra' },
+  { key: FEATURES.AJUSTE_HORAS_PERIODO, label: 'Ajuste global de horas' },
+  { key: FEATURES.BONOS_NO_REMUNERATIVOS, label: 'Bonos especiales' },
+]
+
+function FilaFeatures({ empresaId }) {
+  const { features, cargarFeatures, setFeature } = useEmpresaFeaturesStore()
+  const [guardando, setGuardando] = useState(null)
+  const [errorGuardado, setErrorGuardado] = useState(null)
+
+  useEffect(() => { cargarFeatures(empresaId) }, [empresaId])
+
+  const toggle = async (feature, activo) => {
+    setGuardando(feature); setErrorGuardado(null)
+    const r = await setFeature(empresaId, feature, activo)
+    setGuardando(null)
+    if (!r.ok) setErrorGuardado(r.error)
+  }
+
+  const activas = features[empresaId] || {}
+
+  return (
+    <tr>
+      <td colSpan={7} style={{ background: 'var(--bg-overlay)' }}>
+        <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', padding: '0.5rem 0' }}>
+          {FEATURES_TOGGLEABLES.map((f) => (
+            <label key={f.key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={!!activas[f.key]}
+                disabled={guardando === f.key}
+                onChange={(e) => toggle(f.key, e.target.checked)}
+              />
+              {f.label}
+            </label>
+          ))}
+        </div>
+        {errorGuardado && <p style={{ color: 'var(--danger)', fontSize: '0.8rem' }}>{errorGuardado}</p>}
+      </td>
+    </tr>
+  )
+}
 
 // Panel de Superadmin: lista las empresas (vía la RPC
 // get_empresas_superadmin(), ya existente y compartida con Presencio —
@@ -31,6 +81,7 @@ export default function SuperAdminPage() {
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState('')
   const [entrandoId, setEntrandoId] = useState(null)
+  const [featuresAbiertaId, setFeaturesAbiertaId] = useState(null)
 
   const cargarEmpresas = () => {
     setCargando(true)
@@ -104,7 +155,8 @@ export default function SuperAdminPage() {
             {empresas.map((e) => {
               const pct = e.max_personal ? Math.min(100, ((e.total_personal || 0) / e.max_personal) * 100) : 0
               return (
-                <tr key={e.id} style={{ background: e.es_demo ? 'rgba(251,191,36,0.03)' : undefined }}>
+                <FragmentoEmpresa key={e.id}>
+                <tr style={{ background: e.es_demo ? 'rgba(251,191,36,0.03)' : undefined }}>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <div style={{
@@ -154,7 +206,7 @@ export default function SuperAdminPage() {
                       : <span style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>—</span>}
                   </td>
                   <td style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{fmtFecha(e.created_at)}</td>
-                  <td>
+                  <td style={{ display: 'flex', gap: 6 }}>
                     <button
                       className="btn btn-primary btn-sm"
                       onClick={() => handleEntrar(e)}
@@ -163,8 +215,17 @@ export default function SuperAdminPage() {
                     >
                       <LogIn size={13} /> Entrar
                     </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setFeaturesAbiertaId(featuresAbiertaId === e.id ? null : e.id)}
+                      title="Features habilitadas para esta empresa"
+                    >
+                      <Settings2 size={13} /> Features
+                    </button>
                   </td>
                 </tr>
+                {featuresAbiertaId === e.id && <FilaFeatures empresaId={e.id} />}
+                </FragmentoEmpresa>
               )
             })}
           </tbody>

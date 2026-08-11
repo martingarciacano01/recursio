@@ -45,6 +45,7 @@ export default function ReportesPage() {
 
   useEffect(() => {
     const seq = ++seqEmpresaRef.current
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset intencional al no haber empresa activa.
     if (!empresaId) { setPeriodos([]); return }
     supabase.from('nom_periodos').select('*').eq('empresa_id', empresaId).order('fecha_desde', { ascending: false })
       .then(({ data }) => { if (seqEmpresaRef.current === seq) setPeriodos(data || []) })

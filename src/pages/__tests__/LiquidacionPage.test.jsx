@@ -36,13 +36,16 @@ vi.mock('../../store/conveniosStore', () => ({
 }))
 
 let insertPayload = null
+let periodosMock = []
+let updatePayload = null
 vi.mock('../../lib/supabase', () => ({
   supabase: {
     from: vi.fn((tabla) => {
       if (tabla === 'nom_periodos') {
         return {
-          select: () => ({ eq: () => ({ order: () => Promise.resolve({ data: [], error: null }) }) }),
+          select: () => ({ eq: () => ({ order: () => Promise.resolve({ data: periodosMock, error: null }) }) }),
           insert: (payload) => { insertPayload = payload; return { select: () => ({ single: () => Promise.resolve({ data: { id: 'p1', ...payload }, error: null }) }) } },
+          update: (payload) => { updatePayload = payload; return { eq: () => Promise.resolve({ error: null }) } },
         }
       }
       return chain([])
@@ -116,5 +119,86 @@ describe('LiquidacionPage — Nuevo período', () => {
     expect(screen.getByLabelText('Tipo de período')).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Crear período' })).toBeDisabled()
     expect(insertPayload).toBeNull()
+  })
+})
+
+// Item 6 (sesión 2026-08-08): el selector de períodos filtra por estado con
+// chips (Todos / Abiertos / En aprobación / Cerrados). El chip de la tarjeta
+// "Período" recorta la lista que recibe SelectorPeriodo.
+describe('LiquidacionPage — filtro de estado del selector de períodos', () => {
+  const periodos = [
+    { id: 'p-abierto', tipo: 'mensual', estado: 'abierto', fecha_desde: '2026-07-01', fecha_hasta: '2026-07-31', convenio_id: null },
+    { id: 'p-cerrado', tipo: 'quincena_1', estado: 'cerrado', fecha_desde: '2026-07-01', fecha_hasta: '2026-07-15', convenio_id: null },
+  ]
+
+  beforeEach(() => { periodosMock = periodos })
+
+  it('muestra el chip del período cerrado solo cuando el filtro es Cerrados', async () => {
+    render(<MemoryRouter><LiquidacionPage /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('tab', { name: 'Períodos' }))
+
+    // Carga asíncrona de nom_periodos → SelectorPeriodo.
+    const chipCerrado = await screen.findByRole('button', { name: /2026-07-01 a 2026-07-15/ })
+    expect(chipCerrado).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /2026-07-01 a 2026-07-31/ })).toBeInTheDocument()
+
+    // Filtrar por Cerrados oculta el período abierto.
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrados' }))
+    expect(screen.queryByRole('button', { name: /2026-07-01 a 2026-07-31/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /2026-07-01 a 2026-07-15/ })).toBeInTheDocument()
+
+    // Volver a Todos los muestra a ambos.
+    fireEvent.click(screen.getByRole('button', { name: 'Todos' }))
+    expect(screen.getByRole('button', { name: /2026-07-01 a 2026-07-31/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /2026-07-01 a 2026-07-15/ })).toBeInTheDocument()
+  })
+})
+
+// Critique 2026-08-09 (P1): cerrar el período es irreversible, así que pide
+// confirmación explícita. El primer click en "Cerrar período" solo muestra
+// el aviso; el `update` a nom_periodos recién corre con "Sí, cerrar período".
+describe('LiquidacionPage — confirmación de cierre de período', () => {
+  beforeEach(() => {
+    updatePayload = null
+    periodosMock = [
+      { id: 'p-abierto', tipo: 'mensual', estado: 'abierto', fecha_desde: '2026-07-01', fecha_hasta: '2026-07-31', convenio_id: null },
+    ]
+  })
+
+  it('no cierra con el primer click y pide confirmar', async () => {
+    render(<MemoryRouter><LiquidacionPage /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('tab', { name: 'Períodos' }))
+
+    // Seleccionar el período abierto para que aparezca la zona de acciones.
+    const chip = await screen.findByRole('button', { name: /2026-07-01 a 2026-07-31/ })
+    fireEvent.click(chip)
+
+    const cerrar = screen.getByRole('button', { name: 'Cerrar período' })
+    fireEvent.click(cerrar)
+
+    // Aún no se ejecutó el update; está el aviso de confirmación.
+    expect(updatePayload).toBeNull()
+    await screen.findByText(/¿Cerrar el período\?/)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sí, cerrar período' }))
+
+    await waitFor(() => {
+      expect(updatePayload).toEqual({ estado: 'cerrado' })
+    })
+  })
+
+  it('cancelar descarta la confirmación sin cerrar', async () => {
+    render(<MemoryRouter><LiquidacionPage /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('tab', { name: 'Períodos' }))
+
+    const chip = await screen.findByRole('button', { name: /2026-07-01 a 2026-07-31/ })
+    fireEvent.click(chip)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar período' }))
+    await screen.findByText(/¿Cerrar el período\?/)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
+
+    expect(updatePayload).toBeNull()
+    expect(screen.queryByText(/¿Cerrar el período\?/)).not.toBeInTheDocument()
   })
 })

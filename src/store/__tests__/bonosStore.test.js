@@ -20,7 +20,12 @@ describe('mapeos', () => {
 
   it('aplicacionFromDB', () => {
     const r = aplicacionFromDB({ id: 'a1', empresa_id: 'e1', obra_id: 'o1', bono_id: 'b1', monto: '5000' })
-    expect(r).toEqual({ id: 'a1', empresaId: 'e1', obraId: 'o1', bonoId: 'b1', monto: 5000 })
+    expect(r).toEqual({ id: 'a1', empresaId: 'e1', obraId: 'o1', bonoId: 'b1', monto: 5000, tipoMonto: 'fijo' })
+  })
+
+  it('aplicacionFromDB respeta tipo_monto por_horas (0064)', () => {
+    const r = aplicacionFromDB({ id: 'a2', empresa_id: 'e1', obra_id: null, bono_id: 'b2', monto: '500', tipo_monto: 'por_horas' })
+    expect(r.tipoMonto).toBe('por_horas')
   })
 })
 
@@ -76,11 +81,21 @@ describe('aplicarBono / setExcepcion', () => {
 
   it('aplicarBono hace upsert y guarda la aplicación', async () => {
     supabase.from.mockReturnValue({
-      upsert: () => ({ select: () => ({ single: () => Promise.resolve({ data: { id: 'a1', empresa_id: 'e1', obra_id: 'o1', bono_id: 'b1', monto: 20000 }, error: null }) }) }),
+      upsert: () => ({ select: () => ({ single: () => Promise.resolve({ data: { id: 'a1', empresa_id: 'e1', obra_id: 'o1', bono_id: 'b1', monto: 20000, tipo_monto: 'fijo' }, error: null }) }) }),
     })
     const r = await useBonosStore.getState().aplicarBono({ empresaId: 'e1', obraId: 'o1', bonoId: 'b1', monto: 20000 })
     expect(r.ok).toBe(true)
     expect(useBonosStore.getState().aplicaciones).toHaveLength(1)
+    expect(useBonosStore.getState().aplicaciones[0].tipoMonto).toBe('fijo')
+  })
+
+  it('aplicarBono mandado con tipoMonto por_horas (0064)', async () => {
+    supabase.from.mockReturnValue({
+      upsert: () => ({ select: () => ({ single: () => Promise.resolve({ data: { id: 'a1', empresa_id: 'e1', obra_id: 'o1', bono_id: 'b1', monto: 1000, tipo_monto: 'por_horas' }, error: null }) }) }),
+    })
+    const r = await useBonosStore.getState().aplicarBono({ empresaId: 'e1', obraId: 'o1', bonoId: 'b1', monto: 1000, tipoMonto: 'por_horas' })
+    expect(r.ok).toBe(true)
+    expect(useBonosStore.getState().aplicaciones[0].tipoMonto).toBe('por_horas')
   })
 
   it('setExcepcion con monto null desactiva el bono para la persona', async () => {

@@ -1,9 +1,11 @@
-// Orden del desplegable de períodos: año descendente, mes descendente y,
-// dentro del mismo mes, por tipo en el orden natural de liquidación
-// (1ra quincena → 2da quincena → mensual → SAC → vacaciones → final).
+// Orden del desplegable de períodos: año descendente (los más nuevos primero)
+// y, dentro del mismo año, MES ASCENDENTE (Enero → Diciembre) y por tipo en el
+// orden natural de liquidación (1ra quincena → 2da quincena → mensual → SAC →
+// vacaciones → final).
 //
-// Antes venían en el orden crudo de la consulta (fecha_desde desc), que
-// mezclaba tipos del mismo mes y hacía difícil encontrar uno concreto.
+// Antes los meses también venían descendentes, así que un año con varios
+// períodos arrancaba por Diciembre y el usuario tenía que buscar Enero al
+// final — contra el sentido de lectura cronológica de los períodos.
 const ORDEN_TIPO = [
   'quincena_1', 'quincena_2', 'quincenal',
   'mensual', 'mensual_fc',
@@ -20,16 +22,20 @@ export function ordenarPeriodos(periodos) {
   return [...(periodos || [])].sort((a, b) => {
     const da = String(a.fecha_desde || '')
     const db = String(b.fecha_desde || '')
-    // año + mes, más nuevo primero
-    const ma = da.slice(0, 7)
-    const mb = db.slice(0, 7)
-    if (ma !== mb) return mb.localeCompare(ma)
+    // año: más nuevo primero
+    const anioA = da.slice(0, 4)
+    const anioB = db.slice(0, 4)
+    if (anioA !== anioB) return anioB.localeCompare(anioA)
+    // mismo año: mes ascendente (Enero → Diciembre)
+    const ma = da.slice(5, 7)
+    const mb = db.slice(5, 7)
+    if (ma !== mb) return ma.localeCompare(mb)
     // mismo mes: por tipo
     const pa = pesoTipo(a.tipo)
     const pb = pesoTipo(b.tipo)
     if (pa !== pb) return pa - pb
     // desempate estable por fecha exacta
-    return db.localeCompare(da)
+    return da.localeCompare(db)
   })
 }
 

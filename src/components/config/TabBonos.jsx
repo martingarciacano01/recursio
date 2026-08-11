@@ -3,7 +3,7 @@ import { useBonosStore } from '../../store/bonosStore'
 import { useAuthStore } from '../../store/authStore'
 import { supabase } from '../../lib/supabase'
 
-// Gestión de bonos no remunerativos (plan convenios-por-obra 2026-08-07):
+// Gestión de bonos especiales (plan convenios-por-obra 2026-08-07):
 // el catálogo global lo define superadmin (nom_bonos); cada empresa aplica
 // un bono a una obra (o a toda la empresa) con su propio monto
 // (nom_bono_aplicaciones), y puede excepcionar personas puntuales
@@ -17,11 +17,16 @@ export default function TabBonos({ empresaId }) {
   } = useBonosStore()
 
   const [obras, setObras] = useState([])
+  const [personal, setPersonal] = useState([])
+  const [busquedaPersonal, setBusquedaPersonal] = useState('')
   useEffect(() => { if (empresaId) cargarBonos(empresaId) }, [empresaId])
   useEffect(() => {
     if (!empresaId) return
     supabase.from('nom_v_obras').select('id, nombre').eq('empresa_id', empresaId).order('nombre')
       .then(({ data }) => setObras(data || []))
+    supabase.from('nom_v_personal').select('id, nombre').eq('empresa_id', empresaId)
+      .order('nombre')
+      .then(({ data }) => setPersonal(data || []))
   }, [empresaId])
 
   // Alta global (superadmin)
@@ -35,16 +40,17 @@ export default function TabBonos({ empresaId }) {
   }
 
   // Aplicar bono a la empresa/obra
-  const [aplicacion, setAplicacion] = useState({ bonoId: '', obraId: '', monto: '' })
+  const [aplicacion, setAplicacion] = useState({ bonoId: '', obraId: '', monto: '', tipoMonto: 'fijo' })
   const [errorAplicar, setErrorAplicar] = useState(null)
   const handleAplicar = async () => {
     setErrorAplicar(null)
     if (!aplicacion.bonoId || aplicacion.monto === '') { setErrorAplicar('Elegí un bono y un monto.'); return }
     const r = await aplicarBono({
-      empresaId, obraId: aplicacion.obraId || null, bonoId: aplicacion.bonoId, monto: Number(aplicacion.monto),
+      empresaId, obraId: aplicacion.obraId || null, bonoId: aplicacion.bonoId,
+      monto: Number(aplicacion.monto), tipoMonto: aplicacion.tipoMonto,
     })
     if (!r.ok) { setErrorAplicar(r.error); return }
-    setAplicacion({ bonoId: '', obraId: '', monto: '' })
+    setAplicacion({ bonoId: '', obraId: '', monto: '', tipoMonto: 'fijo' })
   }
 
   // Excepción por persona
@@ -52,14 +58,27 @@ export default function TabBonos({ empresaId }) {
   const [errorExcepcion, setErrorExcepcion] = useState(null)
   const handleExcepcion = async () => {
     setErrorExcepcion(null)
-    if (!excepcion.bonoId || !excepcion.personalId.trim()) { setErrorExcepcion('Elegí un bono y una persona.'); return }
+    if (!excepcion.bonoId) { setErrorExcepcion('Elegí un bono.'); return }
+    if (!excepcion.personalId.trim()) {
+      setErrorExcepcion('Elegí a la persona por nombre (desde la lista) — hace falta el match exacto.')
+      return
+    }
+    if (!excepcion.desactivar && excepcion.monto === '') {
+      setErrorExcepcion('Completá el monto para la persona (o marcá "Desactivar bono").')
+      return
+    }
     const r = await setExcepcion({
       empresaId, personalId: excepcion.personalId.trim(), bonoId: excepcion.bonoId,
       monto: excepcion.desactivar ? null : Number(excepcion.monto) || 0,
     })
     if (!r.ok) { setErrorExcepcion(r.error); return }
     setExcepcionForm({ bonoId: '', personalId: '', monto: '', desactivar: false })
+    setBusquedaPersonal('')
   }
+
+  const personalFiltrado = personal.filter((p) =>
+    p.nombre.toLowerCase().includes(busquedaPersonal.toLowerCase())
+  ).slice(0, 50)
 
   const nombreBono = (id) => bonos.find((b) => b.id === id)?.nombre ?? id
   const nombreObra = (id) => (id ? (obras.find((o) => o.id === id)?.nombre ?? id) : 'Toda la empresa')
@@ -71,10 +90,11 @@ export default function TabBonos({ empresaId }) {
     <div className="pila max-900">
       {esSuperadmin && (
         <form className="card" onSubmit={(e) => { e.preventDefault(); handleCrearBono() }}>
-          <h3 style={{ fontSize: '1rem', marginBottom: 4 }}>Catálogo global de bonos (superadmin)</h3>
+          <h3 style={{ fontSize: '1rem', marginBottom: 4 }}>Configuración de bono especial (superadmin)</h3>
           <p className="texto-secundario" style={{ fontSize: '0.85rem', marginBottom: 14 }}>
-            El bono se paga, suma a bruto/neto y a Excel, pero NO se imprime en el recibo ni integra
-            base de aportes. Cada empresa lo aplica por obra o por toda la empresa.
+            Definís el catálogo de bonos especiales; cada empresa decide dónde se aplica (por obra o
+            toda la empresa) y qué monto paga. Suma a bruto/neto y a Excel, pero NO se imprime en el
+            recibo ni integra base de aportes.
           </p>
           <div className="form-grid" style={{ marginBottom: 14 }}>
             <div className="input-group">
@@ -101,9 +121,10 @@ export default function TabBonos({ empresaId }) {
       <form className="card" onSubmit={(e) => { e.preventDefault(); handleAplicar() }}>
         <h3 style={{ fontSize: '1rem', marginBottom: 4 }}>Aplicar bono</h3>
         <p className="texto-secundario" style={{ fontSize: '0.85rem', marginBottom: 14 }}>
-          Elegí un bono del catálogo, una obra (o toda la empresa) y el monto que se paga.
+          Bono especial definido por empresa: elegí un bono del catálogo, una obra (o toda la
+          empresa) y el monto que se paga — fijo por período o por hora trabajada.
         </p>
-        <div className="form-grid" style={{ marginBottom: 14 }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
           <div className="input-group">
             <label className="input-label" htmlFor="ap-bono">Bono</label>
             <select id="ap-bono" className="input" value={aplicacion.bonoId}
@@ -125,19 +146,28 @@ export default function TabBonos({ empresaId }) {
             <input id="ap-monto" className="input" type="number" min="0" value={aplicacion.monto}
               onChange={(e) => setAplicacion((f) => ({ ...f, monto: e.target.value }))} />
           </div>
+          <div className="input-group">
+            <label className="input-label" htmlFor="ap-tipo-monto">Tipo de monto</label>
+            <select id="ap-tipo-monto" className="input" value={aplicacion.tipoMonto}
+              onChange={(e) => setAplicacion((f) => ({ ...f, tipoMonto: e.target.value }))}>
+              <option value="fijo">Fijo (monto por período)</option>
+              <option value="por_horas">Por hora trabajada</option>
+            </select>
+          </div>
         </div>
         <button type="submit" className="btn btn-primary btn-sm">Aplicar</button>
         {errorAplicar && <p style={{ color: 'var(--danger)', marginTop: 10 }}>{errorAplicar}</p>}
 
         {aplicaciones.length > 0 && (
-          <table className="tabla" style={{ marginTop: 16 }}>
-            <thead><tr><th>Bono</th><th>Obra</th><th>Monto</th><th /></tr></thead>
+          <table className="table" style={{ marginTop: 16 }}>
+            <thead><tr><th>Bono</th><th>Obra</th><th>Monto</th><th>Tipo</th><th /></tr></thead>
             <tbody>
               {aplicaciones.map((a) => (
                 <tr key={a.id}>
                   <td>{nombreBono(a.bonoId)}</td>
                   <td>{nombreObra(a.obraId)}</td>
                   <td>${a.monto.toLocaleString('es-AR')}</td>
+                  <td>{a.tipoMonto === 'por_horas' ? 'por hora' : 'fijo'}</td>
                   <td><button type="button" className="btn btn-ghost btn-sm" onClick={() => eliminarAplicacion(a.id)}>Quitar</button></td>
                 </tr>
               ))}
@@ -161,9 +191,29 @@ export default function TabBonos({ empresaId }) {
             </select>
           </div>
           <div className="input-group">
-            <label className="input-label" htmlFor="ex-persona">ID de personal</label>
-            <input id="ex-persona" className="input" value={excepcion.personalId}
-              onChange={(e) => setExcepcionForm((f) => ({ ...f, personalId: e.target.value }))} />
+            <label className="input-label" htmlFor="ex-persona">Persona</label>
+            <input
+              id="ex-persona"
+              className="input"
+              placeholder="Buscá por nombre…"
+              value={excepcion.desactivar || busquedaPersonal ? busquedaPersonal : (personal.find((p) => p.id === excepcion.personalId)?.nombre ?? busquedaPersonal)}
+              onChange={(e) => {
+                const q = e.target.value
+                setBusquedaPersonal(q)
+                const match = personal.find((p) => p.nombre.toLowerCase() === q.toLowerCase())
+                setExcepcionForm((f) => ({ ...f, personalId: match?.id ?? '' }))
+              }}
+              list="lista-personal-bonos"
+              autoComplete="off"
+            />
+            <datalist id="lista-personal-bonos">
+              {personalFiltrado.map((p) => <option key={p.id} value={p.nombre}>{p.id}</option>)}
+            </datalist>
+            {excepcion.personalId && (
+              <span className="texto-muted" style={{ fontSize: '0.8rem' }}>
+                ID: {excepcion.personalId}
+              </span>
+            )}
           </div>
           <div className="input-group">
             <label className="input-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -184,13 +234,13 @@ export default function TabBonos({ empresaId }) {
         {errorExcepcion && <p style={{ color: 'var(--danger)', marginTop: 10 }}>{errorExcepcion}</p>}
 
         {excepciones.length > 0 && (
-          <table className="tabla" style={{ marginTop: 16 }}>
+          <table className="table" style={{ marginTop: 16 }}>
             <thead><tr><th>Bono</th><th>Persona</th><th>Monto</th><th /></tr></thead>
             <tbody>
               {excepciones.map((e) => (
                 <tr key={e.id}>
                   <td>{nombreBono(e.bonoId)}</td>
-                  <td>{e.personalId}</td>
+                  <td>{e.personalNombre ?? personal.find((p) => p.id === e.personalId)?.nombre ?? e.personalId}</td>
                   <td>{e.monto === null ? 'Desactivado' : `$${e.monto.toLocaleString('es-AR')}`}</td>
                   <td><button type="button" className="btn btn-ghost btn-sm" onClick={() => eliminarExcepcion(e.id)}>Quitar</button></td>
                 </tr>

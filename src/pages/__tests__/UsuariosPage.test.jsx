@@ -23,14 +23,15 @@ describe('UsuariosPage', () => {
   it('lista los usuarios vinculados con su email y rol (Task 4.2)', () => {
     render(<UsuariosPage />)
     expect(screen.getByText('ana@empresa.com')).toBeInTheDocument()
-    expect(screen.getByText('rrhh')).toBeInTheDocument()
+    expect(screen.getAllByText('RRHH').length).toBeGreaterThan(0)
   })
 
   it('invita un usuario nuevo por email con el rol elegido', async () => {
     render(<UsuariosPage />)
-    fireEvent.change(screen.getByPlaceholderText('email@empresa.com'), { target: { value: 'nuevo@x.com' } })
+    fireEvent.click(screen.getByText('Invitar usuario'))
+    fireEvent.change(screen.getByPlaceholderText('usuario@empresa.com'), { target: { value: 'nuevo@x.com' } })
     fireEvent.change(screen.getByLabelText('Rol'), { target: { value: 'admin' } })
-    fireEvent.click(screen.getByText('Invitar'))
+    fireEvent.click(screen.getByText('Enviar invitación'))
     await waitFor(() => expect(invitarUsuario).toHaveBeenCalledWith(
       expect.objectContaining({ email: 'nuevo@x.com', empresaId: 'e1', rol: 'admin' })
     ))

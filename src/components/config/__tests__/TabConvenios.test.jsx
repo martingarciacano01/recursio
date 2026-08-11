@@ -4,6 +4,7 @@ import TabConvenios from '../TabConvenios'
 
 const crearConvenioMock = vi.fn().mockResolvedValue({ ok: true, convenioId: 'c2' })
 const actualizarConvenioMock = vi.fn().mockResolvedValue({ ok: true })
+const eliminarConvenioMock = vi.fn().mockResolvedValue({ ok: true })
 const cargarConveniosMock = vi.fn()
 
 let convenios = [
@@ -15,11 +16,16 @@ vi.mock('../../../store/conveniosStore', () => ({
   useConveniosStore: () => ({
     convenios, cargarConvenios: cargarConveniosMock,
     crearConvenio: crearConvenioMock, actualizarConvenio: actualizarConvenioMock,
+    eliminarConvenio: eliminarConvenioMock,
   }),
 }))
 
 describe('TabConvenios', () => {
-  beforeEach(() => { crearConvenioMock.mockClear(); actualizarConvenioMock.mockClear() })
+  beforeEach(() => {
+    crearConvenioMock.mockClear()
+    actualizarConvenioMock.mockClear()
+    eliminarConvenioMock.mockClear()
+  })
 
   it('lista los convenios propios con su modalidad', () => {
     render(<TabConvenios empresaId="e1" />)
@@ -61,5 +67,29 @@ describe('TabConvenios', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Editar' })[0])
 
     expect(screen.queryByText('boom')).not.toBeInTheDocument()
+  })
+
+  it('eliminar un convenio pide confirmación antes de llamar a eliminarConvenio', async () => {
+    render(<TabConvenios empresaId="e1" />)
+    fireEvent.click(screen.getAllByRole('button', { name: 'Eliminar' })[0])
+    // El primer click abre la confirmación, no borra todavía.
+    expect(eliminarConvenioMock).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Sí, borrar' }))
+    await waitFor(() => {
+      expect(eliminarConvenioMock).toHaveBeenCalledWith('c1', 'e1')
+    })
+  })
+
+  it('si eliminarConvenio avisa que está en uso, muestra el aviso y no hace nada más', async () => {
+    eliminarConvenioMock.mockResolvedValueOnce({
+      ok: false,
+      error: 'un convenio no se borra si hay personal o períodos creados con él',
+    })
+    render(<TabConvenios empresaId="e1" />)
+    fireEvent.click(screen.getAllByRole('button', { name: 'Eliminar' })[0])
+    fireEvent.click(screen.getByRole('button', { name: 'Sí, borrar' }))
+    await waitFor(() => {
+      expect(screen.getByText(/no se borra si hay personal o períodos/)).toBeInTheDocument()
+    })
   })
 })

@@ -4,13 +4,13 @@ import { ordenarPeriodos, agruparPorAnio } from '../ordenarPeriodos'
 const p = (id, fecha_desde, tipo) => ({ id, fecha_desde, fecha_hasta: fecha_desde, tipo })
 
 describe('ordenarPeriodos', () => {
-  it('ordena por mes descendente', () => {
+  it('ordena los meses de Enero a Diciembre dentro del año', () => {
     const orden = ordenarPeriodos([
       p('a', '2026-05-01', 'mensual'),
       p('b', '2026-07-01', 'mensual'),
       p('c', '2026-06-01', 'mensual'),
     ]).map((x) => x.id)
-    expect(orden).toEqual(['b', 'c', 'a'])
+    expect(orden).toEqual(['a', 'c', 'b'])
   })
 
   it('dentro del mismo mes ordena por tipo, no por fecha', () => {
@@ -51,6 +51,6 @@ describe('agruparPorAnio', () => {
       p('c', '2026-06-01', 'mensual'),
     ])
     expect(grupos.map(([anio]) => anio)).toEqual(['2026', '2025'])
-    expect(grupos[0][1].map((x) => x.id)).toEqual(['b', 'c'])
+    expect(grupos[0][1].map((x) => x.id)).toEqual(['c', 'b'])
   })
 })

@@ -22,10 +22,12 @@ import { useAuthStore } from '../store/authStore'
 //
 // Los gráficos casi no agregan consultas: reutilizan los mismos datos que ya
 // se traían para las tarjetas (sólo se suma el nombre de cada convenio).
+// Recharts dibuja en SVG y no resuelve `var(--token)` en atributos fill,
+// así que estos colores se resuelven según el tema activo (mismo código de
+// color que los tokens en index.css).
 const COLOR_ESTADO = {
-  alDia: 'var(--success)',
-  incompletos: 'var(--danger)',
-  docPendiente: 'var(--warning)',
+  claro: { alDia: '#1a7f37', incompletos: '#b3261e', docPendiente: '#9a6700', barra: '#5aa5d8' },
+  oscuro: { alDia: '#2ea043', incompletos: '#da3633', docPendiente: '#d29922', barra: '#5aa5d8' },
 }
 
 function Vacio({ children }) {
@@ -175,11 +177,13 @@ export default function DashboardPage() {
   const colorUrgencia = datos.urgencia === 'urgente' ? 'var(--danger)'
     : datos.urgencia === 'normal' ? 'var(--warning)' : 'var(--brand-secondary)'
 
+  const paleta = COLOR_ESTADO[temaEfectivo === 'claro' ? 'claro' : 'oscuro']
+
   const datosAnillo = useMemo(() => ([
-    { clave: 'alDia', nombre: 'Al día', valor: datos.reparto.alDia, color: COLOR_ESTADO.alDia },
-    { clave: 'docPendiente', nombre: 'Documentación pendiente', valor: datos.reparto.docPendiente, color: COLOR_ESTADO.docPendiente },
-    { clave: 'incompletos', nombre: 'Datos incompletos', valor: datos.reparto.incompletos, color: COLOR_ESTADO.incompletos },
-  ].filter((d) => d.valor > 0)), [datos.reparto])
+    { clave: 'alDia', nombre: 'Al día', valor: datos.reparto.alDia, color: paleta.alDia },
+    { clave: 'docPendiente', nombre: 'Documentación pendiente', valor: datos.reparto.docPendiente, color: paleta.docPendiente },
+    { clave: 'incompletos', nombre: 'Datos incompletos', valor: datos.reparto.incompletos, color: paleta.incompletos },
+  ].filter((d) => d.valor > 0)), [datos.reparto, paleta])
 
   const pctAlDia = porcentaje(datos.reparto.alDia, datos.reparto.total)
 
@@ -394,7 +398,7 @@ export default function DashboardPage() {
                         itemStyle={{ color: estiloTooltip.color }}
                         formatter={(v) => [v, 'Personas']}
                       />
-                      <Bar dataKey="cantidad" fill="var(--brand-blue)" radius={[0, 6, 6, 0]} isAnimationActive={false} />
+                      <Bar dataKey="cantidad" fill={paleta.barra} radius={[0, 6, 6, 0]} isAnimationActive={false} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>

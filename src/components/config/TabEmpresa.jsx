@@ -16,6 +16,7 @@ function useConfigHoras(empresaId) {
   useEffect(() => {
     if (!empresaId) return
     let activo = true
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- kickoff intencional del fetch inicial de config de horas.
     setCargandoHoras(true)
     supabase.from('nom_config_horas').select('*').eq('empresa_id', empresaId).maybeSingle()
       .then(({ data, error: err }) => {
@@ -54,40 +55,37 @@ const DEFAULT_CFG_OBRA = { tope_horas_diarias: '', jornada_horas: 8 }
 
 function useConfigObras(empresaId) {
   const [obras, setObras] = useState([])
-  const [obraId, setObraId] = useState('')
-  const [cfgObra, setCfgObra] = useState(DEFAULT_CFG_OBRA)
+  // mapa obraId -> { tope_horas_diarias, jornada_horas } (cargado para TODAS
+  // las obras de una, como mapa en vez de a pedido por obra — ver Item 3).
+  const [cfgPorObra, setCfgPorObra] = useState({})
   const [cargandoObras, setCargandoObras] = useState(true)
   const [errorObras, setErrorObras] = useState(null)
 
   useEffect(() => {
     if (!empresaId) return
     let activo = true
-    supabase.from('nom_v_obras').select('id, nombre').eq('empresa_id', empresaId).order('nombre')
-      .then(({ data, error: err }) => {
-        if (!activo) return
-        if (err) { setErrorObras(err.message); setCargandoObras(false); return }
-        setObras(data || [])
-        setCargandoObras(false)
-      })
+    Promise.all([
+      supabase.from('nom_v_obras').select('id, nombre').eq('empresa_id', empresaId).order('nombre'),
+      supabase.from('nom_config_obras').select('obra_id, tope_horas_diarias, jornada_horas').eq('empresa_id', empresaId),
+    ]).then(([{ data: obras, error: errObra }, { data: cfgs, error: errCfg }]) => {
+      if (!activo) return
+      const err = errObra || errCfg
+      if (err) { setErrorObras(err.message); setCargandoObras(false); return }
+      setObras(obras || [])
+      setCfgPorObra(Object.fromEntries((cfgs || []).map((c) => [c.obra_id, {
+        tope_horas_diarias: c.tope_horas_diarias ?? '',
+        jornada_horas: c.jornada_horas ?? 8,
+      }])))
+      setCargandoObras(false)
+    })
     return () => { activo = false }
   }, [empresaId])
 
-  useEffect(() => {
-    if (!empresaId || !obraId) { setCfgObra(DEFAULT_CFG_OBRA); return }
-    let activo = true
-    supabase.from('nom_config_obras').select('*').eq('empresa_id', empresaId).eq('obra_id', obraId).maybeSingle()
-      .then(({ data, error: err }) => {
-        if (!activo) return
-        if (err) { setErrorObras(err.message); return }
-        setCfgObra(data ? {
-          tope_horas_diarias: data.tope_horas_diarias ?? '',
-          jornada_horas: data.jornada_horas ?? 8,
-        } : DEFAULT_CFG_OBRA)
-      })
-    return () => { activo = false }
-  }, [empresaId, obraId])
+  const setCfgLocal = (obraId, valores) => {
+    setCfgPorObra((prev) => ({ ...prev, [obraId]: valores }))
+  }
 
-  const guardarConfigObra = async (valores) => {
+  const guardarConfigObra = async (obraId, valores) => {
     const { error: err } = await supabase.from('nom_config_obras').upsert({
       empresa_id: empresaId,
       obra_id: obraId,
@@ -95,11 +93,11 @@ function useConfigObras(empresaId) {
       jornada_horas: Number(valores.jornada_horas) || 8,
     })
     if (err) return { ok: false, error: err.message }
-    setCfgObra(valores)
+    setCfgLocal(obraId, valores)
     return { ok: true }
   }
 
-  return { obras, obraId, setObraId, cfgObra, cargandoObras, errorObras, guardarConfigObra }
+  return { obras, cfgPorObra, setCfgLocal, cargandoObras, errorObras, guardarConfigObra }
 }
 
 export default function TabEmpresa({ empresaId }) {
@@ -116,9 +114,8 @@ export default function TabEmpresa({ empresaId }) {
   const [formHoras, setFormHoras] = useState(DEFAULT_CFG_HORAS)
   const [guardadoHoras, setGuardadoHoras] = useState(false)
   const [errorGuardadoHoras, setErrorGuardadoHoras] = useState(null)
-  const { obras, obraId, setObraId, cfgObra, errorObras, guardarConfigObra } = useConfigObras(empresaId)
-  const [formObra, setFormObra] = useState(DEFAULT_CFG_OBRA)
-  const [guardadoObra, setGuardadoObra] = useState(false)
+  const { obras, cfgPorObra, setCfgLocal, errorObras, guardarConfigObra } = useConfigObras(empresaId)
+  const [guardadoObraId, setGuardadoObraId] = useState(null)
   const [errorGuardadoObra, setErrorGuardadoObra] = useState(null)
 
   useEffect(() => { if (empresaId) cargar(empresaId) }, [empresaId])
@@ -126,13 +123,13 @@ export default function TabEmpresa({ empresaId }) {
   useEffect(() => { setForm({ cuit, domicilio }) }, [cuit, domicilio])
   // eslint-disable-next-line react-hooks/set-state-in-effect -- resync intencional del form local cuando llega la config de horas.
   useEffect(() => { setFormHoras(cfgHoras) }, [cfgHoras])
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- resync intencional del form local cuando llega la config de la obra elegida.
-  useEffect(() => { setFormObra(cfgObra) }, [cfgObra])
 
-  const handleGuardarObra = async () => {
-    const r = await guardarConfigObra(formObra)
+  const handleGuardarObra = async (obraId) => {
+    const valores = cfgPorObra[obraId]
+    if (!valores) return
+    const r = await guardarConfigObra(obraId, valores)
     setErrorGuardadoObra(r.ok ? null : r.error)
-    if (r.ok) { setGuardadoObra(true); setTimeout(() => setGuardadoObra(false), 2500) }
+    if (r.ok) { setGuardadoObraId(obraId); setTimeout(() => setGuardadoObraId(null), 2500) }
   }
 
   const handleGuardarHoras = async () => {
@@ -279,41 +276,55 @@ export default function TabEmpresa({ empresaId }) {
       </form>
 
       {obras.length > 0 && (
-        <form className="card" onSubmit={(e) => { e.preventDefault(); handleGuardarObra() }}>
+        <form className="card" onSubmit={(e) => e.preventDefault()}>
           <h3 style={{ fontSize: '1rem', marginBottom: 4 }}>Horas por obra</h3>
           <p className="texto-secundario" style={{ fontSize: '0.85rem', marginBottom: 14 }}>
-            Tope de horas diarias y jornada específicos de una obra. Sin configurar, se usa la de "Horas extra y jornada" de arriba.
+            Tope de horas diarias y jornada de cada obra. Sin configurar una obra, se usa la de
+            "Horas extra y jornada" de arriba.
           </p>
-          <div className="form-grid" style={{ marginBottom: 14 }}>
-            <div className="input-group">
-              <label className="input-label" htmlFor="obra-tope-select">Obra</label>
-              <select id="obra-tope-select" className="input" value={obraId} onChange={(e) => setObraId(e.target.value)}>
-                <option value="">Elegí una obra…</option>
-                {obras.map((o) => <option key={o.id} value={o.id}>{o.nombre}</option>)}
-              </select>
-            </div>
-            {obraId && (
-              <>
-                <div className="input-group">
-                  <label className="input-label" htmlFor="obra-jornada">Jornada normal (horas/día)</label>
-                  <input id="obra-jornada" className="input" type="number" min="1" step="0.5" value={formObra.jornada_horas}
-                    onChange={(e) => setFormObra((f) => ({ ...f, jornada_horas: e.target.value }))} />
-                </div>
-                <div className="input-group">
-                  <label className="input-label" htmlFor="obra-tope-diario">Tope de horas diarias (opcional)</label>
-                  <input id="obra-tope-diario" className="input" type="number" min="0" step="0.5" placeholder="Sin tope"
-                    value={formObra.tope_horas_diarias}
-                    onChange={(e) => setFormObra((f) => ({ ...f, tope_horas_diarias: e.target.value }))} />
-                </div>
-              </>
-            )}
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr><th>Obra</th><th style={{ width: 130 }}>Jornada (horas/día)</th><th style={{ width: 150 }}>Tope diario</th><th style={{ width: 110 }} /></tr>
+              </thead>
+              <tbody>
+                {obras.map((o) => {
+                  const cfg = cfgPorObra[o.id] ?? DEFAULT_CFG_OBRA
+                  return (
+                    <tr key={o.id}>
+                      <td>{o.nombre}</td>
+                      <td>
+                        <input
+                          className="input input-sm"
+                          type="number" min="1" step="0.5"
+                          aria-label={`Jornada de ${o.nombre}`}
+                          value={cfg.jornada_horas}
+                          onChange={(e) => setCfgLocal(o.id, { ...cfg, jornada_horas: e.target.value })}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="input input-sm"
+                          type="number" min="0" step="0.5" placeholder="Sin tope"
+                          aria-label={`Tope diario de ${o.nombre}`}
+                          value={cfg.tope_horas_diarias}
+                          onChange={(e) => setCfgLocal(o.id, { ...cfg, tope_horas_diarias: e.target.value })}
+                        />
+                      </td>
+                      <td>
+                        <button
+                          type="button" className="btn btn-primary btn-sm"
+                          onClick={() => handleGuardarObra(o.id)}
+                        >
+                          {guardadoObraId === o.id ? 'Guardado' : 'Guardar'}
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
-          {obraId && (
-            <div className="acciones">
-              <button type="submit" className="btn btn-primary btn-sm">Guardar</button>
-              {guardadoObra && <span className="badge badge-success">guardado</span>}
-            </div>
-          )}
           {errorGuardadoObra && <p style={{ color: 'var(--danger)', marginTop: 10 }}>{errorGuardadoObra}</p>}
           {errorObras && <p style={{ color: 'var(--danger)', marginTop: 10 }}>{errorObras}</p>}
         </form>
