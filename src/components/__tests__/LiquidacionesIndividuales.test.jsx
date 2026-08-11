@@ -18,6 +18,7 @@ let ausenciasData = [
   { id: 'aus-1', tipo: 'vacaciones', estado: 'aprobada', fecha_desde: '2026-07-01', fecha_hasta: '2026-07-10' },
 ]
 let vacacionesLiquidadasData = []
+let liquidacionesHistorialData = []
 const updateConvenioMock = vi.fn()
 
 const crearPeriodoVacacionesMock = vi.fn().mockResolvedValue({ ok: true })
@@ -40,7 +41,7 @@ vi.mock('../../lib/supabase', () => ({
         { id: 'cat-1', nombre: 'Oficial', vigencia_desde: '2026-01-01' },
         { id: 'cat-2', nombre: 'Oficial especializado', vigencia_desde: '2026-01-01' },
       ])
-      if (tabla === 'nom_liquidaciones') return chain([])
+      if (tabla === 'nom_liquidaciones') return chain(liquidacionesHistorialData)
       return chain([])
     }),
   },
@@ -63,7 +64,8 @@ describe('LiquidacionesIndividuales', () => {
     ausenciasData = [
       { id: 'aus-1', tipo: 'vacaciones', estado: 'aprobada', fecha_desde: '2026-07-01', fecha_hasta: '2026-07-10' },
     ]
-    vacacionesLiquidadasData = []
+vacacionesLiquidadasData = []
+    liquidacionesHistorialData = []
   })
 
   it('al elegir una persona lista sus ausencias de vacaciones elegibles', async () => {
@@ -168,5 +170,18 @@ describe('LiquidacionesIndividuales', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Generar liquidación final' })).toBeInTheDocument()
     })
+  })
+
+  it('el historial con liquidaciones queda en contenedor con scroll horizontal (Task 6.10)', async () => {
+    liquidacionesHistorialData = [
+      { id: 'liq-1', personal_id: 'p1', periodo_id: 'per-1', neto: 8000, numero_recibo: 42, anulado: false, nom_periodos: { tipo: 'vacaciones', fecha_desde: '2026-07-01', fecha_hasta: '2026-07-10' } },
+    ]
+    render(<LiquidacionesIndividuales empresaId="e1" />)
+    fireEvent.change(screen.getByLabelText('Persona'), { target: { value: 'p1' } })
+    await waitFor(() => {
+      expect(screen.getByText(/Historial de liquidaciones individuales/)).toBeInTheDocument()
+    })
+    const tabla = screen.getByText('Neto').closest('.table-scroll')
+    expect(tabla).not.toBeNull()
   })
 })

@@ -413,28 +413,31 @@ export default function LiquidacionesIndividuales({ empresaId }) {
         {errorHistorial && <p style={{ color: 'var(--danger)' }}>Error: {errorHistorial}</p>}
         {historial.length === 0 && !errorHistorial && <p style={{ color: 'var(--text-secondary)', marginTop: 8 }}>Sin liquidaciones individuales registradas.</p>}
         {historial.length > 0 && (
-          <table className="table" style={{ marginTop: 8 }}>
-            <thead>
-              <tr><th>Persona</th><th>Período</th><th>Neto</th><th>Recibo</th><th></th></tr>
-            </thead>
-            <tbody>
-              {historial.map((l) => (
-                <tr key={l.id}>
-                  <td>{personas.find((p) => p.id === l.personal_id)?.nombre || l.personal_id}</td>
-                  <td>{etiquetaPeriodo(l.nom_periodos)}</td>
-                  <td><strong>${fmtMonto(l.neto)}</strong></td>
-                  <td>{l.numero_recibo ? `#${l.numero_recibo}` : '—'}</td>
-                  <td>
-                    {!l.anulado && (
-                      <button className="btn btn-ghost btn-sm" onClick={() => handleDescargarRecibo(l)} disabled={descargandoRecibo === l.id}>
-                        {descargandoRecibo === l.id ? 'Generando…' : l.numero_recibo ? 'Descargar recibo' : 'Emitir recibo'}
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          /* Task 6.10 (plan 2026-08-11): historial sin scroll horizontal, se aplastaba en mobile. */
+          <div className="table-scroll">
+            <table className="table" style={{ marginTop: 8 }}>
+              <thead>
+                <tr><th>Persona</th><th>Período</th><th>Neto</th><th>Recibo</th><th></th></tr>
+              </thead>
+              <tbody>
+                {historial.map((l) => (
+                  <tr key={l.id}>
+                    <td>{personas.find((p) => p.id === l.personal_id)?.nombre || l.personal_id}</td>
+                    <td>{etiquetaPeriodo(l.nom_periodos)}</td>
+                    <td><strong>${fmtMonto(l.neto)}</strong></td>
+                    <td>{l.numero_recibo ? `#${l.numero_recibo}` : '—'}</td>
+                    <td>
+                      {!l.anulado && (
+                        <button className="btn btn-ghost btn-sm" onClick={() => handleDescargarRecibo(l)} disabled={descargandoRecibo === l.id}>
+                          {descargandoRecibo === l.id ? 'Generando…' : l.numero_recibo ? 'Descargar recibo' : 'Emitir recibo'}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
