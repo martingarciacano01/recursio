@@ -66,7 +66,7 @@ export default function AprobacionesPage() {
     }
     setProcesando(false); setSeleccion([])
     push(accion === 'aprobado'
-      ? `${ids.length === 1 ? 'Período aprobado' : `${ids.length} períodos aprobados`}.`
+      ? 'Período aprobado: ya se pueden emitir los recibos para el empleado a los legajos.'
       : `${ids.length === 1 ? 'Período rechazado' : `${ids.length} períodos rechazados`}.`, 'success')
     await cargarInstancias(empresaActiva?.id)
   }

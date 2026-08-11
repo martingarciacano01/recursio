@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useLiquidacionStore } from '../store/liquidacionStore'
 import { ausenciasVacacionesElegibles } from '../utils/vacacionesElegibles'
 import { etiquetaPeriodo } from '../utils/etiquetaPeriodo'
-import { generarYDescargarRecibo } from '../utils/emitirReciboLegajo'
+import { emitirYDescargarReciboVariante, tieneFirmaConfigurada } from '../utils/emitirReciboLegajo'
 import { filtrarConveniosVisibles, categoriasVigentes } from '../utils/convenios'
 
 const fmtMonto = (n) => (Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -14,7 +14,7 @@ const fmtMonto = (n) => (Number(n) || 0).toLocaleString('es-AR', { minimumFracti
 // para vacaciones era directamente un bug (liquidaba a TODA la nómina activa
 // sin personalIds). Acá se buscan/eligen de a una persona por vez.
 export default function LiquidacionesIndividuales({ empresaId }) {
-  const { crearPeriodoFinal, crearPeriodoVacaciones, emitirRecibo } = useLiquidacionStore()
+  const { crearPeriodoFinal, crearPeriodoVacaciones, emitirReciboVariante } = useLiquidacionStore()
 
   const [busqueda, setBusqueda] = useState('')
   const [incluirBajas, setIncluirBajas] = useState(false)
@@ -73,7 +73,13 @@ export default function LiquidacionesIndividuales({ empresaId }) {
 
   const [historial, setHistorial] = useState([])
   const [errorHistorial, setErrorHistorial] = useState('')
-  const [descargandoRecibo, setDescargandoRecibo] = useState(null)
+  const [descargandoRecibo, setDescargandoRecibo] = useState(null) // { id, variante }
+  // Fase 7 Task 7.4: gate de firma del botón "para el Empleado".
+  const [tieneFirma, setTieneFirma] = useState(false)
+
+  useEffect(() => {
+    if (empresaId) tieneFirmaConfigurada(empresaId).then(setTieneFirma)
+  }, [empresaId])
 
   // seqEmpresa/seqPersona (Task 3.4, M2): mismo problema de orden de red
   // no garantizado que en LiquidacionPage/ReportesPage — acá aplica al
@@ -217,19 +223,29 @@ export default function LiquidacionesIndividuales({ empresaId }) {
     cargarHistorial()
   }
 
-  const handleDescargarRecibo = async (l) => {
+  const handleDescargarVariante = async (l, variante) => {
     setErrorHistorial('')
-    setDescargandoRecibo(l.id)
+    setDescargandoRecibo({ id: l.id, variante })
     try {
+      // Fase 7 Task 7.4: gate del flujo del período (gate fuerte en RPC).
+      let flujoAprobado = false
+      const { data: flujo } = await supabase.from('nom_flujo_instancias').select('estado').eq('periodo_id', l.periodo_id).maybeSingle()
+      if (flujo?.estado === 'aprobado') flujoAprobado = true
+      if (variante === 'empleado' && !flujoAprobado) {
+        setErrorHistorial('El período debe estar aprobado para emitir el recibo para el empleado.')
+        setDescargandoRecibo(null)
+        return
+      }
       const { data: filasItems } = await supabase.from('nom_liquidacion_items').select('*').eq('liquidacion_id', l.id)
-      const { doc, hash, nombreArchivo } = await generarYDescargarRecibo({
+      const r = await emitirYDescargarReciboVariante({
+        liquidacionId: l.id,
         empresaId, personalId: l.personal_id,
         nombrePersona: personas.find((p) => p.id === l.personal_id)?.nombre || l.personal_id,
         periodo: l.nom_periodos, filasItems, numeroRecibo: l.numero_recibo,
+        variante, emitirReciboVariante,
       })
-      const r = await emitirRecibo(l.id, hash)
       if (!r.ok) { setErrorHistorial(r.error); setDescargandoRecibo(null); return }
-      doc.save(`${nombreArchivo}-${r.numeroRecibo}.pdf`)
+      r.doc.save(`${r.nombreArchivo}-${r.numeroRecibo}${variante === 'empleado' ? '-empleado' : '-empleador'}.pdf`)
       cargarHistorial()
     } catch (e) {
       setErrorHistorial(e instanceof Error ? e.message : String(e))
@@ -426,13 +442,30 @@ export default function LiquidacionesIndividuales({ empresaId }) {
                     <td>{etiquetaPeriodo(l.nom_periodos)}</td>
                     <td><strong>${fmtMonto(l.neto)}</strong></td>
                     <td>{l.numero_recibo ? `#${l.numero_recibo}` : '—'}</td>
-                    <td>
-                      {!l.anulado && (
-                        <button className="btn btn-ghost btn-sm" onClick={() => handleDescargarRecibo(l)} disabled={descargandoRecibo === l.id}>
-                          {descargandoRecibo === l.id ? 'Generando…' : l.numero_recibo ? 'Descargar recibo' : 'Emitir recibo'}
+<td>
+                    {!l.anulado && (
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {/* Fase 7 Task 7.4: variante empleador siempre; empleado
+                            con gate de firma (el de flujo se valida en el handler
+                            contra nom_flujo_instancias). */}
+                        <button className="btn btn-ghost btn-sm"
+                          onClick={() => handleDescargarVariante(l, 'empleador')}
+                          disabled={descargandoRecibo?.id === l.id}>
+                          {descargandoRecibo?.id === l.id && descargandoRecibo.variante === 'empleador'
+                            ? 'Generando…'
+                            : l.numero_recibo ? 'Descargar recibo (Empleador)' : 'Emitir recibo (Empleador)'}
                         </button>
-                      )}
-                    </td>
+                        <button className="btn btn-ghost btn-sm"
+                          title="Se habilita cuando el período esté aprobado y esté cargada la firma del aprobador."
+                          onClick={() => handleDescargarVariante(l, 'empleado')}
+                          disabled={descargandoRecibo?.id === l.id || !tieneFirma}>
+                          {descargandoRecibo?.id === l.id && descargandoRecibo.variante === 'empleado'
+                            ? 'Generando…'
+                            : 'Emitir para Empleado'}
+                        </button>
+                      </div>
+                    )}
+                  </td>
                   </tr>
                 ))}
               </tbody>

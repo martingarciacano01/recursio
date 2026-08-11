@@ -13,7 +13,7 @@ import { verificarEscalaVigente } from '../utils/verificarEscala'
 import SelectorPeriodo from '../components/SelectorPeriodo'
 import { etiquetaConcepto } from '../utils/etiquetaConcepto'
 import { etiquetaPeriodo } from '../utils/etiquetaPeriodo'
-import { generarYDescargarRecibo } from '../utils/emitirReciboLegajo'
+import { emitirYDescargarReciboVariante, tieneFirmaConfigurada } from '../utils/emitirReciboLegajo'
 import { generarZipRecibos, nombreArchivoZip } from '../utils/reciboZip'
 import LiquidacionesIndividuales from '../components/LiquidacionesIndividuales'
 import { useToastStore } from '../store/toastStore'
@@ -53,11 +53,15 @@ export default function LiquidacionPage() {
   const empresaActiva = empresa || empresaVista
   const empresaId = empresaActiva?.id || ''
 
-  const { liquidaciones, calculando, omitidos, advertencias, sinHoras, calcularPeriodo, cargarLiquidaciones, emitirRecibo } = useLiquidacionStore()
+  const { liquidaciones, calculando, omitidos, advertencias, sinHoras, calcularPeriodo, cargarLiquidaciones, emitirRecibo, emitirReciboVariante } = useLiquidacionStore()
   const push = useToastStore((s) => s.push)
   const [mostrarAvisos, setMostrarAvisos] = useState(false)
-  const [emitiendoRecibo, setEmitiendoRecibo] = useState(null)
   const [errorRecibo, setErrorRecibo] = useState('')
+  // Fase 7 Task 7.4: gate del botón "para el Empleado" — flujo aprobado
+  // llega por liquidación (periodoFlujoAprobado); la firma se checa contra
+  // nom_firma_empresa (tieneFirmaConfigurada, cacheado).
+  const [firmaConfigurada, setFirmaConfigurada] = useState(false)
+  const [emitiendoVariante, setEmitiendoVariante] = useState(null)
   const { flujos, cargarFlujos, iniciarFlujo } = useFlujosStore()
   const [flujoElegido, setFlujoElegido] = useState('')
   const [enviandoFlujo, setEnviandoFlujo] = useState(false)
@@ -277,44 +281,39 @@ export default function LiquidacionPage() {
     if (periodoSeleccionado) { cargarLiquidaciones(periodoSeleccionado); cargarAjustesHoras(periodoSeleccionado) }
   }, [periodoSeleccionado])
 
-  // Genera el PDF real (art. 140 LCT, src/utils/reciboPdf.js), calcula su
-  // hash SHA-256 (src/utils/reciboHash.js) y asigna numero_recibo vía RPC
-  // (emitir_recibo, migración 0016) — best-effort en los datos de empresa/
-  // legajo que esta pantalla no tenía cargados hasta ahora, para no
-  // duplicar todo el fetching que ya hacen FichaLegajoPage/SuperAdminPage.
-  const handleEmitirRecibo = async (l) => {
-    setErrorRecibo(''); setEmitiendoRecibo(l.id)
+  // Fase 7 Task 7.4: gate de firma del botón "para el Empleado".
+  useEffect(() => {
+    if (empresaId) tieneFirmaConfigurada(empresaId).then(setFirmaConfigurada)
+  }, [empresaId])
+
+  // Fase 7 Task 7.4: emite la variante pedida ('empleado'|'empleador') con
+  // el flujo de 3 pasos (reservar número → generar PDF con esa variante →
+  // guardar hash). El gate server-side (flujo aprobado + firma para
+  // 'empleado') lo aplica emitir_recibo_variante; el front solo muestra el
+  // botón cuando corresponde.
+  const handleEmitirVariante = async (l, variante) => {
+    setErrorRecibo(''); setEmitiendoVariante({ id: l.id, variante })
     try {
-      // Task 2.6: el hash tiene que autenticar el PDF FINAL, con el número
-      // de recibo ya impreso (reciboPdf.js dibuja "Recibo N°:" en el
-      // documento) — antes se calculaba el hash sobre un PDF sin número
-      // (o con el número viejo, en un regenerar) y recién después se
-      // asignaba/actualizaba el número real, así que el hash guardado
-      // nunca correspondía al PDF que la persona terminaba viendo. Fix:
-      // primero reservar/confirmar el número (emitir_recibo es idempotente
-      // si ya existe), generar el PDF CON ese número, y recién ahí hashear
-      // y guardar el hash definitivo con una segunda llamada (que solo
-      // actualiza el hash, no reasigna número).
-      const numeroReservado = await emitirRecibo(l.id, null)
-      if (!numeroReservado.ok) { setErrorRecibo(numeroReservado.error); setEmitiendoRecibo(null); return }
-      const { doc, hash, nombreArchivo } = await generarYDescargarRecibo({
+      const r = await emitirYDescargarReciboVariante({
+        liquidacionId: l.id,
         empresaId,
         personalId: l.personalId,
         nombrePersona: personalPorId.get(l.personalId) || l.personalId,
         periodo: periodoActivo,
         filasItems: itemsPorLiq[l.id] || [],
-        numeroRecibo: numeroReservado.numeroRecibo,
+        numeroRecibo: l.numeroRecibo,
+        variante,
+        emitirReciboVariante,
       })
-      const r = await emitirRecibo(l.id, hash)
-      if (!r.ok) { setErrorRecibo(r.error); setEmitiendoRecibo(null); return }
-      doc.save(`${nombreArchivo}-${r.numeroRecibo}.pdf`)
-      registrarAcceso(supabase, 'recibo_pdf', l.id, `período ${periodoActivo?.tipo || ''} ${periodoActivo?.fecha_desde || ''}`).catch(() => {})
-      push(`Recibo N° ${r.numeroRecibo} emitido.`, 'success')
+      if (!r.ok) { setErrorRecibo(r.error); setEmitiendoVariante(null); return }
+      r.doc.save(`${r.nombreArchivo}-${r.numeroRecibo}${variante === 'empleado' ? '-empleado' : '-empleador'}.pdf`)
+      registrarAcceso(supabase, `recibo_pdf_${variante}`, l.id, `período ${periodoActivo?.tipo || ''} ${periodoActivo?.fecha_desde || ''}`).catch(() => {})
+      push(`Recibo ${variante === 'empleado' ? 'para Empleado' : 'para Empleador'} N° ${r.numeroRecibo} emitido.`, 'success')
       await cargarLiquidaciones(periodoSeleccionado)
     } catch (e) {
       setErrorRecibo(e instanceof Error ? e.message : String(e))
     }
-    setEmitiendoRecibo(null)
+    setEmitiendoVariante(null)
   }
 
   // Cerrar deja el período en solo lectura: `calcularPeriodo` ya se bloquea
@@ -1069,10 +1068,28 @@ export default function LiquidacionPage() {
                           )}
                           {ajusteHorasHabilitado && errorAjuste && <p style={{ color: 'var(--danger)', fontSize: '0.85rem', marginBottom: 8 }}>{errorAjuste}</p>}
                           {items.length > 0 && !l.anulado && puedeEmitirRecibos && (
-                            <button className="btn btn-primary btn-sm" style={{ marginBottom: 8 }}
-                              onClick={(e) => { e.stopPropagation(); handleEmitirRecibo(l) }} disabled={emitiendoRecibo === l.id}>
-                              {emitiendoRecibo === l.id ? 'Generando…' : l.numeroRecibo ? 'Regenerar recibo PDF' : 'Emitir recibo PDF'}
-                            </button>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }} onClick={(e) => e.stopPropagation()}>
+                              {/* Variante empleador: siempre (comportamiento actual). */}
+                              <button className="btn btn-primary btn-sm"
+                                onClick={() => handleEmitirVariante(l, 'empleador')}
+                                disabled={emitiendoVariante?.id === l.id}>
+                                {emitiendoVariante?.id === l.id && emitiendoVariante.variante === 'empleador'
+                                  ? 'Generando…'
+                                  : l.numeroRecibo ? 'Regenerar recibo (Empleador)' : 'Emitir recibo para Empleador'}
+                              </button>
+                              {/* Variante empleado: solo con flujo aprobado + firma. */}
+                              <button
+                                className="btn btn-ghost btn-sm"
+                                title={!l.periodoFlujoAprobado || !firmaConfigurada
+                                  ? 'Se habilita cuando el período esté aprobado y esté cargada la firma del aprobador (Configuración → Empresa).'
+                                  : undefined}
+                                onClick={() => handleEmitirVariante(l, 'empleado')}
+                                disabled={emitiendoVariante?.id === l.id || !l.periodoFlujoAprobado || !firmaConfigurada}>
+                                {emitiendoVariante?.id === l.id && emitiendoVariante.variante === 'empleado'
+                                  ? 'Generando…'
+                                  : 'Emitir recibo para Empleado'}
+                              </button>
+                            </div>
                           )}
                           {items.length === 0 ? 'Cargando detalle…' : grupos.map(([tipo, titulo]) => {
                             const delGrupo = items.filter((i) => i.tipo === tipo)

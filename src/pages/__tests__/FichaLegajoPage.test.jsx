@@ -41,6 +41,7 @@ vi.mock('../../lib/supabase', () => {
       eq: () => builder,
       order: () => builder,
       single: () => builder,
+      maybeSingle: () => builder,
       then: (resolve) => resolve(respuestas[tabla] ?? { data: [], error: null }),
     }
     return builder

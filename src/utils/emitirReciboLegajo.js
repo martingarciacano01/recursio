@@ -47,6 +47,44 @@ export async function cargarFirmaEmpresa(empresaId) {
   return resultado
 }
 
+// Ligero (no descarga la imagen): solo dice si la empresa tiene la firma
+// configurada — gate del botón "para el Empleado" en el front. El check
+// fuerte (firma + flujo aprobado) lo hace el RPC emitir_recibo_variante.
+let cacheFirmaConfigurada = new Set()
+export async function tieneFirmaConfigurada(empresaId) {
+  if (!empresaId) return false
+  if (cacheFirmaConfigurada.has(empresaId)) return true
+  const { data } = await supabase.from('nom_firma_empresa')
+    .select('empresa_id').eq('empresa_id', empresaId).maybeSingle()
+  if (data) { cacheFirmaConfigurada.add(empresaId); return true }
+  return false
+}
+
+// Flujo de 3 pasos para emitir UN recibo por variante (Fase 7 Task 7.4),
+// extraído para reusarlo en LiquidacionPage/LiquidacionesIndividuales/
+// FichaLegajoPage:
+//   1. reservar/confirmar el número (`emitirReciboVariante` es idempotente
+//      y reutiliza el numero_recibo de la otra variante);
+//   2. generar el PDF CON ese número y la variante (firma para 'empleado');
+//   3. guardar el hash definitivo. Devuelve { ok, error, numeroRecibo, doc,
+//      nombreArchivo } — el caller hace el save() y el refresh según su
+//      propio estado.
+export async function emitirYDescargarReciboVariante({
+  liquidacionId, empresaId, personalId, nombrePersona, periodo, filasItems,
+  numeroRecibo, variante = 'empleador', firma = null, emitirReciboVariante,
+}) {
+  const reserva = await emitirReciboVariante(liquidacionId, variante, null)
+  if (!reserva.ok) return { ok: false, error: reserva.error }
+  const numeroParaPdf = numeroRecibo ?? reserva.numeroRecibo
+  const { doc, hash, nombreArchivo } = await generarYDescargarRecibo({
+    empresaId, personalId, nombrePersona, periodo, filasItems,
+    numeroRecibo: numeroParaPdf, variante, firma,
+  })
+  const r = await emitirReciboVariante(liquidacionId, variante, hash)
+  if (!r.ok) return { ok: false, error: r.error }
+  return { ok: true, numeroRecibo: r.numeroRecibo, doc, nombreArchivo }
+}
+
 // Datos de cabecera del recibo (empresa + persona) resueltos contra
 // Supabase. Extraído de LiquidacionPage.handleEmitirRecibo (Fase 6 Task 7)
 // para poder emitir el mismo recibo desde la ficha del legajo sin duplicar

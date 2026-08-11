@@ -17,7 +17,7 @@ import { useDocumentosStore } from '../store/documentosStore'
 import { pasosGuiaAlta, resumenGuia } from '../utils/guiaAlta'
 import { generarLegajoPdf } from '../utils/legajoPdf'
 import { etiquetaPeriodo } from '../utils/etiquetaPeriodo'
-import { generarYDescargarRecibo, cargarDatosEmpresa } from '../utils/emitirReciboLegajo'
+import { emitirYDescargarReciboVariante, tieneFirmaConfigurada, cargarDatosEmpresa } from '../utils/emitirReciboLegajo'
 
 const PESTANAS = ['Datos', 'Familiares', 'Documentación', 'Sanciones', 'Adicionales', 'Ausencias', 'Liquidaciones']
 
@@ -30,7 +30,7 @@ export default function FichaLegajoPage() {
   // filtrar nom_legajo por empresa_id igual que un usuario normal.
   const empresaActiva = empresa || empresaVista
   const { legajos, familiares, sanciones, error: errorLegajo, cargarLegajos, cargarFamiliares, cargarSanciones } = useLegajoStore()
-  const { crearPeriodoFinal, emitirRecibo } = useLiquidacionStore()
+  const { crearPeriodoFinal, emitirReciboVariante } = useLiquidacionStore()
   const [persona, setPersona] = useState(null)
   const [ausencias, setAusencias] = useState([])
   const [liquidaciones, setLiquidaciones] = useState([])
@@ -42,8 +42,10 @@ export default function FichaLegajoPage() {
   const [generandoFinal, setGenerandoFinal] = useState(false)
   const [errorFinal, setErrorFinal] = useState('')
   const [pestana, setPestana] = useState(PESTANAS[0])
-  const [descargandoRecibo, setDescargandoRecibo] = useState(null)
+  const [descargandoRecibo, setDescargandoRecibo] = useState(null) // { id, variante }
   const [asistenteAbierto, setAsistenteAbierto] = useState(false)
+  // Fase 7 Task 7.4: gate de firma del botón "para el Empleado".
+  const [tieneFirma, setTieneFirma] = useState(false)
 
   // La guía de alta necesita saber qué documentación exige la empresa y cuál
   // ya está cargada. Se lee del mismo store que usa la pestaña Documentación,
@@ -103,6 +105,11 @@ export default function FichaLegajoPage() {
     return () => { cancelado = true }
   }, [personalId, empresaActiva?.id])
 
+  // Fase 7 Task 7.4: gate de firma del botón "para el Empleado".
+  useEffect(() => {
+    if (empresaActiva?.id) tieneFirmaConfigurada(empresaActiva.id).then(setTieneFirma)
+  }, [empresaActiva?.id])
+
   const legajo = legajos.find((l) => l.personalId === personalId) || null
   const fmtMonto = (n) => (Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -125,25 +132,38 @@ export default function FichaLegajoPage() {
     }
   }
 
-  // Descarga el recibo de una liquidación ya calculada. Si la liquidación
-  // todavía no tiene numero_recibo, se lo asigna con la RPC emitir_recibo
-  // (misma semántica que la pantalla de Liquidación) y se guarda el hash.
-  const handleDescargarRecibo = async (l) => {
+  // Descarga el recibo de una liquidación ya calculada, por variante
+  // (Fase 7 Task 7.4): empleador siempre; empleado con gate del flujo del
+  // período (consulta a nom_flujo_instancias, el gate fuerte lo aplica la
+  // RPC emitir_recibo_variante).
+  const handleDescargarVariante = async (l, variante) => {
     setErrorLiquidaciones('')
-    setDescargandoRecibo(l.id)
+    setDescargandoRecibo({ id: l.id, variante })
     try {
+      if (variante === 'empleado') {
+        let flujoAprobado = false
+        const { data: flujo } = await supabase.from('nom_flujo_instancias').select('estado').eq('periodo_id', l.periodo_id).maybeSingle()
+        if (flujo?.estado === 'aprobado') flujoAprobado = true
+        if (!flujoAprobado) {
+          setErrorLiquidaciones('El período debe estar aprobado para emitir el recibo para el empleado.')
+          setDescargandoRecibo(null)
+          return
+        }
+      }
       const { data: filasItems } = await supabase.from('nom_liquidacion_items').select('*').eq('liquidacion_id', l.id)
-      const { doc, hash, nombreArchivo } = await generarYDescargarRecibo({
+      const r = await emitirYDescargarReciboVariante({
+        liquidacionId: l.id,
         empresaId: empresaActiva?.id,
         personalId,
         nombrePersona: persona.nombre,
         periodo: l.nom_periodos,
         filasItems,
         numeroRecibo: l.numero_recibo,
+        variante,
+        emitirReciboVariante,
       })
-      const r = await emitirRecibo(l.id, hash)
       if (!r.ok) { setErrorLiquidaciones(r.error); setDescargandoRecibo(null); return }
-      doc.save(`${nombreArchivo}-${r.numeroRecibo}.pdf`)
+      r.doc.save(`${r.nombreArchivo}-${r.numeroRecibo}${variante === 'empleado' ? '-empleado' : '-empleador'}.pdf`)
     } catch (e) {
       setErrorLiquidaciones(e instanceof Error ? e.message : String(e))
     }
@@ -296,13 +316,27 @@ export default function FichaLegajoPage() {
                     <td>{l.numero_recibo ? `#${l.numero_recibo}${l.version > 1 ? ` v${l.version}` : ''}` : '—'}</td>
                     <td>
                       {!l.anulado && (
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => handleDescargarRecibo(l)}
-                          disabled={descargandoRecibo === l.id || !empresaActiva?.id}
-                        >
-                          {descargandoRecibo === l.id ? 'Generando…' : l.numero_recibo ? 'Descargar recibo' : 'Emitir recibo'}
-                        </button>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => handleDescargarVariante(l, 'empleador')}
+                            disabled={descargandoRecibo?.id === l.id || !empresaActiva?.id}
+                          >
+                            {descargandoRecibo?.id === l.id && descargandoRecibo.variante === 'empleador'
+                              ? 'Generando…'
+                              : l.numero_recibo ? 'Descargar recibo (Empleador)' : 'Emitir recibo (Empleador)'}
+                          </button>
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            title="Se habilita cuando el período esté aprobado y esté cargada la firma del aprobador."
+                            onClick={() => handleDescargarVariante(l, 'empleado')}
+                            disabled={descargandoRecibo?.id === l.id || !empresaActiva?.id || !tieneFirma}
+                          >
+                            {descargandoRecibo?.id === l.id && descargandoRecibo.variante === 'empleado'
+                              ? 'Generando…'
+                              : 'Emitir para Empleado'}
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>

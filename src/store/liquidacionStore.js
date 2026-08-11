@@ -18,6 +18,11 @@ export const liquidacionFromDB = (r) => ({
   version: r.version ?? 1,
   anulado: r.anulado ?? false,
   motivoAnulacion: r.motivo_anulacion ?? null,
+  // Fase 7 Task 7.4: se expone por liquidación el estado del flujo de su
+  // período (el recibo "para el Empleado" solo se habilita si está en
+  // 'aprobado'). El mapper default a false: sin flujo, no hay requisito
+  // de aprobación que usar.
+  periodoFlujoAprobado: !!r.periodo_flujo_aprobado,
 })
 
 export const itemFromDB = (r) => ({
@@ -205,10 +210,20 @@ export const useLiquidacionStore = create((set, get) => ({
     const { data, error } = await supabase.from('nom_liquidaciones').select('*').eq('periodo_id', periodoId)
     if (get()._seqLiq !== seq) return // se pidió otro período mientras esta respuesta viajaba: descartar
     if (error) { set({ error: error.message }); return }
+    // Fase 7 Task 7.4: estado del flujo del período (gate del recibo "para
+    // el Empleado"). Un período puede no tener instancia (nunca entró al
+    // circuito) → flujoAprobado = false.
+    let flujoAprobado = false
+    const { data: flujo } = await supabase.from('nom_flujo_instancias').select('estado').eq('periodo_id', periodoId).maybeSingle()
+    if (flujo?.estado === 'aprobado') flujoAprobado = true
+    if (get()._seqLiq !== seq) return
     // Limpia el error previo: sin esto un error viejo (ej. un periodoId
     // vacío) quedaba pegado en pantalla para siempre, incluso sobre
     // resultados correctos de una corrida posterior.
-    set({ liquidaciones: (data || []).map(liquidacionFromDB), error: null })
+    set({
+      liquidaciones: (data || []).map((r) => liquidacionFromDB({ ...r, periodo_flujo_aprobado: flujoAprobado })),
+      error: null,
+    })
   },
 
   cargarItems: async (liquidacionId) => {
@@ -225,6 +240,18 @@ export const useLiquidacionStore = create((set, get) => ({
   // el PDF con jsPDF y calcularHashPdf (src/utils/reciboHash.js).
   emitirRecibo: async (liquidacionId, hashPdf) => {
     const { data, error } = await supabase.rpc('emitir_recibo', { p_liquidacion_id: liquidacionId, p_hash_pdf: hashPdf })
+    if (error) return { ok: false, error: error.message }
+    return { ok: true, numeroRecibo: data }
+  },
+
+  // Fase 7 Task 7.4: emite una variante puntual con su hash (RPC
+  // emitir_recibo_variante, migración 0069). Reutiliza el mismo
+  // numero_recibo que la variante ya emitida; valida el gate (flujo
+  // aprobado + firma) en el servidor.
+  emitirReciboVariante: async (liquidacionId, variante, hashPdf) => {
+    const { data, error } = await supabase.rpc('emitir_recibo_variante', {
+      p_liquidacion_id: liquidacionId, p_variante: variante, p_hash: hashPdf,
+    })
     if (error) return { ok: false, error: error.message }
     return { ok: true, numeroRecibo: data }
   },

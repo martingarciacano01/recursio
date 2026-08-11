@@ -30,7 +30,7 @@ describe('mappers de liquidacion', () => {
     expect(liquidacionFromDB(row)).toEqual({
       id: 'l1', empresaId: 'e1', periodoId: 'p1', personalId: 'per1', obraId: null, bruto: 1000, neto: 800, estado: 'preliminar',
       totalAportes: 0, totalContribuciones: 0, detalleHoras: null,
-      numeroRecibo: null, hashPdf: null, version: 1, anulado: false, motivoAnulacion: null,
+      numeroRecibo: null, hashPdf: null, version: 1, anulado: false, motivoAnulacion: null, periodoFlujoAprobado: false,
     })
   })
 
@@ -269,6 +269,40 @@ describe('crearPeriodoVacaciones', () => {
   })
 })
 
+function tablaConEstadoFlujo(estado) {
+  return {
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    maybeSingle: vi.fn().mockResolvedValue({ data: estado ? { estado } : null, error: null }),
+  }
+}
+
+describe('cargarLiquidaciones — flujo aprobado (Fase 7 Task 7.4)', () => {
+  it('expone periodoFlujoAprobado=true cuando la instancia del período está aprobada', async () => {
+    const dataLiq = [{ id: 'l1', empresa_id: 'e1', periodo_id: 'per-1', personal_id: 'per1', bruto: 1000, neto: 800, estado: 'preliminar' }]
+    supabase.from = vi.fn((tabla) => {
+      if (tabla === 'nom_liquidaciones') return { select: vi.fn().mockReturnThis(), eq: vi.fn().mockResolvedValue({ data: dataLiq, error: null }) }
+      if (tabla === 'nom_flujo_instancias') return tablaConEstadoFlujo('aprobado')
+      return {}
+    })
+    const { useLiquidacionStore } = await import('../liquidacionStore')
+    await useLiquidacionStore.getState().cargarLiquidaciones('per-1')
+    expect(useLiquidacionStore.getState().liquidaciones[0].periodoFlujoAprobado).toBe(true)
+  })
+
+  it('expone periodoFlujoAprobado=false sin instancia de flujo', async () => {
+    const dataLiq = [{ id: 'l2', empresa_id: 'e1', periodo_id: 'per-2', personal_id: 'per1', bruto: 1000, neto: 800, estado: 'preliminar' }]
+    supabase.from = vi.fn((tabla) => {
+      if (tabla === 'nom_liquidaciones') return { select: vi.fn().mockReturnThis(), eq: vi.fn().mockResolvedValue({ data: dataLiq, error: null }) }
+      if (tabla === 'nom_flujo_instancias') return tablaConEstadoFlujo(null)
+      return {}
+    })
+    const { useLiquidacionStore } = await import('../liquidacionStore')
+    await useLiquidacionStore.getState().cargarLiquidaciones('per-2')
+    expect(useLiquidacionStore.getState().liquidaciones[0].periodoFlujoAprobado).toBe(false)
+  })
+})
+
 describe('cargarLiquidaciones — guardia de secuencia (Task 3.1, race condition C1)', () => {
   it('descarta la respuesta de un pedido viejo si llega despues de uno mas nuevo', async () => {
     // periodo A tarda, periodo B es rapido: A llega DESPUES de B en el
@@ -276,10 +310,16 @@ describe('cargarLiquidaciones — guardia de secuencia (Task 3.1, race condition
     // responde ultimo" (A) y pisaba los datos correctos de B.
     let resolverA
     const promesaA = new Promise((resolve) => { resolverA = resolve })
-    supabase.from = vi.fn(() => ({
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn((_col, periodoId) => (periodoId === 'periodo-A' ? promesaA : Promise.resolve({ data: [{ id: 'liq-B', periodo_id: 'periodo-B' }], error: null }))),
-    }))
+    supabase.from = vi.fn((tabla) => {
+      if (tabla === 'nom_liquidaciones') {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn((_col, periodoId) => (periodoId === 'periodo-A' ? promesaA : Promise.resolve({ data: [{ id: 'liq-B', periodo_id: 'periodo-B' }], error: null }))),
+        }
+      }
+      if (tabla === 'nom_flujo_instancias') return tablaConEstadoFlujo(null)
+      return {}
+    })
     const { useLiquidacionStore } = await import('../liquidacionStore')
     const pA = useLiquidacionStore.getState().cargarLiquidaciones('periodo-A')
     await useLiquidacionStore.getState().cargarLiquidaciones('periodo-B')

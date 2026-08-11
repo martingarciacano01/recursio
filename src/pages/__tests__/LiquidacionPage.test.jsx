@@ -7,6 +7,7 @@ function chain(data, error = null) {
   const obj = {
     select: () => obj, eq: () => obj, order: () => obj, in: () => obj, or: () => obj,
     insert: () => obj, single: () => Promise.resolve({ data, error }),
+    maybeSingle: () => Promise.resolve({ data, error }),
     then: (resolve) => resolve({ data, error }),
   }
   return obj
