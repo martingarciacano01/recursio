@@ -48,6 +48,6 @@ cd supabase && supabase functions deploy liquidar-periodo --project-ref <ref-de-
 
 | Versión | Nombre | Notas |
 |---|---|---|
-| 0069 | firma_recibos | Tabla `nom_firma_empresa`, bucket público `nom-firmas`, columnas `hash_pdf_empleado`/`hash_pdf_empleador`/`emitido_empleado`/`emitido_empleador` en `nom_liquidaciones`, RPC `emitir_recibo_variante`. 100% idempotente. |
+| 0069 | firma_recibos | Tabla `nom_firma_empresa`, bucket público `nom-firmas`, columnas `hash_pdf_empleado`/`hash_pdf_empleador`/`emitido_empleado`/`emitido_empleador` en `nom_liquidaciones`, RPC `emitir_recibo_variante`. 100% idempotente. **Requiere 0054 aplicada** (`estado_revision` en `nom_liquidaciones`, plan de aprobaciones 2026-08-03) — el RPC rechaza liquidaciones con `estado_revision='rechazado'`. |
 
 Sin aplicar la 0069, los botones "para el Empleado" se ven (si hay período aprobado) pero `emitir_recibo_variante` falla con "function does not exist" — aplicar antes de probar la variante.
