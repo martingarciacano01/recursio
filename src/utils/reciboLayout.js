@@ -16,11 +16,16 @@ const suma = (arr) => arr.reduce((s, i) => s + (Number(i.monto) || 0), 0)
 
 export function armarRecibo(items) {
   const lista = items || []
-  const contribuciones = lista.filter((i) => i.grupoRecibo === 'contribucion')
-  const cct = lista.filter((i) => i.grupoRecibo === 'cct')
-  const remunerativos = lista.filter((i) => i.grupoRecibo === 'remunerativo')
-  const noRemunerativos = lista.filter((i) => i.grupoRecibo === 'no_remunerativo')
-  const descuentos = lista.filter((i) => i.grupoRecibo === 'descuento')
+  // Task 2.1 (plan 2026-08-11): un ítem en $0 no aporta al total y ensucia el
+  // recibo (ej. la resta de quincena 1 en quincena 2 deja el ítem en $0 dentro
+  // de la lista — index.ts:838-850). Se descartan de las secciones; se
+  // conservan los informativos (cantidad de horas sin monto).
+  const conMonto = (i) => Number(i.monto) !== 0 || i.tipo === 'informativo'
+  const contribuciones = lista.filter((i) => i.grupoRecibo === 'contribucion' && conMonto(i))
+  const cct = lista.filter((i) => i.grupoRecibo === 'cct' && conMonto(i))
+  const remunerativos = lista.filter((i) => i.grupoRecibo === 'remunerativo' && conMonto(i))
+  const noRemunerativos = lista.filter((i) => i.grupoRecibo === 'no_remunerativo' && conMonto(i))
+  const descuentos = lista.filter((i) => i.grupoRecibo === 'descuento' && conMonto(i))
 
   const subtotalContribuciones = suma(contribuciones) + suma(cct)
   const totalRemunerativo = suma(remunerativos)

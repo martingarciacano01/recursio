@@ -896,14 +896,16 @@ Deno.serve(async (req) => {
     const itemsLote = loteResultados.flatMap((r) => {
       const liqId = liqIdPorPersonal.get(r.personalId)
       if (!liqId) return []
-      return r.resultado.items.map((i) => ({
-        empresa_id: periodo.empresa_id, liquidacion_id: liqId, concepto_codigo: i.codigo,
-        concepto_nombre: i.nombre, tipo: i.tipo, monto: i.monto, regla_aplicada: String(i.reglaAplicada),
-        unidad_texto: i.unidadTexto ?? null,
-        base_calculo: i.baseCalculo ?? null,
-        grupo_recibo: i.grupoRecibo ?? null,
-        detalle_recibo: i.detalleRecibo ?? null,
-      }))
+      return r.resultado.items
+        .filter((i) => i.monto !== 0 || i.tipo === 'informativo')
+        .map((i) => ({
+          empresa_id: periodo.empresa_id, liquidacion_id: liqId, concepto_codigo: i.codigo,
+          concepto_nombre: i.nombre, tipo: i.tipo, monto: i.monto, regla_aplicada: String(i.reglaAplicada),
+          unidad_texto: i.unidadTexto ?? null,
+          base_calculo: i.baseCalculo ?? null,
+          grupo_recibo: i.grupoRecibo ?? null,
+          detalle_recibo: i.detalleRecibo ?? null,
+        }))
     })
     if (itemsLote.length > 0) {
       await supabase.from('nom_liquidacion_items').insert(itemsLote)
@@ -1438,16 +1440,18 @@ async function liquidarPeriodoEspecial(supabase: any, periodo: any, personalIds:
   const itemsInsert = resultados.flatMap((r) => {
     const liqId = liqIdPorPersonal.get(r.personalId)
     if (!liqId) return []
-    return r.items.map((i) => ({
-      empresa_id: periodo.empresa_id, liquidacion_id: liqId, concepto_codigo: i.codigo,
-      concepto_nombre: i.nombre, tipo: i.tipo, monto: i.monto,
-      // Los ítems que pasaron por liquidarConceptos (Task 32b) traen su
-      // reglaAplicada real; indemnización/preaviso (que nunca pasan por el
-      // motor) no tienen una, y se documentan con el marcador de siempre.
-      regla_aplicada: i.reglaAplicada !== undefined ? String(i.reglaAplicada) : 'periodo_especial',
-      unidad_texto: i.unidadTexto ?? null, base_calculo: i.baseCalculo ?? null,
-      grupo_recibo: i.grupoRecibo ?? null, detalle_recibo: i.detalleRecibo ?? null,
-    }))
+    return r.items
+      .filter((i) => i.monto !== 0 || i.tipo === 'informativo')
+      .map((i) => ({
+        empresa_id: periodo.empresa_id, liquidacion_id: liqId, concepto_codigo: i.codigo,
+        concepto_nombre: i.nombre, tipo: i.tipo, monto: i.monto,
+        // Los ítems que pasaron por liquidarConceptos (Task 32b) traen su
+        // reglaAplicada real; indemnización/preaviso (que nunca pasan por el
+        // motor) no tienen una, y se documentan con el marcador de siempre.
+        regla_aplicada: i.reglaAplicada !== undefined ? String(i.reglaAplicada) : 'periodo_especial',
+        unidad_texto: i.unidadTexto ?? null, base_calculo: i.baseCalculo ?? null,
+        grupo_recibo: i.grupoRecibo ?? null, detalle_recibo: i.detalleRecibo ?? null,
+      }))
   })
   if (itemsInsert.length > 0) {
     await supabase.from('nom_liquidacion_items').insert(itemsInsert)

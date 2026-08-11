@@ -92,3 +92,61 @@ describe('armarRecibo — bono no remunerativo (grupoRecibo null) no se imprime'
     expect(r.costoTotalEmpleador).toBeCloseTo(rSinBono.costoTotalEmpleador)
   })
 })
+
+// Task 2.1 (plan 2026-08-11): los ítems en $0 no se imprimen en el recibo.
+// Caso real: resta de quincena 1 en quincena 2 deja el ítem en $0 dentro de
+// la lista (index.ts:838-850). Los ítems informativos se conservan aunque el
+// monto sea 0 (ej. cantidad de horas sin monto).
+describe('armarRecibo — ítems en $0 no se imprimen (Task 2.1)', () => {
+  const itemsConCeros = [
+    ...items,
+    // Remunerativo reducido a $0 por la resta de Q1 (caso Q2 del cliente)
+    { codigo: 'Q1', nombre: 'Adelanto Q1', tipo: 'remunerativo', monto: 0, unidadTexto: null, baseCalculo: null, grupoRecibo: 'remunerativo', detalleRecibo: null },
+    // Descuento que evaluó en $0 (escala faltante, % con base $0)
+    { codigo: 'EXTRA_0', nombre: 'Extra inexistente', tipo: 'descuento', monto: 0, unidadTexto: null, baseCalculo: null, grupoRecibo: 'descuento', detalleRecibo: 'sindical' },
+    // Contribución en $0
+    { codigo: 'SIPA_0', nombre: 'SIPA $0', tipo: 'aporte_patronal', monto: 0, unidadTexto: null, baseCalculo: null, grupoRecibo: 'contribucion', detalleRecibo: 'seguridad_social' },
+    // Informativo en $0: se conserva (pero no tiene grupoRecibo, no se imprime solo)
+    { codigo: 'HORAS', nombre: 'Horas', tipo: 'informativo', monto: 0, unidadTexto: '160', baseCalculo: null, grupoRecibo: null, detalleRecibo: null },
+  ]
+  const r = armarRecibo(itemsConCeros)
+  const rSinCeros = armarRecibo(items)
+
+  it('no aparecen en ninguna sección', () => {
+    expect(r.remunerativos.map((i) => i.codigo)).not.toContain('Q1')
+    expect(r.descuentos.map((i) => i.codigo)).not.toContain('EXTRA_0')
+    expect(r.contribuciones.map((i) => i.codigo)).not.toContain('SIPA_0')
+    expect(r.cct.map((i) => i.codigo)).not.toContain('Q1')
+  })
+
+  it('los totales del recibo no cambian (sumar $0 no altera nada)', () => {
+    expect(r.sueldoBruto).toBeCloseTo(rSinCeros.sueldoBruto)
+    expect(r.sueldoNeto).toBeCloseTo(rSinCeros.sueldoNeto)
+    expect(r.subtotalContribuciones).toBeCloseTo(rSinCeros.subtotalContribuciones)
+    expect(r.costoTotalEmpleador).toBeCloseTo(rSinCeros.costoTotalEmpleador)
+    expect(r.detalle).toEqual(rSinCeros.detalle)
+  })
+})
+
+// Task 2.2 (plan 2026-08-11): armarRecibo con arrays vacíos no rompe y deja
+// secciones vacías detectables por reciboPdf.js (sub-encabezados condicionales).
+describe('armarRecibo — con arrays vacíos (Task 2.2)', () => {
+  const r = armarRecibo([])
+
+  it('secciones vacías y totales en 0', () => {
+    expect(r.contribuciones).toEqual([])
+    expect(r.cct).toEqual([])
+    expect(r.remunerativos).toEqual([])
+    expect(r.noRemunerativos).toEqual([])
+    expect(r.descuentos).toEqual([])
+    expect(r.sueldoBruto).toBe(0)
+    expect(r.totalDescuentos).toBe(0)
+    expect(r.sueldoNeto).toBe(0)
+    expect(r.subtotalContribuciones).toBe(0)
+  })
+
+  it('sin detalle de organismos ni torta (salvo Sueldo Neto)', () => {
+    expect(r.detalle).toEqual([])
+    expect(r.torta.map((s) => s.label)).toEqual(['Sueldo Neto'])
+  })
+})

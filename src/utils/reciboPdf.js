@@ -107,24 +107,28 @@ export async function generarReciboPdf({ empresa, persona, periodo, items, codig
   // ── COSTO TOTAL EMPLEADOR ───────────────────────────────────────────
   banda('COSTO TOTAL EMPLEADOR', R.costoTotalEmpleador)
   encColumnas()
-  R.contribuciones.forEach(filaItem)
+  if (R.contribuciones.length > 0) R.contribuciones.forEach(filaItem)
   if (R.cct.length > 0) {
     subEncabezado('COSTO DERIVADO DEL CCT')
     R.cct.forEach(filaItem)
   }
-  banda('SUBTOTAL CONTRIBUCIONES EMPLEADOR', R.subtotalContribuciones)
+  if (R.subtotalContribuciones !== 0) banda('SUBTOTAL CONTRIBUCIONES EMPLEADOR', R.subtotalContribuciones)
 
   // ── SUELDO BRUTO ────────────────────────────────────────────────────
   banda('SUELDO BRUTO', R.sueldoBruto)
   encColumnas()
-  subEncabezado('REMUNERATIVO')
-  R.remunerativos.forEach(filaItem)
+  if (R.remunerativos.length > 0) {
+    subEncabezado('REMUNERATIVO')
+    R.remunerativos.forEach(filaItem)
+  }
   if (R.noRemunerativos.length > 0) {
     subEncabezado('NO REMUNERATIVO')
     R.noRemunerativos.forEach(filaItem)
   }
-  subEncabezado('DESCUENTOS')
-  R.descuentos.forEach(filaItem)
+  if (R.descuentos.length > 0) {
+    subEncabezado('DESCUENTOS')
+    R.descuentos.forEach(filaItem)
+  }
 
   // ── COMPOSICIÓN SALARIAL ────────────────────────────────────────────
   y += 1
