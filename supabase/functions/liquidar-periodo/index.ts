@@ -667,8 +667,16 @@ Deno.serve(async (req) => {
   // Task 2.12: config de horas extras/jornada por empresa (migración 0050).
   // Sin fila cargada, se comporta exactamente igual que antes (contabiliza
   // HE, sin topes, jornada 8h u 4h si es parcial).
-  const { data: cfgHoras } = await supabase.from('nom_config_horas')
+  // El error se chequea: sin este GRANT (bug 0070), la query devolvía null
+  // en silencio y el cálculo corría sin tope/jornada configurados.
+  const { data: cfgHoras, error: errCfgHoras } = await supabase.from('nom_config_horas')
     .select('*').eq('empresa_id', periodo.empresa_id).maybeSingle()
+  if (errCfgHoras) {
+    await supabase.from('nom_periodos').update({ calculo_estado: 'error' }).eq('id', periodoId)
+    return new Response(JSON.stringify({ error: `error al leer config de horas: ${errCfgHoras.message}`, code: errCfgHoras.code }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
   const jornadaHorasConfig = cfgHoras?.jornada_horas != null
     ? Number(cfgHoras.jornada_horas)
     : null
@@ -701,7 +709,13 @@ Deno.serve(async (req) => {
   // comportamiento de siempre. Se lee SIEMPRE (feedback 2026-08-09): el
   // tope por obra lo configura la propia empresa en Empresa → Horas por
   // obra, sin depender del toggle de feature del superadmin.
-  const { data: cfgsObra } = await supabase.from('nom_config_obras').select('*').eq('empresa_id', periodo.empresa_id)
+  const { data: cfgsObra, error: errCfgsObra } = await supabase.from('nom_config_obras').select('*').eq('empresa_id', periodo.empresa_id)
+  if (errCfgsObra) {
+    await supabase.from('nom_periodos').update({ calculo_estado: 'error' }).eq('id', periodoId)
+    return new Response(JSON.stringify({ error: `error al leer config de horas por obra: ${errCfgsObra.message}`, code: errCfgsObra.code }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
   const configObraPorObraId = new Map<string, any>((cfgsObra || []).map((c: any) => [c.obra_id, c]))
 
   // Bonos no remunerativos (0062): catálogo global activo + aplicaciones y

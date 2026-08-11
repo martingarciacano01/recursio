@@ -35,7 +35,17 @@ Las migraciones 0037, 0038, 0039, 0041 y 0042 se aplicaron el 2026-08-01 en un s
 cd supabase && supabase functions deploy liquidar-periodo --project-ref <ref-de-presencio-dev>
 ```
 
-> **Último deploy: 2026-08-11 (version 23, `--use-api`).** Incluye el fix del tope de horas diarias (`b18eab6`): recorta las horas trabajadas y no solo la extra. Antes (version 22, deploy 2026-08-04) la extra se cortaba pero el básico pagaba las horas completas — por eso "el tope no modificaba nada". Ver `docs/TOPE-HORAS-POR-OBRA.md`.
+> **Último deploy: 2026-08-11 (version 25, `--use-api`).** Incluye el fix del tope de horas diarias (`b18eab6`) y el **chequeo de errores** al leer `nom_config_horas`/`nom_config_obras` (antes un permiso faltante hacía que el cálculo corriera sin tope en silencio). Antes (version 22, deploy 2026-08-04) la extra se cortaba pero el básico pagaba las horas completas — por eso "el tope no modificaba nada". Ver `docs/TOPE-HORAS-POR-OBRA.md`.
+
+## Fix aplicado en vivo — 0070 grants service_role (2026-08-11)
+
+**Causa raíz del "el tope no modifica nada":** la edge function corre con `service_role`, que bypasea RLS pero **no** los GRANTs de tabla. Las tablas de las Fases 5-6 (`nom_config_horas`, `nom_config_obras`, `nom_ajustes_horas`, `nom_bonos`, `nom_bono_aplicaciones`, `nom_bono_excepciones`) solo se concedieron a `authenticated`, nunca a `service_role` → la función las leía en `null` en silencio y calculaba SIN tope/jornada/ajustes/bonos. Verificado con grants reales + log `[DIAG-TOPE]`.
+
+| Versión | Nombre | Notas |
+|---|---|---|
+| 0070 | grants_service_role_fase5_6 | GRANT SELECT/INSERT/UPDATE/DELETE a service_role de las tablas de config de Fase 5-6 + `nom_firma_empresa`. **Aplicada en vivo 2026-08-11.** |
+
+La migración `0070` es idempotente; aplicarla en cualquier entorno nuevo antes de liquidar.
 
 | Versión | Nombre | Notas |
 |---|---|---|
