@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useBonosStore } from '../../store/bonosStore'
 import { useAuthStore } from '../../store/authStore'
+import { useToastStore } from '../../store/toastStore'
 import { supabase } from '../../lib/supabase'
 
 // Gestión de bonos especiales (plan convenios-por-obra 2026-08-07):
@@ -15,6 +16,7 @@ export default function TabBonos({ empresaId }) {
     bonos, aplicaciones, excepciones, cargando, error,
     cargarBonos, crearBonoGlobal, aplicarBono, eliminarAplicacion, setExcepcion, eliminarExcepcion,
   } = useBonosStore()
+  const push = useToastStore((s) => s.push)
 
   const [obras, setObras] = useState([])
   const [personal, setPersonal] = useState([])
@@ -82,6 +84,29 @@ export default function TabBonos({ empresaId }) {
 
   const nombreBono = (id) => bonos.find((b) => b.id === id)?.nombre ?? id
   const nombreObra = (id) => (id ? (obras.find((o) => o.id === id)?.nombre ?? id) : 'Toda la empresa')
+
+  // Task 6.2 (plan 2026-08-11): un click quitaba el bono (aplicación o
+  // excepción) sin confirmación, e ignoraba un posible { ok: false }.
+  const handleQuitarAplicacion = async (a) => {
+    if (!window.confirm(`¿Quitar el bono "${nombreBono(a.bonoId)}" de ${nombreObra(a.obraId)}?`)) return
+    const r = await eliminarAplicacion(a.id)
+    if (!r.ok) {
+      push('No se pudo quitar la aplicación del bono', 'error')
+      return
+    }
+    push('Bono quitado de la aplicación.', 'success')
+  }
+
+  const handleQuitarExcepcion = async (e) => {
+    const persona = e.personalNombre ?? personal.find((p) => p.id === e.personalId)?.nombre ?? e.personalId
+    if (!window.confirm(`¿Quitar la excepción del bono "${nombreBono(e.bonoId)}" para ${persona}?`)) return
+    const r = await eliminarExcepcion(e.id)
+    if (!r.ok) {
+      push('No se pudo quitar la excepción', 'error')
+      return
+    }
+    push('Excepción quitada.', 'success')
+  }
 
   if (cargando) return <div className="card">Cargando…</div>
   if (error) return <div className="card" style={{ color: 'var(--danger)' }}>Error: {error}</div>
@@ -168,7 +193,7 @@ export default function TabBonos({ empresaId }) {
                   <td>{nombreObra(a.obraId)}</td>
                   <td>${a.monto.toLocaleString('es-AR')}</td>
                   <td>{a.tipoMonto === 'por_horas' ? 'por hora' : 'fijo'}</td>
-                  <td><button type="button" className="btn btn-ghost btn-sm" onClick={() => eliminarAplicacion(a.id)}>Quitar</button></td>
+                  <td><button type="button" className="btn btn-ghost btn-sm" onClick={() => handleQuitarAplicacion(a)}>Quitar</button></td>
                 </tr>
               ))}
             </tbody>
@@ -242,7 +267,7 @@ export default function TabBonos({ empresaId }) {
                   <td>{nombreBono(e.bonoId)}</td>
                   <td>{e.personalNombre ?? personal.find((p) => p.id === e.personalId)?.nombre ?? e.personalId}</td>
                   <td>{e.monto === null ? 'Desactivado' : `$${e.monto.toLocaleString('es-AR')}`}</td>
-                  <td><button type="button" className="btn btn-ghost btn-sm" onClick={() => eliminarExcepcion(e.id)}>Quitar</button></td>
+                  <td><button type="button" className="btn btn-ghost btn-sm" onClick={() => handleQuitarExcepcion(e)}>Quitar</button></td>
                 </tr>
               ))}
             </tbody>
