@@ -16,7 +16,6 @@ import { etiquetaPeriodo } from '../utils/etiquetaPeriodo'
 import { generarYDescargarRecibo } from '../utils/emitirReciboLegajo'
 import { generarZipRecibos, nombreArchivoZip } from '../utils/reciboZip'
 import LiquidacionesIndividuales from '../components/LiquidacionesIndividuales'
-import Toast from '../components/Toast'
 import { useToastStore } from '../store/toastStore'
 import { useEmpresaFeaturesStore, FEATURES } from '../store/empresaFeaturesStore'
 import { useConveniosStore } from '../store/conveniosStore'
@@ -54,7 +53,7 @@ export default function LiquidacionPage() {
   const empresaActiva = empresa || empresaVista
   const empresaId = empresaActiva?.id || ''
 
-  const { liquidaciones, calculando, error, omitidos, advertencias, sinHoras, calcularPeriodo, cargarLiquidaciones, emitirRecibo } = useLiquidacionStore()
+  const { liquidaciones, calculando, omitidos, advertencias, sinHoras, calcularPeriodo, cargarLiquidaciones, emitirRecibo } = useLiquidacionStore()
   const push = useToastStore((s) => s.push)
   const [mostrarAvisos, setMostrarAvisos] = useState(false)
   const [emitiendoRecibo, setEmitiendoRecibo] = useState(null)
@@ -362,11 +361,18 @@ export default function LiquidacionPage() {
     if (!periodoSeleccionado) return
     const periodoAlPedir = periodoSeleccionado
     const r = await calcularPeriodo(periodoAlPedir)
+    // Task 6.6 (plan 2026-08-11): antes el error de cálculo salía por un
+    // <Toast> legacy que compartía posición con el ToastContainer global
+    // (ambos bottom:20 right:20). Unificado: pasa por el toastStore global.
+    if (!r.ok) {
+      push(r.error, 'error')
+      return
+    }
     // Task 3.1: el SelectorPeriodo ya queda disabled mientras calculando,
     // pero esto es una segunda guarda defensiva — si por lo que sea el
     // período seleccionado cambió mientras la Edge Function respondía, no
     // recargar liquidaciones del período viejo sobre la pantalla del nuevo.
-    if (r.ok && periodoSeleccionado === periodoAlPedir) cargarLiquidaciones(periodoAlPedir)
+    if (periodoSeleccionado === periodoAlPedir) cargarLiquidaciones(periodoAlPedir)
   }
 
   const liquidacionesFiltradas = liquidaciones.filter((l) => {
@@ -851,7 +857,9 @@ export default function LiquidacionPage() {
         </div>
       )}
 
-      <Toast mensaje={error} tipo="error" onClose={() => useLiquidacionStore.setState({ error: null })} />
+      {/* Task 6.6: el error de cálculo sale por el toastStore/ToastContainer
+          global (ver handleCalcular) — se eliminó el <Toast> legacy que se
+          superponía con él en la misma esquina. */}
       {errorRecibo && <div className="card" style={{ color: 'var(--danger)' }}>Error al emitir recibo: {errorRecibo}</div>}
 
       {erroresZip.length > 0 && (

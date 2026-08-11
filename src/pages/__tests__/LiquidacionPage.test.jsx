@@ -15,11 +15,17 @@ function chain(data, error = null) {
 vi.mock('../../store/authStore', () => ({
   useAuthStore: (sel) => sel({ empresa: { id: 'e1' }, empresaVista: null }),
 }))
+const calcularPeriodoMock = vi.fn()
+const cargarLiquidacionesMock = vi.fn()
 vi.mock('../../store/liquidacionStore', () => ({
   useLiquidacionStore: () => ({
     liquidaciones: [], calculando: false, error: null, omitidos: [], advertencias: [], sinHoras: [],
-    calcularPeriodo: vi.fn(), cargarLiquidaciones: vi.fn(), emitirRecibo: vi.fn(),
+    calcularPeriodo: calcularPeriodoMock, cargarLiquidaciones: cargarLiquidacionesMock, emitirRecibo: vi.fn(),
   }),
+}))
+const pushMock = vi.fn()
+vi.mock('../../store/toastStore', () => ({
+  useToastStore: (sel) => sel({ push: pushMock }),
 }))
 vi.mock('../../store/flujosStore', () => ({
   useFlujosStore: () => ({ flujos: [], cargarFlujos: vi.fn(), iniciarFlujo: vi.fn() }),
@@ -160,9 +166,25 @@ describe('LiquidacionPage — filtro de estado del selector de períodos', () =>
 describe('LiquidacionPage — confirmación de cierre de período', () => {
   beforeEach(() => {
     updatePayload = null
+    calcularPeriodoMock.mockReset().mockResolvedValue({ ok: true })
+    pushMock.mockClear()
     periodosMock = [
       { id: 'p-abierto', tipo: 'mensual', estado: 'abierto', fecha_desde: '2026-07-01', fecha_hasta: '2026-07-31', convenio_id: null },
     ]
+  })
+
+  // Task 6.6: el error de cálculo ahora pasa por el toastStore global (en vez
+  // del <Toast> legacy que se superponía en la misma esquina).
+  it('si calcularPeriodo falla, avisa por el toast global y no recarga', async () => {
+    calcularPeriodoMock.mockResolvedValueOnce({ ok: false, error: 'sin aportes cargados' })
+    render(<MemoryRouter><LiquidacionPage /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('tab', { name: 'Períodos' }))
+    const chip = await screen.findByRole('button', { name: /2026-07-01 a 2026-07-31/ })
+    fireEvent.click(chip)
+    fireEvent.click(screen.getByRole('button', { name: 'Calcular' }))
+    await waitFor(() => {
+      expect(pushMock).toHaveBeenCalledWith('sin aportes cargados', 'error')
+    })
   })
 
   it('no cierra con el primer click y pide confirmar', async () => {
