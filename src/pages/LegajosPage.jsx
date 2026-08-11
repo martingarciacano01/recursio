@@ -18,6 +18,11 @@ export default function LegajosPage() {
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState('')
   const [total, setTotal] = useState(0)
+  // Task 6.5 (plan 2026-08-11): count del estado filtrado (opcional). Efecto
+  // por separado: la query principal sigue trayendo todos los estados (el
+  // filtro es client-side), pero el paginado debe saber cuántos hay del
+  // estado elegido para no ofrecer "Cargar más" que no cambia la tabla.
+  const [totalEstado, setTotalEstado] = useState(null)
   const [busqueda, setBusqueda] = useState('')
   const [filtroEstado, setFiltroEstado] = useState('activo')
   const { rango, siguientePagina, reset, hayMasPaginas } = usePaginado(100)
@@ -27,6 +32,21 @@ export default function LegajosPage() {
   useEffect(() => {
     reset()
   }, [empresaActiva?.id])
+
+  // Task 6.5: count server-side del estado elegido (head query, sin data).
+  // Se usa para decidir "Cargar más"/aviso: con mayoría inactivos y filtro
+  // "Activo", la query principal trae filas de todos los estados por rango, y
+  // sin este count "Cargar más" seguía ofreciéndose sin cambiar la tabla.
+  useEffect(() => {
+    if (!empresaActiva?.id || filtroEstado === 'todos') return
+    let cancelado = false
+    supabase.from('nom_v_personal')
+      .select('id', { count: 'exact', head: true })
+      .eq('empresa_id', empresaActiva.id)
+      .eq('estado', filtroEstado)
+      .then(({ count }) => { if (!cancelado) setTotalEstado(typeof count === 'number' ? count : null) })
+    return () => { cancelado = true }
+  }, [empresaActiva?.id, filtroEstado])
 
   useEffect(() => {
     let cancelado = false
@@ -77,8 +97,18 @@ export default function LegajosPage() {
   // paginado (`filas`), no sobre el total de la empresa. Si hay más páginas
   // sin cargar, el resultado puede estar incompleto: se comunica en la UI.
   const visibles = filtrarLegajos(filas, busqueda, filtroEstado)
-  const filtroActivo = busqueda.trim() !== '' || filtroEstado !== 'activo'
-  const puedeHaberMasCoincidencias = filtroActivo && hayMasPaginas(total)
+  const buscando = busqueda.trim() !== ''
+  // Task 6.5: cuando el filtro es de estado, el botón "Cargar más" y el aviso
+  // se calculan contra el count del estado elegido (no el total de todos los
+  // estados). Si ya cargamos todos los del estado, no hay más que buscar.
+  const cargadosDelEstado = filtroEstado === 'todos' ? filas.length : filas.filter((f) => f.estado === filtroEstado).length
+  const totalEstadoValido = filtroEstado === 'todos' ? total : (totalEstado ?? total)
+  const quedanDelEstado = filtroEstado === 'todos'
+    ? hayMasPaginas(total)
+    : cargadosDelEstado < totalEstadoValido
+  const puedeHaberMasCoincidencias = buscando
+    ? hayMasPaginas(total)
+    : filtroEstado !== 'activo' && filtroEstado !== 'todos' && quedanDelEstado
 
   return (
     <div className="page">
@@ -116,7 +146,7 @@ export default function LegajosPage() {
           </div>
           {puedeHaberMasCoincidencias && (
             <p className="texto-secundario" style={{ fontSize: '0.8rem', marginBottom: '0.5rem' }}>
-              El filtro se aplica sobre lo ya cargado (resultados en {filas.length} de {total} personas) — usá "Cargar más" para incluir el resto.
+              El filtro se aplica sobre lo ya cargado (resultados en {cargadosDelEstado} de {totalEstadoValido} personas del estado) — usá "Cargar más" para incluir el resto.
             </p>
           )}
           <table className="table">
@@ -140,7 +170,9 @@ export default function LegajosPage() {
               ))}
             </tbody>
           </table>
-          {hayMasPaginas(total) && (
+          {/* Task 6.5: "Cargar más" respeta el estado filtrado — no se ofrece
+              cuando ya cargamos todos los del estado aunque queden de otro. */}
+          {quedanDelEstado && (
             <button className="btn btn-ghost btn-sm" onClick={siguientePagina}>Cargar más</button>
           )}
         </div>
