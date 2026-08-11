@@ -212,6 +212,21 @@ describe('opciones de horas extra (Task 2.12, config por empresa)', () => {
     expect(r.horasExtra50).toBe(4) // 12 (tope) - 8 (jornada) = 4, no 6
   })
 
+  it('topeHorasDiarias también recorta horasTrabajadas (Item 2, plan convenios-por-obra)', () => {
+    const dias = [{ fecha: '2026-02-02', horaEntradaEsperada: '08:00', horaEntradaReal: '08:00', ausenciaAprobada: false, horasTrabajadas: 14 }]
+    const r = calcularAsistencia(dias, 15, 8, { topeHorasDiarias: 12 })
+    // El excedente sobre el tope queda fuera de las horas trabajadas del
+    // período (ni normal ni extra): no se paga en silencio vía el básico.
+    expect(r.horasTrabajadas).toBe(12)
+  })
+
+  it('topeHorasDiarias por debajo de la jornada: las horas trabajadas se cortan en el tope', () => {
+    const dias = [{ fecha: '2026-02-02', horaEntradaEsperada: '08:00', horaEntradaReal: '08:00', ausenciaAprobada: false, horasTrabajadas: 10 }]
+    const r = calcularAsistencia(dias, 15, 8, { topeHorasDiarias: 8 })
+    expect(r.horasTrabajadas).toBe(8)
+    expect(r.horasExtra50).toBe(0) // nada por encima del tope: ni normal ni recargo
+  })
+
   it('jornada UOCRA de 9h: 9h trabajadas no generan extra', () => {
     const dias = [{ fecha: '2026-02-02', horaEntradaEsperada: '08:00', horaEntradaReal: '08:00', ausenciaAprobada: false, horasTrabajadas: 9 }]
     const r = calcularAsistencia(dias, 15, 9)

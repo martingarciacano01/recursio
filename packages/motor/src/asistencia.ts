@@ -70,7 +70,14 @@ export function calcularAsistencia(
 
   for (const dia of dias) {
     const horas = dia.horasTrabajadas ?? 0
-    resultado.horasTrabajadas += horas
+    // topeHorasDiarias (Item 2, plan convenios-por-obra 2026-08-07): el tope
+    // no solo recorta la hora extra — el excedente sobre el tope queda
+    // directamente fuera de las horas trabajadas del período (ni normal ni
+    // extra). Sin esto, una jornada de 14h con tope 12 seguía contando 14h
+    // para el básico, pagando 2h en silencio aunque el recargo extra se
+    // hubiese cortado en el tope.
+    const horasTopadas = opciones.topeHorasDiarias != null ? Math.min(horas, opciones.topeHorasDiarias) : horas
+    resultado.horasTrabajadas += horasTopadas
 
     if (dia.horasExtra50 !== undefined || dia.horasExtra100 !== undefined) {
       // Precalculadas (corrección manual futura): tienen prioridad.
@@ -78,16 +85,15 @@ export function calcularAsistencia(
       resultado.horasExtra100 += dia.horasExtra100 ?? 0
     } else if (dia.esFeriado) {
       // Feriado trabajado (Task 2.5): recargo 100%, no cuenta como extra 50.
-      resultado.horasFeriado += horas
+      resultado.horasFeriado += horasTopadas
     } else if (dia.esDomingo) {
-      resultado.horasExtra100 += horas
-    } else if (contabilizarHorasExtras && horas > jornadaHoras) {
+      resultado.horasExtra100 += horasTopadas
+    } else if (contabilizarHorasExtras && horasTopadas > jornadaHoras) {
       // topeHorasDiarias: el excedente por encima del tope no se paga con
       // recargo (queda directamente sin contar, ni como normal ni como
       // extra) — el tope existe para que un exceso desmedido (error de
       // fichaje, jornada mal cerrada) no dispare una hora extra gigante.
-      const horasHastaTope = opciones.topeHorasDiarias != null ? Math.min(horas, opciones.topeHorasDiarias) : horas
-      resultado.horasExtra50 += horasHastaTope - jornadaHoras
+      resultado.horasExtra50 += horasTopadas - jornadaHoras
     }
 
     if (dia.horaEntradaEsperada === null) continue // día no laborable: no hay falta ni tardanza
