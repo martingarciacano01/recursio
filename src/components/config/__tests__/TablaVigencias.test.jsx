@@ -59,4 +59,11 @@ describe('TablaVigencias', () => {
       '2026-08-01'
     )
   })
+
+  // Task 6.9: sin categorías/no remunerativos, la tabla mostraba solo el
+  // encabezado. Ahora mensaje de vacío.
+  it('sin items muestra el mensaje de vacío en vez de la tabla vacía', () => {
+    render(<TablaVigencias items={[]} etiquetaValor="Básico" soloLectura onGuardar={() => {}} mensajeVacio="Sin categorías todavía." />)
+    expect(screen.getByText('Sin categorías todavía.')).toBeInTheDocument()
+  })
 })

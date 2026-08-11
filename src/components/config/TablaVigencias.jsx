@@ -7,7 +7,7 @@ const fmt = (n) => `$ ${Number(n).toLocaleString('es-AR')}`
 // conModalidad: agrega el selector "Modalidad" (hora/mensual/quincenal) al
 // alta de vigencia — solo tiene sentido para escalas de básico, no para
 // no remunerativos (que no tienen modalidad de pago).
-export default function TablaVigencias({ items, etiquetaValor, soloLectura, onGuardar, conModalidad = false }) {
+export default function TablaVigencias({ items, etiquetaValor, soloLectura, onGuardar, conModalidad = false, mensajeVacio = '' }) {
   const [abierto, setAbierto] = useState(false)
   const [valores, setValores] = useState({})       // nombre -> monto tipeado
   const [modalidades, setModalidades] = useState({}) // nombre -> modalidad elegida
@@ -39,6 +39,11 @@ export default function TablaVigencias({ items, etiquetaValor, soloLectura, onGu
           <tr><th style={{ textAlign: 'left' }}>Categoría</th><th style={{ textAlign: 'right' }}>{etiquetaValor} vigente</th><th /></tr>
         </thead>
         <tbody>
+          {items.length === 0 && mensajeVacio && (
+            // Task 6.9 (plan 2026-08-11): antes un convenio sin categorías/no
+            // remunerativos dejaba solo el encabezado, sin decir nada.
+            <tr><td colSpan={3} style={{ color: 'var(--text-secondary)' }}>{mensajeVacio}</td></tr>
+          )}
           {items.map((i) => (
             <FilaCategoria key={i.nombre} item={i} expandido={expandido === i.nombre}
               onToggle={() => setExpandido(expandido === i.nombre ? null : i.nombre)} />

@@ -22,6 +22,8 @@ export default function TabNoRemunerativos({ convenio, soloLectura }) {
         items={agruparVigencias(noRemunerativos, hoy)}
         etiquetaValor="Monto no rem."
         soloLectura={soloLectura}
+        // Task 6.9: estado vacío visible (antes quedaba solo el encabezado).
+        mensajeVacio="Sin no remunerativos para este convenio todavía. Agregalos desde “Nueva vigencia” o importalos en lote desde la pestaña “Importar CSV”."
         onGuardar={async (filas, fecha) => {
           const r = await guardarVigencias(convenio.id, filas, fecha)
           if (r.ok) await cargarNoRemunerativos(convenio.id)
