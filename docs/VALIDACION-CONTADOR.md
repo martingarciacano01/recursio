@@ -42,3 +42,28 @@ divisor.
    del contador.
 3. Corregir el motor donde haya divergencia (volver a las tasks 2.1–2.13
    según corresponda) y tachar el punto de esta lista.
+
+---
+
+## Archivado (Fase 7, plan 2026-08-11): firma del recibo en dos variantes
+
+Decisión de producto implementada (pendiente de validación del contador):
+
+- **Recibo "para el Empleado"**: lo recibe el trabajador, lleva la imagen
+  de la firma del aprobador de pago + aclaración (Nombre y Apellido y
+  puesto de la compañía). Solo se puede emitir cuando el flujo del período
+  está **aprobado** y hay firma configurada en Configuración → Empresa
+  (tabla `nom_firma_empresa`, migración 0069).
+- **Recibo "para el Empleador"**: lo conserva la empresa, deja el espacio
+  en blanco de "Firma del Empleado" (el trabajador firma al cobrar).
+  Emitible siempre, también antes de la aprobación.
+
+Ambas variantes comparten el mismo `numero_recibo` por liquidación y se
+hashean por separado (`hash_pdf_empleado`/`hash_pdf_empleador`). La firma
+la configura el admin o el aprobador de pago; el RPC `emitir_recibo_variante`
+rechaza la variante empleado si el período no está aprobado o no hay firma.
+
+**Queda para el contador:** confirmar que la firma del aprobador de pago
+es la que corresponde en el recibo del trabajador (vs. firma del empleador
+propiamente dicha) y que la aclaración nombre/puesto cumple lo que pide el
+CCT/ley aplicable.

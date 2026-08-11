@@ -41,3 +41,13 @@ cd supabase && supabase functions deploy liquidar-periodo --project-ref <ref-de-
 | 0067 | periodo_por_obra | Agrega `nom_periodos.obra_id` (opcional): un período puede acotarse a una obra/sitio; al calcular, `liquidar-periodo` procesa solo el personal activo de esa obra. Idempotente. |
 
 **Estado 0058–0063:** confirmadas aplicadas por el usuario en Presencio-dev (2026-08-07, handoff). 0063 habilita las 4 features por empresa en Superadmin → "Features" — sin tildar, la UI no muestra nada nuevo y liquidar-periodo ignora ajustes/topes por obra/bonos aunque haya datos cargados. **Importante:** `liquidar-periodo` consulta `nom_empresa_features` y `nom_bonos`/`nom_bono_aplicaciones`/`nom_bono_excepciones` incondicionalmente al inicio; si esas tablas no existen la función falla para CUALQUIER período (incluida la liquidación final) — por eso el diagnóstico y el redeploy van juntos.
+
+## Pendiente de aplicar — 0069 firma de recibos (Fase 7, plan 2026-08-11)
+
+**No requiere redeploy de `liquidar-periodo`** (la migración es solo SQL; el front ya emite contra el RPC nuevo). Aplicar en SQL Editor de Presencio-dev:
+
+| Versión | Nombre | Notas |
+|---|---|---|
+| 0069 | firma_recibos | Tabla `nom_firma_empresa`, bucket público `nom-firmas`, columnas `hash_pdf_empleado`/`hash_pdf_empleador`/`emitido_empleado`/`emitido_empleador` en `nom_liquidaciones`, RPC `emitir_recibo_variante`. 100% idempotente. |
+
+Sin aplicar la 0069, los botones "para el Empleado" se ven (si hay período aprobado) pero `emitir_recibo_variante` falla con "function does not exist" — aplicar antes de probar la variante.
