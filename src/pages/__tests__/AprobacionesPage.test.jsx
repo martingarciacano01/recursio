@@ -77,4 +77,29 @@ describe('AprobacionesPage — detalle de recibos y rechazo individual', () => {
     render(<MemoryRouter><AprobacionesPage /></MemoryRouter>)
     expect(screen.getByRole('link', { name: 'Ver detalle' })).toHaveAttribute('href', '/liquidacion?periodo=p1')
   })
+
+  // Task 6.4 (plan 2026-08-11): solo había "Ver más períodos" — sin vuelta
+  // atrás. Con más de una página debe poder volver.
+  it('pagina: Ver más períodos y luego volver con Ver períodos anteriores', () => {
+    const instancias = Array.from({ length: 12 }, (_, i) => ({
+      id: `i${i}`, periodoId: `p${i}`, estado: 'en_progreso',
+      periodo: { tipo: 'mensual', fechaDesde: '2026-07-01', fechaHasta: '2026-07-31' },
+      pasoActual: { orden: 1, nombre: 'Revisión' },
+    }))
+    useAprobacionesStore.mockReturnValue({
+      instancias, recibosPorPeriodo: {}, agregadosPorPeriodo: {}, personalPorId: {},
+      cargando: false, error: null,
+      cargarInstancias: vi.fn(), actuar: vi.fn().mockResolvedValue({ ok: true }), revisarLiquidacion: vi.fn().mockResolvedValue({ ok: true }),
+    })
+    useAuthStore.mockImplementation((sel) => sel({ empresa: { id: 'e1' }, empresaVista: null }))
+
+    render(<MemoryRouter><AprobacionesPage /></MemoryRouter>)
+    expect(screen.getAllByText(/Período mensual/)).toHaveLength(10)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ver más períodos' }))
+    expect(screen.getAllByText(/Período mensual/)).toHaveLength(2)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ver períodos anteriores' }))
+    expect(screen.getAllByText(/Período mensual/)).toHaveLength(10)
+  })
 })

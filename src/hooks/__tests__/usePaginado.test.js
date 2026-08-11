@@ -30,4 +30,17 @@ describe('usePaginado', () => {
     act(() => result.current.siguientePagina())
     expect(result.current.hayMasPaginas(120)).toBe(false) // ya cubrio 0-149
   })
+
+  // Task 6.4 (plan 2026-08-11): solo se podía avanzar — sin vuelta atrás.
+  it('paginaAnterior vuelve a la pagina previa sin bajar de 0', () => {
+    const { result } = renderHook(() => usePaginado(50))
+    act(() => result.current.siguientePagina())
+    act(() => result.current.siguientePagina())
+    act(() => result.current.paginaAnterior())
+    expect(result.current.pagina).toBe(1)
+    expect(result.current.rango).toEqual([50, 99])
+    act(() => result.current.paginaAnterior())
+    act(() => result.current.paginaAnterior())
+    expect(result.current.pagina).toBe(0)
+  })
 })

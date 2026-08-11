@@ -31,7 +31,7 @@ export default function AprobacionesPage() {
   const [rechazando, setRechazando] = useState(null)
   const [errorAccion, setErrorAccion] = useState(null)
   const [procesando, setProcesando] = useState(false)
-  const { pagina, rango, siguientePagina, reset, hayMasPaginas } = usePaginado(TAMANO_PAGINA)
+  const { pagina, rango, siguientePagina, paginaAnterior, reset, hayMasPaginas } = usePaginado(TAMANO_PAGINA)
   const push = useToastStore((s) => s.push)
 
   useEffect(() => { if (empresaActiva?.id) cargarInstancias(empresaActiva.id) }, [empresaActiva?.id])
@@ -214,8 +214,11 @@ export default function AprobacionesPage() {
         )
       })}
 
+      {/* Task 6.4 (plan 2026-08-11): sin vuelta atrás al paginar, y el
+          <div> quedaba vacío en la última página cuando pagina > 0. */}
       {(pagina > 0 || hayMasPaginas(instancias.length)) && (
         <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 12 }}>
+          {pagina > 0 && <button className="btn btn-ghost btn-sm" onClick={paginaAnterior}>Ver períodos anteriores</button>}
           {hayMasPaginas(instancias.length) && <button className="btn btn-ghost btn-sm" onClick={siguientePagina}>Ver más períodos</button>}
         </div>
       )}

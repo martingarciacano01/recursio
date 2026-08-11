@@ -11,8 +11,9 @@ export function usePaginado(tamanoPagina) {
   const rango = [pagina * tamanoPagina, (pagina + 1) * tamanoPagina - 1]
 
   const siguientePagina = useCallback(() => setPagina((p) => p + 1), [])
+  const paginaAnterior = useCallback(() => setPagina((p) => Math.max(0, p - 1)), [])
   const reset = useCallback(() => setPagina(0), [])
   const hayMasPaginas = useCallback((total) => rango[1] + 1 < total, [rango])
 
-  return { pagina, rango, siguientePagina, reset, hayMasPaginas }
+  return { pagina, rango, siguientePagina, paginaAnterior, reset, hayMasPaginas }
 }
