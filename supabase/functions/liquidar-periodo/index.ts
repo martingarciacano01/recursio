@@ -40,7 +40,14 @@ type ConceptoConConvenio = Concepto & { convenioId: string | null; config: any }
 // null). Función pura — exportada para poder testearla sin levantar todo
 // el handler de la Edge Function.
 export interface BonoCatalogo { id: string; nombre: string; activo?: boolean }
-export interface BonoAplicacion { bono_id: string; obra_id: string | null; monto: number | string }
+export interface BonoAplicacion {
+  bono_id: string
+  obra_id: string | null
+  monto: number | string
+  // 'fijo' (default, histórico 0062) = el monto se paga tal cual;
+  // 'por_horas' (0064) = monto × horas trabajadas del período.
+  tipo_monto?: string | null
+}
 export interface BonoExcepcion { bono_id: string; personal_id: string; monto: number | string | null }
 
 export function resolverBonosPersona(
@@ -48,23 +55,29 @@ export function resolverBonosPersona(
   obraId: string | null,
   bonos: BonoCatalogo[],
   aplicaciones: BonoAplicacion[],
-  excepciones: BonoExcepcion[]
+  excepciones: BonoExcepcion[],
+  horasTrabajadas = 0
 ): { codigo: string; nombre: string; monto: number }[] {
   // Por bono, se prioriza la aplicación específica de la obra sobre la
   // genérica de toda la empresa (obra_id NULL) si ambas existiesen.
-  const porBono = new Map<string, { nombre: string; monto: number }>()
+  const porBono = new Map<string, { nombre: string; monto: number; esPorHora: boolean }>()
   for (const ap of aplicaciones) {
     if (ap.obra_id !== null && ap.obra_id !== obraId) continue
     const yaHayEspecifica = porBono.has(ap.bono_id) && ap.obra_id === null
     if (yaHayEspecifica) continue
     const nombre = bonos.find((b) => b.id === ap.bono_id)?.nombre ?? 'Bono'
-    porBono.set(ap.bono_id, { nombre, monto: Number(ap.monto) })
+    porBono.set(ap.bono_id, {
+      nombre,
+      monto: Number(ap.monto),
+      esPorHora: ap.tipo_monto === 'por_horas',
+    })
   }
   const result: { codigo: string; nombre: string; monto: number }[] = []
   for (const [bonoId, cfg] of porBono) {
     const ex = excepciones.find((e) => e.bono_id === bonoId && e.personal_id === personalId)
     if (ex && ex.monto == null) continue // excepción "desactivado" para esta persona
-    const monto = ex && ex.monto != null ? Number(ex.monto) : cfg.monto
+    let monto = ex && ex.monto != null ? Number(ex.monto) : cfg.monto
+    if (cfg.esPorHora) monto = monto * horasTrabajadas // el valor es POR HORA trabajada
     if (monto === 0) continue
     result.push({ codigo: `bono_${bonoId}`, nombre: cfg.nombre, monto })
   }
@@ -290,6 +303,13 @@ Deno.serve(async (req) => {
     if (periodo.convenio_id) return l?.convenio_id === periodo.convenio_id && l?.fuera_convenio !== true
     return l?.fuera_convenio !== true
   })
+  // Período acotado a una obra/sitio (nom_periodos.obra_id, migración 0067):
+  // solo se procesa el personal activo asignado a esa obra. El filtro va
+  // DESPUÉS del de fuera de convenio/convenio porque la obra es un recorte
+  // adicional, no un sustituto.
+  if (periodo.obra_id) {
+    personalAProcesar = personalAProcesar.filter((p: any) => p.obra_id === periodo.obra_id)
+  }
 
   // Universo del período: la nómina que ESTE tipo de período debe liquidar
   // (ya filtrada por fuera de convenio arriba). Se guarda antes de aplicar
@@ -653,30 +673,48 @@ Deno.serve(async (req) => {
     ? Number(cfgHoras.jornada_horas)
     : null
 
+  // ─── Features de la empresa (migración 0063) ──────────────────────────
+  // Superadmin habilita cada feature por cliente desde Superadmin → Features
+  // (nom_empresa_features). Sin fila = apagada. El cálculo tiene que
+  // respetar el flag aunque haya datos cargados (ajustes/config de
+  // obra/bonos que quedaron de una prueba, o de cuando la feature estuvo
+  // habilitada y después se apagó) — el flag no es solo de UI.
+  const { data: featuresRows } = await supabase.from('nom_empresa_features')
+    .select('feature, activo').eq('empresa_id', periodo.empresa_id)
+  const featuresActivas = new Set((featuresRows || []).filter((f: any) => f.activo).map((f: any) => f.feature))
+  const ajusteHorasHabilitado = featuresActivas.has('ajuste_horas_periodo')
+  const bonosHabilitados = featuresActivas.has('bonos_no_remunerativos')
+
   // ─── Convenios por obra, ajustes de horas y bonos (plan 2026-08-07) ───
   // Ajuste GLOBAL de horas por persona y período (0061): un delta único,
   // no día a día — se aplica sobre horasTrabajadas antes de resolver el
   // básico, para que el básico por hora también lo refleje.
-  const { data: ajustesHoras } = await supabase.from('nom_ajustes_horas')
-    .select('personal_id, horas_globales').eq('periodo_id', periodoId)
+  const { data: ajustesHoras } = ajusteHorasHabilitado
+    ? await supabase.from('nom_ajustes_horas').select('personal_id, horas_globales').eq('periodo_id', periodoId)
+    : { data: [] as any[] }
   const ajusteHorasPorPersonal = new Map<string, number>(
     (ajustesHoras || []).map((a: any) => [a.personal_id, Number(a.horas_globales)])
   )
 
   // Tope de horas y jornada por OBRA (0060): resolución en el loop es
   // obra → empresa (cfgHoras) → default. Sin config de obra, se cae al
-  // comportamiento de siempre.
-  const { data: cfgsObra } = await supabase.from('nom_config_obras')
-    .select('*').eq('empresa_id', periodo.empresa_id)
+  // comportamiento de siempre. Se lee SIEMPRE (feedback 2026-08-09): el
+  // tope por obra lo configura la propia empresa en Empresa → Horas por
+  // obra, sin depender del toggle de feature del superadmin.
+  const { data: cfgsObra } = await supabase.from('nom_config_obras').select('*').eq('empresa_id', periodo.empresa_id)
   const configObraPorObraId = new Map<string, any>((cfgsObra || []).map((c: any) => [c.obra_id, c]))
 
   // Bonos no remunerativos (0062): catálogo global activo + aplicaciones y
   // excepciones de esta empresa. Ver resolverBonosPersona más arriba.
-  const { data: bonosCatalogo } = await supabase.from('nom_bonos').select('id, nombre, activo').eq('activo', true)
-  const { data: bonoAplicaciones } = await supabase.from('nom_bono_aplicaciones')
-    .select('bono_id, obra_id, monto').eq('empresa_id', periodo.empresa_id)
-  const { data: bonoExcepciones } = await supabase.from('nom_bono_excepciones')
-    .select('bono_id, personal_id, monto').eq('empresa_id', periodo.empresa_id)
+  const { data: bonosCatalogo } = bonosHabilitados
+    ? await supabase.from('nom_bonos').select('id, nombre, activo').eq('activo', true)
+    : { data: [] as any[] }
+  const { data: bonoAplicaciones } = bonosHabilitados
+    ? await supabase.from('nom_bono_aplicaciones').select('bono_id, obra_id, monto, tipo_monto').eq('empresa_id', periodo.empresa_id)
+    : { data: [] as any[] }
+  const { data: bonoExcepciones } = bonosHabilitados
+    ? await supabase.from('nom_bono_excepciones').select('bono_id, personal_id, monto').eq('empresa_id', periodo.empresa_id)
+    : { data: [] as any[] }
 
   const resultados = []
   for (const persona of personalAProcesar) {
@@ -754,13 +792,15 @@ Deno.serve(async (req) => {
     const { basicoPeriodo, basicoConvenio, noRem, conceptosLegajo, horasLiquidadas, unidadBasico, baseBasico } =
       await resolverBasicoYConceptos(legajo, asistencia, persona.id, cfgHoras?.contabilizar_horas_extras ?? true)
 
-    // Bonos no remunerativos aplicables a esta persona (obra + excepción,
-    // 0062): se agregan como conceptos sintéticos tipo 'bono' — motor.ts
-    // los suma a bruto/neto sin tocar ninguna base y sin imprimirlos en el
-    // recibo (grupoRecibo forzado a null). orden 999+ para que queden
-    // después de los conceptos del convenio (no afecta bases por diseño).
+    // Bonos no remunerativos aplicables a esta persona (obra + excepción +
+    // tipo de monto, 0062/0064): se agregan como conceptos sintéticos tipo
+    // 'bono' — motor.ts los suma a bruto/neto sin tocar ninguna base y sin
+    // imprimirlos en el recibo (grupoRecibo forzado a null). orden 999+ para
+    // que queden después de los conceptos del convenio (no afecta bases por
+    // diseño). Los de tipo 'por_horas' (0064) ya vienen multiplicados por las
+    // horas trabajadas del período desde resolverBonosPersona.
     const bonosPersona = resolverBonosPersona(
-      persona.id, obraId, bonosCatalogo || [], bonoAplicaciones || [], bonoExcepciones || []
+      persona.id, obraId, bonosCatalogo || [], bonoAplicaciones || [], bonoExcepciones || [], asistencia.horasTrabajadas
     )
     const conceptosLegajoConBonos: ConceptoConConvenio[] = [
       ...conceptosLegajo,
@@ -811,8 +851,14 @@ Deno.serve(async (req) => {
 
     // horasLiquidadas se guarda junto a la asistencia (dentro de
     // detalle_horas) para que el CSV y la grilla de LiquidacionPage.jsx
-    // puedan mostrarla — ver plan 2026-07-29 §2.
-    resultados.push({ personalId: persona.id, resultado, asistencia: { ...asistencia, horasLiquidadas } })
+    // puedan mostrarla — ver plan 2026-07-29 §2. topeHorasDiarias (0060,
+    // resuelto obra → empresa → default) se guarda también para mostrarlo
+    // en el panel de la fila expandida (Item 3, plan convenios-por-obra).
+    resultados.push({
+      personalId: persona.id, obraId,
+      resultado,
+      asistencia: { ...asistencia, horasLiquidadas, topeHorasDiarias: topeHorasDiarias ?? null },
+    })
   }
 
   // Idempotencia: el `upsert` con `onConflict: 'periodo_id,personal_id'`
@@ -823,6 +869,7 @@ Deno.serve(async (req) => {
   for (const loteResultados of partirEnLotes(resultados, 50)) {
     const filasLiquidacion = loteResultados.map((r) => ({
       empresa_id: periodo.empresa_id, periodo_id: periodoId, personal_id: r.personalId,
+      obra_id: r.obraId ?? null,
       bruto: r.resultado.bruto, neto: r.resultado.neto, total_aportes: r.resultado.totalDescuentos,
       total_contribuciones: r.resultado.items
         .filter((i) => i.tipo === 'aporte_patronal')

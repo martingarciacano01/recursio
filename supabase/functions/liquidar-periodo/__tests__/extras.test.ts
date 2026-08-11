@@ -64,6 +64,21 @@ describe('resolverBonosPersona (Task 3.1 — bonos por obra + excepción)', () =
     expect(r2).toEqual([{ codigo: 'bono_b1', nombre: 'Bono presentismo', monto: 50000 }])
   })
 
+  it('bono tipo "por_horas" (0064): monto × horas trabajadas del período', () => {
+    const r = resolverBonosPersona('p1', 'obraA', bonos,
+      [{ bono_id: 'b1', obra_id: 'obraA', monto: 1000, tipo_monto: 'por_horas' }], [],
+      120)
+    expect(r).toEqual([{ codigo: 'bono_b1', nombre: 'Bono presentismo', monto: 120000 }])
+  })
+
+  it('bono "por_horas" con excepción de monto: usa el monto de la excepción como valor por hora', () => {
+    const r = resolverBonosPersona('p1', 'obraA', bonos,
+      [{ bono_id: 'b1', obra_id: 'obraA', monto: 1000, tipo_monto: 'por_horas' }],
+      [{ bono_id: 'b1', personal_id: 'p1', monto: 1500 }],
+      40)
+    expect(r).toEqual([{ codigo: 'bono_b1', nombre: 'Bono presentismo', monto: 60000 }])
+  })
+
   it('sin aplicaciones: no hay bonos', () => {
     expect(resolverBonosPersona('p1', 'obraA', bonos, [], [])).toEqual([])
   })
