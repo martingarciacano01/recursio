@@ -227,6 +227,27 @@ describe('opciones de horas extra (Task 2.12, config por empresa)', () => {
     expect(r.horasExtra50).toBe(0) // nada por encima del tope: ni normal ni recargo
   })
 
+  it('feriado trabajado se topa igual que las horas normales (no excede el tope)', () => {
+    const dias = [{ fecha: '2026-05-25', horaEntradaEsperada: null, horaEntradaReal: '08:00', ausenciaAprobada: false, horasTrabajadas: 14, esFeriado: true }]
+    const r = calcularAsistencia(dias, 15, 8, { topeHorasDiarias: 12 })
+    expect(r.horasFeriado).toBe(12) // el excedente sobre el tope no entra ni como feriado
+    expect(r.horasTrabajadas).toBe(12)
+  })
+
+  it('domingo trabajado se topa igual que las horas normales (no excede el tope)', () => {
+    const dias = [{ fecha: '2026-06-21', horaEntradaEsperada: null, horaEntradaReal: '09:00', ausenciaAprobada: false, horasTrabajadas: 10, esDomingo: true }]
+    const r = calcularAsistencia(dias, 15, 8, { topeHorasDiarias: 6 })
+    expect(r.horasExtra100).toBe(6)
+    expect(r.horasTrabajadas).toBe(6)
+  })
+
+  it('topeHorasDiarias null: sin tope, comportamiento de siempre', () => {
+    const dias = [{ fecha: '2026-02-02', horaEntradaEsperada: '08:00', horaEntradaReal: '08:00', ausenciaAprobada: false, horasTrabajadas: 14 }]
+    const r = calcularAsistencia(dias, 15, 8, { topeHorasDiarias: null })
+    expect(r.horasTrabajadas).toBe(14)
+    expect(r.horasExtra50).toBe(6) // 14 - 8 jornada
+  })
+
   it('jornada UOCRA de 9h: 9h trabajadas no generan extra', () => {
     const dias = [{ fecha: '2026-02-02', horaEntradaEsperada: '08:00', horaEntradaReal: '08:00', ausenciaAprobada: false, horasTrabajadas: 9 }]
     const r = calcularAsistencia(dias, 15, 9)
