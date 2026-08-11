@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Upload, Trash2 } from 'lucide-react'
 import { useEmpresaConfigStore } from '../../store/empresaConfigStore'
+import { useFirmaStore } from '../../store/firmaStore'
+import { useAuthStore } from '../../store/authStore'
+import { puede } from '../../utils/permisos'
 import { supabase } from '../../lib/supabase'
 
 // Task 2.12: si contabilizar horas extras y con qué tope diario, por
@@ -117,12 +120,29 @@ export default function TabEmpresa({ empresaId }) {
   const { obras, cfgPorObra, setCfgLocal, errorObras, guardarConfigObra } = useConfigObras(empresaId)
   const [guardadoObraId, setGuardadoObraId] = useState(null)
   const [errorGuardadoObra, setErrorGuardadoObra] = useState(null)
+  const {
+    firmaUrl, nombreCompleto, puesto, cargando: cargandoFirma, subiendoFirma, error: errorFirma,
+    cargarFirma, subirFirma,
+  } = useFirmaStore()
+  const [formFirma, setFormFirma] = useState({ nombreCompleto: '', puesto: '' })
+  const [errorGuardadoFirma, setErrorGuardadoFirma] = useState(null)
+  const [guardadoFirma, setGuardadoFirma] = useState(false)
+  const inputFirma = useRef(null)
+  const rol = useAuthStore((s) => s.rol)
+  const rolesNomina = useAuthStore((s) => s.rolesNomina)
+  const puedeCargarFirma = rol === 'superadmin' || puede(rolesNomina, 'aprobar_pago')
 
   useEffect(() => { if (empresaId) cargar(empresaId) }, [empresaId])
   // eslint-disable-next-line react-hooks/set-state-in-effect -- resync intencional del form local cuando llegan los datos de la empresa.
   useEffect(() => { setForm({ cuit, domicilio }) }, [cuit, domicilio])
   // eslint-disable-next-line react-hooks/set-state-in-effect -- resync intencional del form local cuando llega la config de horas.
   useEffect(() => { setFormHoras(cfgHoras) }, [cfgHoras])
+  useEffect(() => {
+    if (empresaId && puedeCargarFirma && !cargandoFirma) cargarFirma(empresaId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- kickoff intencional del fetch de firma al montar.
+  }, [empresaId])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- resync intencional del form local cuando llega la firma.
+  useEffect(() => { setFormFirma({ nombreCompleto, puesto }) }, [nombreCompleto, puesto])
 
   const handleGuardarObra = async (obraId) => {
     const valores = cfgPorObra[obraId]
@@ -160,6 +180,42 @@ export default function TabEmpresa({ empresaId }) {
     setErrorLogo(null)
     const r = await quitarLogo(empresaId)
     if (!r.ok) setErrorLogo(r.error)
+  }
+
+  const handleArchivoFirma = async (e) => {
+    const archivo = e.target.files?.[0]
+    e.target.value = '' // permite volver a elegir el mismo archivo
+    if (!archivo) return
+    setErrorGuardadoFirma(null)
+    const r = await subirFirma({
+      empresaId, file: archivo,
+      nombreCompleto: formFirma.nombreCompleto,
+      puesto: formFirma.puesto,
+    })
+    if (!r.ok) setErrorGuardadoFirma(r.error)
+  }
+
+  const handleGuardarFirma = async () => {
+    setErrorGuardadoFirma(null)
+    if (!firmaUrl && !inputFirma.current?.files?.length) {
+      setErrorGuardadoFirma('Elegí una imagen de la firma y completá nombre y puesto.')
+      return
+    }
+    // Si ya hay archivo elegido, subirFirma usa el form; si no, solo faltaría
+    // actualizar la aclaración sobre una firma ya cargada.
+    if (!inputFirma.current?.files?.length) {
+      const { error } = await supabase.from('nom_firma_empresa')
+        .upsert({ empresa_id: empresaId, nombre_completo: formFirma.nombreCompleto.trim(), puesto: formFirma.puesto.trim() }, { onConflict: 'empresa_id' })
+      if (error) { setErrorGuardadoFirma(error.message); return }
+      setGuardadoFirma(true); setTimeout(() => setGuardadoFirma(false), 2500)
+      return
+    }
+    const r = await subirFirma({
+      empresaId, file: inputFirma.current.files[0],
+      nombreCompleto: formFirma.nombreCompleto,
+      puesto: formFirma.puesto,
+    })
+    if (r.ok) { setGuardadoFirma(true); setTimeout(() => setGuardadoFirma(false), 2500) }
   }
 
   return (
@@ -327,6 +383,67 @@ export default function TabEmpresa({ empresaId }) {
           </div>
           {errorGuardadoObra && <p style={{ color: 'var(--danger)', marginTop: 10 }}>{errorGuardadoObra}</p>}
           {errorObras && <p style={{ color: 'var(--danger)', marginTop: 10 }}>{errorObras}</p>}
+        </form>
+      )}
+
+      {puedeCargarFirma && (
+        <form className="card" onSubmit={(e) => { e.preventDefault(); handleGuardarFirma() }}>
+          <h3 style={{ fontSize: '1rem', marginBottom: 4 }}>Firma del aprobador de pago</h3>
+          <p className="texto-secundario" style={{ fontSize: '0.85rem', marginBottom: 14 }}>
+            Se imprime en el recibo "para el Empleado", que se habilita cuando el período está aprobado.
+            PNG o JPG de hasta 2 MB, idealmente con fondo transparente.
+          </p>
+
+          {cargandoFirma ? (
+            <p className="texto-muted">Cargando…</p>
+          ) : (
+            <>
+              <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+                <div className="logo-preview" style={{ minHeight: 48 }}>
+                  {firmaUrl
+                    ? <img src={firmaUrl} alt="Firma del aprobador" style={{ maxHeight: 48 }} />
+                    : <span>Sin firma</span>}
+                </div>
+                <div className="acciones">
+                  <input
+                    ref={inputFirma}
+                    type="file"
+                    accept="image/png,image/jpeg"
+                    onChange={handleArchivoFirma}
+                    style={{ display: 'none' }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => inputFirma.current?.click()}
+                    disabled={subiendoFirma}
+                  >
+                    <Upload size={14} /> {subiendoFirma ? 'Subiendo…' : firmaUrl ? 'Cambiar firma' : 'Subir firma'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="form-grid" style={{ marginBottom: 14 }}>
+                <div className="input-group">
+                  <label className="input-label" htmlFor="emp-firma-nombre">Nombre y Apellido</label>
+                  <input id="emp-firma-nombre" className="input" placeholder="María López" value={formFirma.nombreCompleto}
+                    onChange={(e) => setFormFirma((f) => ({ ...f, nombreCompleto: e.target.value }))} />
+                </div>
+                <div className="input-group">
+                  <label className="input-label" htmlFor="emp-firma-puesto">Puesto en la compañía</label>
+                  <input id="emp-firma-puesto" className="input" placeholder="Contadora" value={formFirma.puesto}
+                    onChange={(e) => setFormFirma((f) => ({ ...f, puesto: e.target.value }))} />
+                </div>
+              </div>
+
+              <div className="acciones">
+                <button type="submit" className="btn btn-primary btn-sm" disabled={subiendoFirma}>Guardar firma</button>
+                {guardadoFirma && <span className="badge badge-success">guardado</span>}
+              </div>
+              {errorGuardadoFirma && <p style={{ color: 'var(--danger)', marginTop: 10 }}>{errorGuardadoFirma}</p>}
+              {errorFirma && <p style={{ color: 'var(--danger)', marginTop: 10 }}>{errorFirma}</p>}
+            </>
+          )}
         </form>
       )}
     </div>
