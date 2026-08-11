@@ -2,6 +2,7 @@ import { cargarJsPDF } from './cargarJsPDF.js'
 import { numeroALetras } from './numeroALetras.js'
 import { armarRecibo } from './reciboLayout.js'
 import { dibujarTorta } from './reciboPie.js'
+import { textoEnPunto } from './textoPdf.js'
 
 const VERDE = [198, 224, 180]        // banda de sección (mismo verde del modelo)
 const GRIS = [230, 230, 230]         // sub-encabezados (REMUNERATIVO, etc.)
@@ -60,9 +61,9 @@ export async function generarReciboPdf({ empresa, persona, periodo, items, codig
 
   const filaItem = (i) => {
     doc.setFontSize(7.5)
-    doc.text(String(i.nombre || ''), colConcepto, y)
+    textoEnPunto(doc, String(i.nombre || ''), colConcepto, y, colUnidad - colConcepto - 3)
     if (i.unidadTexto != null) doc.text(String(i.unidadTexto), colUnidad, y)
-    if (i.baseCalculo != null) doc.text(fmt(i.baseCalculo), colBase, y)
+    if (i.baseCalculo != null) textoEnPunto(doc, fmt(i.baseCalculo), colBase, y, colMonto - colBase - 3)
     doc.text(fmt(i.monto), colMonto, y, { align: 'right' })
     y += 4.2
   }
@@ -71,10 +72,11 @@ export async function generarReciboPdf({ empresa, persona, periodo, items, codig
   // El logo (Configuración → Empresa) va arriba a la derecha, encajado en un
   // recuadro fijo respetando su relación de aspecto. Si falla el dibujado no
   // se corta la emisión: el recibo sale igual, sin logo.
-  if (empresa?.logo?.dataUrl) {
+  const CAJA_ANCHO = 42
+  const CAJA_ALTO = 16
+  const tieneLogo = !!(empresa?.logo?.dataUrl)
+  if (tieneLogo) {
     try {
-      const CAJA_ANCHO = 42
-      const CAJA_ALTO = 16
       const prop = empresa.logo.alto > 0 ? empresa.logo.ancho / empresa.logo.alto : CAJA_ANCHO / CAJA_ALTO
       let ancho = CAJA_ANCHO
       let alto = ancho / prop
@@ -84,24 +86,31 @@ export async function generarReciboPdf({ empresa, persona, periodo, items, codig
   }
 
   doc.setFont(undefined, 'bold'); doc.setFontSize(12)
-  doc.text(String(empresa?.nombre || '—'), colConcepto, y); y += 5
+  // Con logo a la derecha, el nombre se trunca para no pisar la caja (Task 3.4).
+  textoEnPunto(doc, String(empresa?.nombre || '—'), colConcepto, y, tieneLogo ? anchoUtil - CAJA_ANCHO - 4 : anchoUtil)
+  y += 5
   doc.setFont(undefined, 'normal'); doc.setFontSize(8)
   doc.text(String(empresa?.domicilio || '—'), colConcepto, y); y += 4
   doc.text(`C.U.I.T.: ${empresa?.cuit || '—'}`, colConcepto, y); y += 6
 
-  // Grilla de datos del empleado (dos filas, estilo modelo).
+  // Grilla de datos del empleado (dos filas, estilo modelo). Cada cell trunca
+  // con '…' hasta la siguiente columna menos un margen de 2: un banco o
+  // apellido largo ya no pisa la celda vecina (Task 3.2, plan 2026-08-11).
   doc.setFontSize(7.5)
-  const g = (label, valor, x) => { doc.setFont(undefined, 'bold'); doc.text(label, x, y); doc.setFont(undefined, 'normal'); doc.text(String(valor ?? '—'), x, y + 3.5) }
-  g('Mes/Año', `${periodo?.mes || '—'}/${periodo?.anio || '—'}`, M)
-  g('Apellido y Nombre', persona?.nombre || '—', M + 30)
-  g('Legajo', persona?.legajo || '—', M + 95)
-  g('Categoría', persona?.categoria || '—', M + 120)
+  const g = (label, valor, x, anchoMax) => {
+    doc.setFont(undefined, 'bold'); textoEnPunto(doc, label, x, y, anchoMax)
+    doc.setFont(undefined, 'normal'); textoEnPunto(doc, String(valor ?? '—'), x, y + 3.5, anchoMax)
+  }
+  g('Mes/Año', `${periodo?.mes || '—'}/${periodo?.anio || '—'}`, M, 28)
+  g('Apellido y Nombre', persona?.nombre || '—', M + 30, 63)
+  g('Legajo', persona?.legajo || '—', M + 95, 23)
+  g('Categoría', persona?.categoria || '—', M + 120, anchoUtil - 120 - 2)
   y += 9
-  g('Fecha Ingreso', persona?.fechaIngreso || '—', M)
-  g('Antig. Reconocida', persona?.antiguedadReconocida ?? 0, M + 30)
-  g('C.U.I.L.', persona?.cuil || '—', M + 75)
-  g('Banco', persona?.banco || '—', M + 120)
-  g('Período / Pago', `${periodo?.descripcion || '—'}`, M + 150)
+  g('Fecha Ingreso', persona?.fechaIngreso || '—', M, 28)
+  g('Antig. Reconocida', persona?.antiguedadReconocida || '—', M + 30, 43)
+  g('C.U.I.L.', persona?.cuil || '—', M + 75, 43)
+  g('Banco', persona?.banco || '—', M + 120, 28)
+  g('Período / Pago', `${periodo?.descripcion || '—'}`, M + 150, anchoUtil - 150 - 2)
   y += 11
 
   // ── COSTO TOTAL EMPLEADOR ───────────────────────────────────────────
@@ -135,9 +144,9 @@ export async function generarReciboPdf({ empresa, persona, periodo, items, codig
   doc.setFillColor(...GRIS); doc.rect(M, y - 3.5, anchoUtil, 5, 'F')
   doc.setFont(undefined, 'bold'); doc.setFontSize(7.5)
   doc.text('COMPOSICIÓN SALARIAL »', colConcepto, y)
-  doc.text(`Rem.: ${fmt(R.totalRemunerativo)}`, M + anchoUtil * 0.40, y)
-  doc.text(`No rem.: ${fmt(R.totalNoRemunerativo)}`, M + anchoUtil * 0.62, y)
-  doc.text(`Desc.: ${fmt(R.totalDescuentos)}`, M + anchoUtil * 0.83, y)
+  textoEnPunto(doc, `Rem.: ${fmt(R.totalRemunerativo)}`, M + anchoUtil * 0.40, y, anchoUtil * 0.20)
+  textoEnPunto(doc, `No rem.: ${fmt(R.totalNoRemunerativo)}`, M + anchoUtil * 0.62, y, anchoUtil * 0.19)
+  textoEnPunto(doc, `Desc.: ${fmt(R.totalDescuentos)}`, M + anchoUtil * 0.83, y, anchoUtil * 0.16)
   doc.setFont(undefined, 'normal')
   y += 6
 
