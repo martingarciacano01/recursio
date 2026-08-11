@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useEscalasStore, agruparVigencias } from '../../store/escalasStore'
 import TablaVigencias from './TablaVigencias'
+import { descargarPlantillaVigencias } from '../../utils/descargarPlantillaVigencias'
 
 export default function TabEscalas({ convenio, soloLectura }) {
   const { categorias, cargando, error, cargarEscala, guardarVigencias } = useEscalasStore()
@@ -19,8 +20,10 @@ export default function TabEscalas({ convenio, soloLectura }) {
         etiquetaValor="Básico"
         soloLectura={soloLectura}
         conModalidad
-        // Task 6.9: estado vacío visible (antes quedaba solo el encabezado).
-        mensajeVacio="Sin categorías para este convenio todavía. Agregalas desde “Nueva vigencia” o importalas en lote desde la pestaña “Importar CSV” (descargás la plantilla desde ahí)."
+        // Task 6.9: estado vacío visible (antes quedaba solo el encabezado)
+        // + CTA descargar plantilla CSV.
+        mensajeVacio="Sin categorías para este convenio todavía. Agregalas desde “Nueva vigencia” o importalas en lote desde la pestaña “Importar CSV”."
+        onDescargarPlantilla={() => descargarPlantillaVigencias(convenio.id)}
         onGuardar={async (filas, fecha) => {
           const r = await guardarVigencias(convenio.id, filas, fecha)
           if (r.ok) await cargarEscala(convenio.id, { forzar: true })

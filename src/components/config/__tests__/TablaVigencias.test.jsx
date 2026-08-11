@@ -66,4 +66,17 @@ describe('TablaVigencias', () => {
     render(<TablaVigencias items={[]} etiquetaValor="Básico" soloLectura onGuardar={() => {}} mensajeVacio="Sin categorías todavía." />)
     expect(screen.getByText('Sin categorías todavía.')).toBeInTheDocument()
   })
+
+  // Task 6.9: el estado vacío ofrece descargar la plantilla CSV.
+  it('sin items y con onDescargarPlantilla muestra el CTA de la plantilla', () => {
+    const onDescargarPlantilla = vi.fn()
+    render(<TablaVigencias items={[]} etiquetaValor="Básico" soloLectura onGuardar={() => {}} mensajeVacio="Sin categorías." onDescargarPlantilla={onDescargarPlantilla} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Descargar plantilla CSV' }))
+    expect(onDescargarPlantilla).toHaveBeenCalled()
+  })
+
+  it('sin items no muestra el CTA si no se pasa onDescargarPlantilla', () => {
+    render(<TablaVigencias items={[]} etiquetaValor="Básico" soloLectura onGuardar={() => {}} mensajeVacio="Sin categorías." />)
+    expect(screen.queryByRole('button', { name: 'Descargar plantilla CSV' })).toBeNull()
+  })
 })
