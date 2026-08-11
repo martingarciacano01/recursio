@@ -55,4 +55,33 @@ describe('generarReciboPdf (formato costo laboral vertical)', () => {
     expect(texto).toContain('LA EMPRESA S.A.')
     expect(texto).toContain('Perez')
   })
+
+  // Fase 7 Task 7.3: variante 'empleador' conserva la línea "Firma del
+  // Empleado" en blanco; la 'empleado' la reemplaza por nombre + puesto
+  // del aprobador.
+  it('variante empleador conserva la línea de firma del empleado', async () => {
+    const doc = await generarReciboPdf({ ...cabecera, items, variante: 'empleador', firma: null })
+    expect(textoDe(doc)).toContain('Firma del Empleado')
+  })
+
+  it('variante empleado imprime la aclaración del aprobador y no la línea del empleado', async () => {
+    const doc = await generarReciboPdf({
+      ...cabecera, items, variante: 'empleado',
+      firma: { nombreCompleto: 'Maria Lopez', puesto: 'Contadora', ancho: 40, alto: 20, dataUrl: 'data:image/png;base64,AAA=', formato: 'PNG' },
+    })
+    const texto = textoDe(doc)
+    expect(texto).toContain('Maria Lopez')
+    expect(texto).toContain('Contadora')
+    expect(texto).not.toContain('Firma del Empleado')
+  })
+
+  it('variante empleado sin imagen sale igualmente con la aclaración', async () => {
+    const doc = await generarReciboPdf({
+      ...cabecera, items, variante: 'empleado',
+      firma: { nombreCompleto: 'Juan Perez', puesto: 'Gerente', ancho: 40, alto: 20, dataUrl: null, formato: 'PNG' },
+    })
+    const texto = textoDe(doc)
+    expect(texto).toContain('Juan Perez')
+    expect(texto).toContain('Gerente')
+  })
 })

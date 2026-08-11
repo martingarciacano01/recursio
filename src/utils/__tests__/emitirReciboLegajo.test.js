@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { datosReciboDesdeSupabase } from '../emitirReciboLegajo'
+import { datosReciboDesdeSupabase, cargarFirmaEmpresa } from '../emitirReciboLegajo'
 
 const from = vi.fn()
 vi.mock('../../lib/supabase', () => ({ supabase: { from: (t) => from(t) } }))
@@ -12,6 +12,19 @@ function tabla(data) {
     maybeSingle: vi.fn().mockResolvedValue({ data, error: null }),
   }
 }
+
+// Fase 7 Task 7.3: cargarFirmaEmpresa lee nom_firma_empresa y, si no hay
+// URL (o falla), devuelve null sin romper — el recibo del empleado se emite
+// con la sola aclaración textual.
+describe('cargarFirmaEmpresa', () => {
+  beforeEach(() => { from.mockReset() })
+
+  it('devuelve null cuando no hay firma configurada', async () => {
+    from.mockImplementation((t) => (t === 'nom_firma_empresa' ? tabla(null) : tabla(null)))
+    const r = await cargarFirmaEmpresa('e1')
+    expect(r).toBeNull()
+  })
+})
 
 describe('datosReciboDesdeSupabase', () => {
   beforeEach(() => {

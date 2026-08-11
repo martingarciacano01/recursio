@@ -17,7 +17,7 @@ const fmt = (n) => `$${(Number(n) || 0).toLocaleString('es-AR', { minimumFractio
 // composición salarial, neto en letras, detalle por organismo y torta.
 // jsPDF (+ html2canvas) pesa ~380 kB y solo hace falta cuando alguien emite un
 // recibo, así que se carga con import() dinámico: por eso la función es async.
-export async function generarReciboPdf({ empresa, persona, periodo, items, codigoRecibo }) {
+export async function generarReciboPdf({ empresa, persona, periodo, items, codigoRecibo, variante = 'empleador', firma = null }) {
   const jsPDF = await cargarJsPDF()
   const doc = new jsPDF({ orientation: 'portrait', format: 'a4' })
   const R = armarRecibo(items)
@@ -183,14 +183,46 @@ export async function generarReciboPdf({ empresa, persona, periodo, items, codig
   })
 
   // ── Firma ───────────────────────────────────────────────────────────
+  // Variante (Fase 7 Task 7.3):
+  //  * 'empleador' — comportamiento actual: línea "Firma del Empleado" en
+  //    blanco (la firma la pone el trabajador al recibir el recibo).
+  //  * 'empleado' — el trabajador recibe el recibo ya firmado por el
+  //    aprobador de pago: imagen de la firma + aclaración (nombre y puesto
+  //    de la compañía). Si la imagen no pudo cargarse, sale solo la
+  //    aclaración textual (la emisión nunca se corta por la firma).
   const altoPagina = doc.internal.pageSize.getHeight()
   let yFirma = Math.max(y + 8, altoPagina - 24)
   doc.setFontSize(7)
   const leyenda = doc.splitTextToSize(LEYENDA, anchoUtil)
   leyenda.forEach((l) => { doc.text(l, colConcepto, yFirma); yFirma += 3.2 })
   yFirma += 8
-  doc.line(M + anchoUtil * 0.55, yFirma, M + anchoUtil, yFirma)
-  doc.text('Firma del Empleado', M + anchoUtil * 0.7, yFirma + 4)
+
+  if (variante === 'empleado') {
+    const conImagen = !!(firma?.dataUrl)
+    if (conImagen) {
+      try {
+        const CAJA_FIRMA_ALTO = 12
+        const prop = firma.alto > 0 ? firma.ancho / firma.alto : 1
+        let alto = CAJA_FIRMA_ALTO
+        let ancho = alto * prop
+        const anchoMax = (anchoUtil * 0.45)
+        if (ancho > anchoMax) { ancho = anchoMax; alto = ancho / prop }
+        // Sobre la línea de firma, a la derecha (donde firma el aprobador).
+        doc.addImage(firma.dataUrl, firma.formato || 'PNG', M + anchoUtil - ancho, yFirma - alto, ancho, alto)
+      } catch { /* firma inválida: se sigue con la aclaración textual */ }
+    }
+    doc.line(M + anchoUtil * 0.55, yFirma, M + anchoUtil, yFirma)
+    const yAclaracion = yFirma + 9
+    doc.setFont(undefined, 'bold')
+    doc.text(String(firma?.nombreCompleto || '—'), M + anchoUtil * 0.55, yAclaracion, { maxWidth: anchoUtil * 0.45 })
+    doc.setFont(undefined, 'normal')
+    doc.text(String(firma?.puesto || '—'), M + anchoUtil * 0.55, yAclaracion + 4, { maxWidth: anchoUtil * 0.45 })
+    yFirma = yAclaracion + 8
+  } else {
+    doc.line(M + anchoUtil * 0.55, yFirma, M + anchoUtil, yFirma)
+    doc.text('Firma del Empleado', M + anchoUtil * 0.7, yFirma + 4)
+    yFirma += 4
+  }
   if (codigoRecibo) doc.text(`Recibo N°: ${codigoRecibo}`, colConcepto, yFirma + 4)
 
   // Disclaimer legal al pie (Task 4.2, plan 2026-08-11): 1-2 líneas grises

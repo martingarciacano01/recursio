@@ -3,6 +3,7 @@ import { generarReciboPdf } from './reciboPdf'
 import { calcularHashPdf } from './reciboHash'
 import { etiquetaPeriodo } from './etiquetaPeriodo'
 import { cargarLogoRecibo } from './cargarLogoRecibo'
+import { cargarFirmaRecibo } from './cargarFirmaRecibo'
 
 // Datos de EMPRESA del recibo (nombre, CUIT, domicilio, logo) — extraído por
 // separado de datosReciboDesdeSupabase para poder cachearlo por empresaId
@@ -26,6 +27,24 @@ export async function cargarDatosEmpresa(empresaId) {
     domicilio: configRow?.domicilio || '—',
     logo,
   }
+}
+
+// Firma del aprobador para la variante "para el Empleado" (Fase 7). Lee
+// nom_firma_empresa (migración 0069) + descarga la imagen. Tolerante: si no
+// hay firma configurada o falla la descarga devuelve null — el recibo para
+// empleado se emite igual, con la aclaración textual (nombre/puesto).
+const cacheFirmaEmpresa = new Map()
+export async function cargarFirmaEmpresa(empresaId) {
+  if (!empresaId) return null
+  if (cacheFirmaEmpresa.has(empresaId)) return cacheFirmaEmpresa.get(empresaId)
+  const { data } = await supabase.from('nom_firma_empresa')
+    .select('firma_url, nombre_completo, puesto').eq('empresa_id', empresaId).maybeSingle()
+  if (!data?.firma_url) return null
+  const imagen = await cargarFirmaRecibo(data.firma_url)
+  if (!imagen) return null
+  const resultado = { ...imagen, nombreCompleto: data.nombre_completo, puesto: data.puesto }
+  cacheFirmaEmpresa.set(empresaId, resultado)
+  return resultado
 }
 
 // Datos de cabecera del recibo (empresa + persona) resueltos contra
@@ -76,9 +95,12 @@ export function itemsRecibo(filas) {
 // Genera el PDF, calcula su hash y lo descarga. Devuelve { ok, hash, doc }
 // — asignar el número de recibo (RPC emitir_recibo) queda del lado del
 // caller, que es quien tiene el store a mano.
-export async function generarYDescargarRecibo({ empresaId, personalId, nombrePersona, periodo, filasItems, numeroRecibo, empresaCacheada }) {
+// `variante`: 'empleado' | 'empleador' (Fase 7). Para 'empleado' busca la
+// firma del aprobador de la empresa (cargarFirmaEmpresa, tolerante).
+export async function generarYDescargarRecibo({ empresaId, personalId, nombrePersona, periodo, filasItems, numeroRecibo, empresaCacheada, variante = 'empleador', firma = null }) {
   const { empresa, persona } = await datosReciboDesdeSupabase({ empresaId, personalId, nombrePersona, empresaCacheada })
   const desde = periodo?.fecha_desde || periodo?.fechaDesde || ''
+  const datosFirma = variante === 'empleado' ? (firma || await cargarFirmaEmpresa(empresaId)) : null
   const doc = await generarReciboPdf({
     empresa,
     persona,
@@ -90,6 +112,8 @@ export async function generarYDescargarRecibo({ empresaId, personalId, nombrePer
     },
     items: itemsRecibo(filasItems),
     codigoRecibo: numeroRecibo || null,
+    variante,
+    firma: datosFirma,
   })
   const hash = await calcularHashPdf(doc)
   return { doc, hash, nombreArchivo: `recibo-${(nombrePersona || personalId).replace(/[^\w.-]/g, '_')}` }
