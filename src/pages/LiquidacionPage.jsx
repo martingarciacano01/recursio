@@ -53,7 +53,7 @@ export default function LiquidacionPage() {
   const empresaActiva = empresa || empresaVista
   const empresaId = empresaActiva?.id || ''
 
-  const { liquidaciones, calculando, omitidos, advertencias, sinHoras, calcularPeriodo, cargarLiquidaciones, emitirRecibo, emitirReciboVariante } = useLiquidacionStore()
+  const { liquidaciones, calculando, omitidos, advertencias, sinHoras, calcularPeriodo, cargarLiquidaciones, emitirReciboVariante } = useLiquidacionStore()
   const push = useToastStore((s) => s.push)
   const [mostrarAvisos, setMostrarAvisos] = useState(false)
   const [errorRecibo, setErrorRecibo] = useState('')
@@ -379,6 +379,11 @@ export default function LiquidacionPage() {
     return nombre.toLowerCase().includes(busqueda.toLowerCase())
   })
 
+  // Fase 7 Task 7.5: todas las seleccionadas pertenecen a un período con el
+  // flujo aprobado (gate del lote "Recibos para Empleado").
+  const seleccionTodasAprobadas = liquidacionesFiltradas.some((l) => seleccionadas.has(l.id))
+    && liquidacionesFiltradas.filter((l) => seleccionadas.has(l.id)).every((l) => l.periodoFlujoAprobado)
+
   const descargarCsv = () => {
     // Columnas numéricas marcadas con tipo:'numero' para que exportarCsv las
     // formatee con coma decimal es-AR (antes salían con punto, Excel es-AR
@@ -440,7 +445,9 @@ export default function LiquidacionPage() {
   // Descarga en un solo ZIP los recibos de las liquidaciones seleccionadas.
   // Cada PDF pasa por emitir_recibo (queda numerado y auditable, igual que
   // el flujo de "Emitir recibo PDF" de a uno) — ver src/utils/reciboZip.js.
-  const handleDescargarZip = async () => {
+  // Fase 7 Task 7.5: `variante` ('empleado'|'empleador') se propaga a todo
+  // el lote; para 'empleado' el gate (flujo aprobado) lo valida el RPC.
+  const handleDescargarZip = async (variante = 'empleador') => {
     setErroresZip([]); setMostrarErroresZip(false)
     const liqsElegidas = liquidacionesFiltradas.filter((l) => seleccionadas.has(l.id))
     if (liqsElegidas.length === 0) return
@@ -453,13 +460,14 @@ export default function LiquidacionPage() {
         periodo: periodoActivo,
         personalPorId,
         fetchItems: fetchItemsLiquidacion,
-        emitirRecibo,
+        emitirRecibo: emitirReciboVariante,
+        variante,
         onProgreso: (procesados, total) => setProgresoZip({ procesados, total }),
       })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = nombreArchivoZip(periodoActivo)
+      a.download = nombreArchivoZip(periodoActivo, variante)
       a.click()
       // revokeObjectURL diferido (Task 3.4, M5): revocar la URL en el mismo
       // tick que a.click() es una carrera contra el navegador, que dispara
@@ -614,11 +622,28 @@ export default function LiquidacionPage() {
                     Descargar CSV
                   </button>
                 )}
-                <button className="btn btn-ghost btn-sm" onClick={handleDescargarZip} disabled={!puedeEmitirRecibos || seleccionadas.size === 0 || generandoZip}>
-                  {generandoZip
-                    ? `Generando… (${progresoZip?.procesados ?? 0} de ${progresoZip?.total ?? 0})`
-                    : `Descargar recibos (${seleccionadas.size})`}
-                </button>
+                {puedeEmitirRecibos && seleccionadas.size > 0 && (
+                  <>
+                    <button className="btn btn-ghost btn-sm" onClick={() => handleDescargarZip('empleador')} disabled={generandoZip}>
+                      {generandoZip
+                        ? `Generando… (${progresoZip?.procesados ?? 0} de ${progresoZip?.total ?? 0})`
+                        : `Recibos para Empleador (${seleccionadas.size})`}
+                    </button>
+                    {/* Fase 7 Task 7.5: variante empleado solo con período aprobado + firma. */}
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      title={!firmaConfigurada
+                        ? 'Se habilita cuando esté cargada la firma del aprobador (Configuración → Empresa).'
+                        : undefined}
+                      onClick={() => handleDescargarZip('empleado')}
+                      disabled={generandoZip || !firmaConfigurada || !seleccionTodasAprobadas}
+                    >
+                      {generandoZip
+                        ? `Generando… (${progresoZip?.procesados ?? 0} de ${progresoZip?.total ?? 0})`
+                        : `Recibos para Empleado (${seleccionadas.size})`}
+                    </button>
+                  </>
+                )}
                 {periodoActivo && periodoActivo.estado !== 'cerrado' && (
                   <button
                     className="btn btn-ghost btn-sm"

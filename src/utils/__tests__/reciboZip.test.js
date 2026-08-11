@@ -57,8 +57,9 @@ describe('generarZipRecibos', () => {
     expect(r.fallidos).toHaveLength(0)
     // Mismo regex de slug que ya usa emitirReciboLegajo.js (`[^\w.-]` es
     // ASCII-only): los acentos también se reemplazan, no solo espacios.
+    // Fase 7 Task 7.5: por defecto variante empleador → sufijo -empleador.
     expect(Object.keys(r.blob.archivos)).toEqual([
-      'recibo-0001-Juan_P_rez.pdf', 'recibo-0002-Ana_G_mez.pdf', 'recibo-0003-Luis_R_os.pdf',
+      'recibo-0001-Juan_P_rez-empleador.pdf', 'recibo-0002-Ana_G_mez-empleador.pdf', 'recibo-0003-Luis_R_os-empleador.pdf',
     ])
   })
 
@@ -121,13 +122,31 @@ describe('generarZipRecibos', () => {
     })
     expect(progresos).toEqual([[1, 2], [2, 2]])
   })
+
+  it('variante empleado propaga variante+firma a generarYDescargarRecibo y sufija -empleado', async () => {
+    const emitirRecibo = vi.fn().mockResolvedValue({ ok: true, numeroRecibo: '0001' })
+    const fetchItems = vi.fn().mockResolvedValue([])
+    const firma = { dataUrl: 'data:image/png;base64,X=', ancho: 40, alto: 20, formato: 'PNG', nombreCompleto: 'M Lopez', puesto: 'Contadora' }
+    const liquidaciones = [{ id: 'liq1', personalId: 'p1', numeroRecibo: null }]
+
+    const r = await generarZipRecibos({
+      liquidaciones, empresaId: 'e1', periodo, personalPorId, fetchItems, emitirRecibo,
+      variante: 'empleado', firma,
+    })
+
+    expect(generarYDescargarRecibo).toHaveBeenCalledWith(expect.objectContaining({ variante: 'empleado', firma }))
+    expect(Object.keys(r.blob.archivos)).toEqual(['recibo-0001-Juan_P_rez-empleado.pdf'])
+  })
 })
 
 describe('nombreArchivoZip', () => {
   it('arma el nombre con tipo y fecha_desde del período', () => {
-    expect(nombreArchivoZip({ tipo: 'mensual', fecha_desde: '2026-07-01' })).toBe('recibos-mensual-2026-07-01.zip')
+    expect(nombreArchivoZip({ tipo: 'mensual', fecha_desde: '2026-07-01' })).toBe('recibos-mensual-2026-07-01-empleador.zip')
   })
   it('con período null no revienta', () => {
-    expect(nombreArchivoZip(null)).toBe('recibos-periodo-.zip')
+    expect(nombreArchivoZip(null)).toBe('recibos-periodo--empleador.zip')
+  })
+  it('sufija -empleado para la variante empleado (Fase 7 Task 7.5)', () => {
+    expect(nombreArchivoZip({ tipo: 'quincenal', fecha_desde: '2026-07-01' }, 'empleado')).toBe('recibos-quincenal-2026-07-01-empleado.zip')
   })
 })

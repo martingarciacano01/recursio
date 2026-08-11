@@ -22,14 +22,18 @@ import { generarYDescargarRecibo, cargarDatosEmpresa } from './emitirReciboLegaj
 //  personalPorId: Map personalId → nombre (para el nombre de archivo).
 //  fetchItems: async (liquidacionId) => filasItems de nom_liquidacion_items.
 //  emitirRecibo: async (liquidacionId, hashPdf) => { ok, numeroRecibo, error }
-//    (acción del store — se le inyecta acá para no importar supabase directo).
+//    (acción del store — se le inyecta acá para no importar supabase directo;
+//    para variante, el caller pasa emitirReciboVariante).
+//  variante: 'empleado' | 'empleador' (Fase 7 Task 7.5): propaga la
+//    variante a cada recibo del lote y sufija los nombres con -empleado/-empleador.
+//  firma: opcional, imagen de la firma para la variante empleado.
 //  onProgreso: (procesados, total) => void, opcional.
 //
 // Devuelve { blob, emitidos, fallidos } — nunca lanza por un fallo puntual
 // de una persona (sí puede lanzar si falla algo transversal, ej. cargar los
 // datos de la empresa).
 export async function generarZipRecibos({
-  liquidaciones, empresaId, periodo, personalPorId, fetchItems, emitirRecibo, onProgreso,
+  liquidaciones, empresaId, periodo, personalPorId, fetchItems, emitirRecibo, variante = 'empleador', firma = null, onProgreso,
 }) {
   const JSZip = await cargarJsZip()
   const zip = new JSZip()
@@ -46,7 +50,7 @@ export async function generarZipRecibos({
       const filasItems = await fetchItems(l.id)
       const { doc, hash } = await generarYDescargarRecibo({
         empresaId, personalId: l.personalId, nombrePersona, periodo,
-        filasItems, numeroRecibo: l.numeroRecibo, empresaCacheada,
+        filasItems, numeroRecibo: l.numeroRecibo, empresaCacheada, variante, firma,
       })
       // emitir_recibo asigna el número correlativo — tiene que pasar ANTES
       // de nombrar el archivo. Secuencial a propósito (ver comentario de
@@ -57,7 +61,8 @@ export async function generarZipRecibos({
       } else {
         const arrayBuffer = doc.output('arraybuffer')
         const nombreSlug = nombrePersona.replace(/[^\w.-]/g, '_')
-        zip.file(`recibo-${r.numeroRecibo}-${nombreSlug}.pdf`, arrayBuffer)
+        const sufijoVariante = variante === 'empleado' ? '-empleado' : '-empleador'
+        zip.file(`recibo-${r.numeroRecibo}-${nombreSlug}${sufijoVariante}.pdf`, arrayBuffer)
         emitidos.push({ personalId: l.personalId, nombre: nombrePersona, numeroRecibo: r.numeroRecibo })
       }
     } catch (e) {
@@ -70,8 +75,9 @@ export async function generarZipRecibos({
   return { blob, emitidos, fallidos }
 }
 
-// Nombre del zip: recibos-<tipo>-<fecha_desde>.zip (mismo criterio de
-// nombrado que descargarCsv en LiquidacionPage.jsx).
-export function nombreArchivoZip(periodo) {
-  return `recibos-${periodo?.tipo || 'periodo'}-${periodo?.fecha_desde || ''}.zip`
+// Nombre del zip: recibos-<tipo>-<fecha_desde>[-<variante>].zip (mismo
+// criterio de nombrado que descargarCsv en LiquidacionPage.jsx).
+export function nombreArchivoZip(periodo, variante = 'empleador') {
+  const base = `recibos-${periodo?.tipo || 'periodo'}-${periodo?.fecha_desde || ''}`
+  return `${base}${variante === 'empleado' ? '-empleado' : '-empleador'}.zip`
 }
