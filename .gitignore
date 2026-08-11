@@ -45,3 +45,7 @@ vitest.temp.config.js
 vitest_resultado.txt
 recibo-muestra.pdf
 .claude/settings.local.json
+
+# Tooling local de agentes (skills/critiques locales, no parte del repo)
+.opencode/
+.impeccable/
