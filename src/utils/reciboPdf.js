@@ -3,6 +3,7 @@ import { numeroALetras } from './numeroALetras.js'
 import { armarRecibo } from './reciboLayout.js'
 import { dibujarTorta } from './reciboPie.js'
 import { textoEnPunto } from './textoPdf.js'
+import { DISCLAIMER_CONTADOR } from './disclaimerRecursio.js'
 
 const VERDE = [198, 224, 180]        // banda de sección (mismo verde del modelo)
 const GRIS = [230, 230, 230]         // sub-encabezados (REMUNERATIVO, etc.)
@@ -191,6 +192,18 @@ export async function generarReciboPdf({ empresa, persona, periodo, items, codig
   doc.line(M + anchoUtil * 0.55, yFirma, M + anchoUtil, yFirma)
   doc.text('Firma del Empleado', M + anchoUtil * 0.7, yFirma + 4)
   if (codigoRecibo) doc.text(`Recibo N°: ${codigoRecibo}`, colConcepto, yFirma + 4)
+
+  // Disclaimer legal al pie (Task 4.2, plan 2026-08-11): 1-2 líneas grises
+  // en tamaño 6.5. Si se pasa del alto de página, se ancla al pie fijo.
+  doc.setFontSize(6.5); doc.setTextColor(120); doc.setFont(undefined, 'italic')
+  const disclaimer = doc.splitTextToSize(DISCLAIMER_CONTADOR, anchoUtil)
+  let yDisclaimer = yFirma + 9
+  for (const l of disclaimer) {
+    if (yDisclaimer > altoPagina - 6) yDisclaimer = altoPagina - 6
+    doc.text(l, colConcepto, yDisclaimer)
+    yDisclaimer += 3
+  }
+  doc.setTextColor(0); doc.setFont(undefined, 'normal')
 
   return doc
 }

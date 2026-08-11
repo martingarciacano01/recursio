@@ -4,6 +4,7 @@ import { useAuthStore } from '../store/authStore'
 import { supabase } from '../lib/supabase'
 import { Lock, Mail, AlertCircle, LogIn, ShieldCheck, ArrowLeft } from 'lucide-react'
 import Logo from '../components/Logo'
+import { DISCLAIMER_CONTADOR } from '../utils/disclaimerRecursio'
 
 // Layout calcado del LoginPage de Presencio (fichaobra/src/pages/LoginPage.jsx),
 // ya con el isologo definitivo de Recursio (cambia según tema claro/oscuro).
@@ -225,6 +226,9 @@ export default function LoginPage() {
 
         <p style={{ textAlign: 'center', marginTop: '1.5rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
           Recursio &mdash; Nómina para el ecosistema Presencio
+        </p>
+        <p style={{ textAlign: 'center', marginTop: '0.5rem', fontSize: '0.7rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+          {DISCLAIMER_CONTADOR}
         </p>
       </div>
     </div>

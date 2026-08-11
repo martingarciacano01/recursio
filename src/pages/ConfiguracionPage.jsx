@@ -17,6 +17,7 @@ import TabAlertas from '../components/config/TabAlertas'
 import TabConvenios from '../components/config/TabConvenios'
 import TabBonos from '../components/config/TabBonos'
 import { useEmpresaFeaturesStore, FEATURES } from '../store/empresaFeaturesStore'
+import { DISCLAIMER_CONTADOR } from '../utils/disclaimerRecursio'
 
 // La configuración tiene dos naturalezas distintas y mezclarlas en una sola
 // fila de 10 pestañas era confuso:
@@ -321,7 +322,14 @@ export default function ConfiguracionPage() {
           {pestana === 'Mis convenios' && <TabConvenios empresaId={empresaActiva.id} />}
 
           {pestana === 'Bonos especiales' && <TabBonos empresaId={empresaActiva.id} />}
-          {pestana === 'Datos de la empresa' && <TabEmpresa empresaId={empresaActiva.id} />}
+          {pestana === 'Datos de la empresa' && (
+            <>
+              <div className="card card-compacta max-900" style={{ marginBottom: 12, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                {DISCLAIMER_CONTADOR}
+              </div>
+              <TabEmpresa empresaId={empresaActiva.id} />
+            </>
+          )}
           {pestana === 'Parámetros' && <TabParametros empresaId={empresaActiva.id} />}
           {pestana === 'Documentación' && <TabDocumentacion empresaId={empresaActiva.id} />}
           {pestana === 'Alertas' && <TabAlertas empresaId={empresaActiva.id} />}
