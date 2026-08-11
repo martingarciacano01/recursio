@@ -15,6 +15,7 @@ import TabEmpresa from '../components/config/TabEmpresa'
 import TabDocumentacion from '../components/config/TabDocumentacion'
 import TabAlertas from '../components/config/TabAlertas'
 import TabConvenios from '../components/config/TabConvenios'
+import TabImportarCsv from '../components/config/TabImportarCsv'
 import TabBonos from '../components/config/TabBonos'
 import { useEmpresaFeaturesStore, FEATURES } from '../store/empresaFeaturesStore'
 import { DISCLAIMER_CONTADOR } from '../utils/disclaimerRecursio'
@@ -33,7 +34,7 @@ const SECCIONES = [
     label: 'Convenios',
     icono: Scale,
     porConvenio: true,
-    tabs: ['Escalas salariales', 'No remunerativos', 'Aportes y contribuciones', 'Adicionales', 'Mis convenios'],
+    tabs: ['Escalas salariales', 'No remunerativos', 'Aportes y contribuciones', 'Adicionales', 'Mis convenios', 'Importar CSV'],
   },
   {
     id: 'empresa',
@@ -320,6 +321,7 @@ export default function ConfiguracionPage() {
           {pestana === 'Aportes y contribuciones' && <TabAportes convenio={convenio} empresaId={empresaActiva.id} soloLectura={esGlobal} />}
           {pestana === 'Adicionales' && <TabAdicionales convenio={convenio} empresaId={empresaActiva.id} soloLectura={esGlobal} />}
           {pestana === 'Mis convenios' && <TabConvenios empresaId={empresaActiva.id} />}
+          {pestana === 'Importar CSV' && <TabImportarCsv convenioId={convenioId} />}
 
           {pestana === 'Bonos especiales' && <TabBonos empresaId={empresaActiva.id} />}
           {pestana === 'Datos de la empresa' && (

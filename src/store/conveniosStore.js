@@ -147,6 +147,68 @@ export const useConveniosStore = create((set, get) => ({
     return { ok: true, convenioId: nuevo.id }
   },
 
+  // Importación por CSV (Fase 5, plan 2026-08-11): inserta vigencias
+  // nuevas sin pisar las existentes. El patrón del repo es agregar una
+  // fila nueva con vigencia_desde (nunca update): se pre-consultan las
+  // (convenio_id, nombre, vigencia_desde) ya existentes y se saltan las
+  // duplicadas (el UNIQUE de ambas tablas es la red de seguridad contra la
+  // carrera). filas: las devueltas por parseCsvConvenios. Devuelve
+  // { insertados, omitidos }.
+  importarVigencias: async (convenioId, filas) => {
+    const porConcepto = (tipo) => filas.filter((f) => f.concepto === tipo)
+    const basicos = porConcepto('basico')
+    const noRem = porConcepto('no_remunerativo')
+
+    const clavesExistentes = async (tabla, colNombre) => {
+      if (basicos.length === 0 && noRem.length === 0) return new Set()
+      const { data } = await supabase.from(tabla)
+        .select(`convenio_id, ${colNombre}, vigencia_desde`)
+        .eq('convenio_id', convenioId)
+      return new Set((data || []).map((r) => `${r.vigencia_desde}|${r[colNombre]}`))
+    }
+
+    const [existentesBasic, existentesNoRem] = await Promise.all([
+      clavesExistentes('nom_categorias', 'nombre'),
+      clavesExistentes('nom_no_remunerativos', 'categoria_nombre'),
+    ])
+
+    const omi = []
+    const pendientesBasic = basicos.filter((f) => {
+      const clave = `${f.vigenciaDesde}|${f.nombre}`
+      if (existentesBasic.has(clave)) { omi.push(f); return false }
+      return true
+    })
+    const pendientesNoRem = noRem.filter((f) => {
+      const clave = `${f.vigenciaDesde}|${f.nombre}`
+      if (existentesNoRem.has(clave)) { omi.push(f); return false }
+      return true
+    })
+
+    let insertados = 0
+    if (pendientesBasic.length > 0) {
+      const { error } = await supabase.from('nom_categorias').insert(
+        pendientesBasic.map((f) => ({
+          convenio_id: convenioId, nombre: f.nombre, basico: f.valor,
+          vigencia_desde: f.vigenciaDesde, modalidad: f.modalidad || 'hora',
+        }))
+      )
+      if (error) return { ok: false, error: error.message }
+      insertados += pendientesBasic.length
+    }
+    if (pendientesNoRem.length > 0) {
+      const { error } = await supabase.from('nom_no_remunerativos').insert(
+        pendientesNoRem.map((f) => ({
+          convenio_id: convenioId, categoria_nombre: f.nombre, monto: f.valor,
+          vigencia_desde: f.vigenciaDesde,
+        }))
+      )
+      if (error) return { ok: false, error: error.message }
+      insertados += pendientesNoRem.length
+    }
+
+    return { ok: true, insertados, omitidos: omi.length }
+  },
+
   // Item 4 (sesión 2026-08-08): borrado de convenios propios. Antes no había
   // forma de quitar uno erróneo; pero borrar a ciegas dejaría legajos y
   // períodos apuntando a un convenio que ya no existe. Por eso se valida el

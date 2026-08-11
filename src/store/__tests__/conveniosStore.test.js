@@ -289,3 +289,91 @@ describe('cargarConvenios — cache por empresa', () => {
     expect(supabase.from).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('importarVigencias (Fase 5)', () => {
+  beforeEach(() => { vi.clearAllMocks() })
+
+  const fromMock = (respuestas) => {
+    supabase.from.mockImplementation((tabla) => {
+      const insert = () => Promise.resolve(respuestas.insert || { data: [], error: null })
+      const select = () => ({
+        eq: () => Promise.resolve(respuestas[tabla] || { data: [], error: null }),
+        insert,
+      })
+      return { select, insert }
+    })
+  }
+
+  it('separa básicos → nom_categorias y no_remunerativos → nom_no_remunerativos', async () => {
+    fromMock({
+      nom_categorias: { data: [], error: null },
+      nom_no_remunerativos: { data: [], error: null },
+    })
+    const filas = [
+      { fila: 2, concepto: 'basico', nombre: 'Operario', valor: 1284.5, modalidad: 'hora', vigenciaDesde: '2026-08-01' },
+      { fila: 3, concepto: 'no_remunerativo', nombre: 'Adicional', valor: 500, modalidad: null, vigenciaDesde: '2026-08-01' },
+    ]
+    const r = await useConveniosStore.getState().importarVigencias('c1', filas)
+    expect(r.ok).toBe(true)
+    expect(r.insertados).toBe(2)
+    expect(r.omitidos).toBe(0)
+
+    const llamadas = supabase.from.mock.calls
+    const insertCategoria = llamadas.find(([t]) => t === 'nom_categorias')
+    const insertNoRem = llamadas.find(([t]) => t === 'nom_no_remunerativos')
+    expect(insertCategoria).toBeDefined()
+    expect(insertNoRem).toBeDefined()
+  })
+
+  it('omite filas ya existentes (misma convenio+nombre+vigencia)', async () => {
+    fromMock({
+      nom_categorias: { data: [{ vigencia_desde: '2026-08-01', nombre: 'Operario' }], error: null },
+      nom_no_remunerativos: { data: [], error: null },
+    })
+    const filas = [
+      { fila: 2, concepto: 'basico', nombre: 'Operario', valor: 1284.5, modalidad: 'hora', vigenciaDesde: '2026-08-01' },
+      { fila: 3, concepto: 'basico', nombre: 'Nuevo', valor: 900, modalidad: 'mensual', vigenciaDesde: '2026-08-01' },
+    ]
+    const r = await useConveniosStore.getState().importarVigencias('c1', filas)
+    expect(r.ok).toBe(true)
+    expect(r.insertados).toBe(1)
+    expect(r.omitidos).toBe(1)
+  })
+
+  it('importar el mismo CSV dos veces inserta una sola vez', async () => {
+    const filas = [
+      { fila: 2, concepto: 'basico', nombre: 'Operario', valor: 1284.5, modalidad: 'hora', vigenciaDesde: '2026-08-01' },
+    ]
+    fromMock({ nom_categorias: { data: [], error: null }, nom_no_remunerativos: { data: [], error: null } })
+    await useConveniosStore.getState().importarVigencias('c1', filas)
+    fromMock({
+      nom_categorias: { data: [{ vigencia_desde: '2026-08-01', nombre: 'Operario' }], error: null },
+      nom_no_remunerativos: { data: [], error: null },
+    })
+    const r = await useConveniosStore.getState().importarVigencias('c1', filas)
+    expect(r.insertados).toBe(0)
+    expect(r.omitidos).toBe(1)
+  })
+
+  it('propaga el error de insert', async () => {
+    fromMock({
+      nom_categorias: { data: [], error: null },
+      nom_no_remunerativos: { data: [], error: null },
+    })
+    // Solo el insert de nom_categorias falla (post-preconsulta).
+    supabase.from.mockImplementation(() => {
+      const insert = () => Promise.resolve({ data: null, error: { message: 'duplicado' } })
+      const select = () => ({
+        eq: () => Promise.resolve({ data: [], error: null }),
+        insert,
+      })
+      return { select, insert }
+    })
+    const filas = [
+      { fila: 2, concepto: 'basico', nombre: 'Operario', valor: 1284.5, modalidad: 'hora', vigenciaDesde: '2026-08-01' },
+    ]
+    const r = await useConveniosStore.getState().importarVigencias('c1', filas)
+    expect(r.ok).toBe(false)
+    expect(r.error).toBe('duplicado')
+  })
+})
