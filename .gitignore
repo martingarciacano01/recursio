@@ -49,3 +49,4 @@ recibo-muestra.pdf
 # Tooling local de agentes (skills/critiques locales, no parte del repo)
 .opencode/
 .impeccable/
+.vercel
