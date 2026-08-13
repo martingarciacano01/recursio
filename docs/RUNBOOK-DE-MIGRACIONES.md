@@ -22,13 +22,23 @@ Las env vars del proyecto Vercel `recursio` están separadas por entorno y ya co
 
 ## Estado de prod (Presencio)
 
-**Aún NO se aplicó ninguna migración de Recursio a Presencio prod** (`qsgzbfusjhgnyacdbbzg` ni backup). El lanzamiento a prod está documentado en `docs/superpowers/plans/2026-08-12-lanzamiento-recursio-prod.md` y sigue pendiente de ejecución manual:
+**Migraciones aplicadas el 2026-08-13** vía Management API (`/v1/projects/{ref}/database/query`, token del keychain `Supabase CLI`), sin tocar las tablas de Presencio. Antes de aplicar se hizo snapshot de las 18 tablas de Presencio a `/tmp/snp-presencio.tar.gz`.
 
-1. Backup de la base prod sin password (lo hace el usuario).
-2. Aplicar en el SQL Editor de Presencio prod, **una por una y en orden**, las migraciones `0001` → `0070` (incluye el consolidado `0066` y el fix `0070` de grants service_role para liquidar-periodo; **no** incluir la llamada `000_02_setup_demo_NO_EJECUTAR_EN_PROD.sql`, es destructiva).
-3. Deployar las Edge Functions `invitar-usuario` y `liquidar-periodo` contra `qsgzbfusjhgnyacdbbzg`.
-4. Crear el bucket público `nom-firmas` y la storage API (si no viene con 0069).
-5. Verificar RLS: Presencio y Recursio conviven en la misma base; el SQL schema de Recursio usa su propio namespace `nom_*`.
+| Versión | Estado en prod | Notas |
+|---|---|---|
+| 0001–00021, 0001b, 0002b, 0025–0065 | aplicadas 2026-08-13 | Orden numérico; OK todas. |
+| 0026 | aplicada con fix | El endpoint de Management API ejecutó la migración parcialmente y falló con `policy ... already exists` (el `database/query` no es transaccional statement-por-statement). 0045 (el fix del bypass de superadmin) sí corrió OK. Se reconcilió el estado con `/tmp/reconcile.sql`: se dropearon las 19 policies legacy (`*_all`/`*_rw`/`*_write` de 0008/0012/0014/0021/0025/0032/0034/0040) y se crearon las 4 de `nom_no_remunerativos` que habían quedado sin aplicar. Resultado: RLS por rol consistente = el estado de 0026+0045 limpias. |
+| 0066 | aplicada 2026-08-13 | Consolidado 0058–0065. |
+| 0067, 0068, 0069, 0070 | aplicadas 2026-08-13 | Fase 7 firma + grants service_role. |
+
+**Resultado en prod:** 35 tablas `nom_*`, 5 vistas de contrato (`nom_v_personal`, `nom_v_horas_dia`, `nom_v_ausencias`, `nom_v_obras`, `nom_v_empresa_feriados`), seeds (2 convenios, 38 conceptos, 8 categorías), `nom_usuarios_empresas` vacía (aún sin roles de Nómina asignados). Edge Functions **`invitar-usuario`** y **`liquidar-periodo`** deployadas el 2026-08-13 con `verify_jwt: True` (alineadas con dev). `invite-user` es la función de Presencio (no confundir).
+
+**Pendiente luego de este lanzamiento:**
+1. Asignar roles en `nom_usuarios_empresas` en prod (la RLS por rol cierra el acceso; sin filas, nadie con rol Nómina aunque sea autenticado — igual que en dev cuando se aplicó 0026).
+2. Smoke test de `liquidar-periodo` con un período real cargado.
+3. Confirmar que las anon keys/URLs de Vercel (Production) siguen las de `qsgzbfusjhgnyacdbbzg`.
+
+**Verificado ya en el lanzamiento:** bucket público `nom-firmas` creado (0069), RPC `emitir_recibo_variante`/`emitir_recibo`/`has_rol_nomina`/`whoami_nomina`/`listar_usuarios_empresa` presentes, funciones con `verify_jwt: True` respondiendo 401 sin token.
 
 ## Cómo aplicar una migración nueva
 
