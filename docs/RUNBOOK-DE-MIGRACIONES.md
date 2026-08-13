@@ -1,8 +1,34 @@
 # Runbook de migraciones — Recursio
 
-Registro manual de qué migraciones de `supabase/migrations/` están aplicadas en la base de Supabase compartida con Presencio (proyecto "Presencio-dev" en el dashboard).
+Registro manual de qué migraciones de `supabase/migrations/` están aplicadas en cada base de Supabase. Hay **dos entorno** de Recursio:
+
+| Entorno | Proyecto Supabase | Ref | Región | Rama Git | Deploy Vercel |
+|---|---|---|---|---|---|
+| **dev/staging** | Presencio-dev | `hlipootstxojwdxwkrwl` | us-east-2 | `dev` | preview |
+| **prod** | Presencio (compartida con la app real de Presencio) | `qsgzbfusjhgnyacdbbzg` | us-west-2 | `prod` | production |
 
 **Importante:** `supabase_migrations.schema_migrations` NO trackea las migraciones de Recursio (solo tiene filas genéricas de Presencio). Las migraciones de Recursio se aplican a mano, vía SQL Editor de Supabase, y quedan registradas acá.
+
+## Mapeo rama → proyecto → env vars (Vercel)
+
+Las env vars del proyecto Vercel `recursio` están separadas por entorno y ya configuradas:
+
+| Env var | Production (rama `prod`) → Presencio prod | Preview (rama `dev`) → Presencio-dev |
+|---|---|---|
+| `VITE_SUPABASE_URL` | `https://qsgzbfusjhgnyacdbbzg.supabase.co` | `https://hlipootstxojwdxwkrwl.supabase.co` |
+| `VITE_SUPABASE_ANON_KEY` | anon key de Presencio prod | anon key de Presencio-dev |
+
+`link.productionBranch` del proyecto Vercel = `prod`. En la práctica: un push a `prod` genera el deploy de producción contra la base real; un push a `dev` genera preview contra la base de staging. No hay que tocar envs Vercel al agregar migraciones — solo aplicar el SQL en la base indicada abajo.
+
+## Estado de prod (Presencio)
+
+**Aún NO se aplicó ninguna migración de Recursio a Presencio prod** (`qsgzbfusjhgnyacdbbzg` ni backup). El lanzamiento a prod está documentado en `docs/superpowers/plans/2026-08-12-lanzamiento-recursio-prod.md` y sigue pendiente de ejecución manual:
+
+1. Backup de la base prod sin password (lo hace el usuario).
+2. Aplicar en el SQL Editor de Presencio prod, **una por una y en orden**, las migraciones `0001` → `0070` (incluye el consolidado `0066` y el fix `0070` de grants service_role para liquidar-periodo; **no** incluir la llamada `000_02_setup_demo_NO_EJECUTAR_EN_PROD.sql`, es destructiva).
+3. Deployar las Edge Functions `invitar-usuario` y `liquidar-periodo` contra `qsgzbfusjhgnyacdbbzg`.
+4. Crear el bucket público `nom-firmas` y la storage API (si no viene con 0069).
+5. Verificar RLS: Presencio y Recursio conviven en la misma base; el SQL schema de Recursio usa su propio namespace `nom_*`.
 
 ## Cómo aplicar una migración nueva
 
