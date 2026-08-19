@@ -42,6 +42,23 @@ describe('mappers de legajo', () => {
     })
   })
 
+  it('legajoFromDB mapea telefono y email (migración 0071 / Presencio 043-044)', () => {
+    const row = {
+      id: 'l1', empresa_id: 'e1', personal_id: 'p1',
+      telefono: '+54 9 11 5555-5555', email: 'empleado@empresa.com',
+    }
+    const l = legajoFromDB(row)
+    expect(l.telefono).toBe('+54 9 11 5555-5555')
+    expect(l.email).toBe('empleado@empresa.com')
+  })
+
+  it('legajoToDB mapea telefono y email de vuelta a snake_case', () => {
+    const row = legajoToDB({ personalId: 'p1', telefono: '+54 9 11 5555-5555', email: 'empleado@empresa.com' }, 'e1')
+    expect(row.telefono).toBe('+54 9 11 5555-5555')
+    expect(row.email).toBe('empleado@empresa.com')
+    expect(legajoToDB({ personalId: 'p1' }, 'e1').email).toBeUndefined()
+  })
+
   it('familiarFromDB mapea snake_case a camelCase', () => {
     const row = { id: 'f1', empresa_id: 'e1', personal_id: 'p1', vinculo: 'hijo', nombre: 'Juan', cuil: null, fecha_nacimiento: '2015-01-01', doc_path: null }
     expect(familiarFromDB(row)).toEqual({

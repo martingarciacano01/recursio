@@ -56,6 +56,17 @@ export async function generarLegajoPdf({ empresa, persona, legajo, familiares = 
   ])
   L.y += 2
 
+  // ── 4. Datos de contacto ────────────────────────────────────────────────
+  L.banda('DATOS DE CONTACTO')
+  L.fila([
+    { texto: `Dirección: ${legajo?.domicilio || '—'}`, x: L.colIzq },
+    { texto: `Teléfono: ${legajo?.telefono || '—'}`, x: L.colIzq + 70 },
+  ])
+  L.fila([
+    { texto: `Correo: ${legajo?.email || '—'}`, x: L.colIzq },
+  ])
+  L.y += 2
+
   // ── 4. Documentación (vencidos en rojo) ───────────────────────────────
   L.banda('DOCUMENTACIÓN', documentos.length > 0 ? `${documentos.length} documento(s)` : null)
   if (documentos.length === 0) {

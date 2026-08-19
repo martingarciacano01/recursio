@@ -99,3 +99,11 @@ La migración `0070` es idempotente; aplicarla en cualquier entorno nuevo antes 
 | 0069 | firma_recibos | Tabla `nom_firma_empresa`, bucket público `nom-firmas`, columnas `hash_pdf_empleado`/`hash_pdf_empleador`/`emitido_empleado`/`emitido_empleador` en `nom_liquidaciones`, RPC `emitir_recibo_variante`. 100% idempotente. **Requiere 0054 aplicada** (`estado_revision` en `nom_liquidaciones`, plan de aprobaciones 2026-08-03) — el RPC rechaza liquidaciones con `estado_revision='rechazado'`. |
 
 Sin aplicar la 0069, los botones "para el Empleado" se ven (si hay período aprobado) pero `emitir_recibo_variante` falla con "function does not exist" — aplicar antes de probar la variante.
+
+## Pendiente de aplicar — 0071 contacto del legajo (nom_legajo)
+
+Replica las columnas de contacto que Presencio agrega al esquema compartido: `telefono` (Presencio 043) y `email` (Presencio 044). La dirección ya existe (`domicilio`, 0002). 100% idempotente (`ADD COLUMN IF NOT EXISTS`). Presencio es la fuente de verdad que las escribe; Recursio solo las lee en la ficha del legajo.
+
+| Versión | Nombre | Notas |
+|---|---|---|
+| 0071 | legajo_contacto | `ADD COLUMN IF NOT EXISTS telefono, email` en `nom_legajo`. Aplicar en Presencio-dev y en prod (mismo proyecto Presencio). No requiere redeploy de `liquidar-periodo`. |

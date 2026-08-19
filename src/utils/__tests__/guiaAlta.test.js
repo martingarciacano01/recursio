@@ -64,6 +64,14 @@ describe('pasosGuiaAlta', () => {
     expect(paso.completos).toBe(1)
     expect(paso.pendientesObligatorios).toBe(1) // falta el CBU
   })
+
+  it('el paso de domicilio incluye dirección, teléfono y correo como opcionales', () => {
+    const pasos = pasosGuiaAlta({ legajo: { domicilio: 'Calle 1', telefono: '+54 9 11', email: 'a@b.com' } })
+    const dom = buscar(pasos, 'domicilio')
+    expect(dom.items.find((i) => i.id === 'domicilio')).toMatchObject({ obligatorio: false, ok: true, label: 'Dirección' })
+    expect(dom.items.find((i) => i.id === 'telefono')).toMatchObject({ obligatorio: false, ok: true, label: 'Teléfono' })
+    expect(dom.items.find((i) => i.id === 'email')).toMatchObject({ obligatorio: false, ok: true, label: 'Correo electrónico' })
+  })
 })
 
 describe('resumenGuia', () => {

@@ -65,13 +65,16 @@ export function pasosGuiaAlta({ legajo, requeridos = [], documentos = [], famili
 
   const domicilio = {
     id: 'domicilio',
-    titulo: 'Domicilio',
+    titulo: 'Domicilio y contacto',
     descripcion: 'Se imprime en documentación laboral; ninguno frena la liquidación.',
     pestana: 'Datos',
     items: [
+      { id: 'domicilio', label: 'Dirección', obligatorio: false, ok: !vacio(legajo?.domicilio) },
       { id: 'localidad', label: 'Localidad', obligatorio: false, ok: !vacio(legajo?.localidad) },
       { id: 'provincia', label: 'Provincia', obligatorio: false, ok: !vacio(legajo?.provincia) },
       { id: 'codigoPostal', label: 'Código postal', obligatorio: false, ok: !vacio(legajo?.codigoPostal) },
+      { id: 'telefono', label: 'Teléfono', obligatorio: false, ok: !vacio(legajo?.telefono) },
+      { id: 'email', label: 'Correo electrónico', obligatorio: false, ok: !vacio(legajo?.email) },
     ],
   }
 

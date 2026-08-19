@@ -40,6 +40,9 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId, inici
     localidad: legajo?.localidad || '',
     provincia: legajo?.provincia || '',
     codigoPostal: legajo?.codigoPostal || '',
+    domicilio: legajo?.domicilio || '',
+    telefono: legajo?.telefono || '',
+    email: legajo?.email || '',
   })
 
   // `form` se inicializa en el primer render, cuando `legajo` todavía es
@@ -66,6 +69,9 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId, inici
       localidad: legajo.localidad || '',
       provincia: legajo.provincia || '',
       codigoPostal: legajo.codigoPostal || '',
+      domicilio: legajo.domicilio || '',
+      telefono: legajo.telefono || '',
+      email: legajo.email || '',
     })
   }, [legajo?.id, legajo?.convenioId, legajo?.categoriaId, legajo?.fueraConvenio, legajo?.sueldoConvenido, editando])
 
@@ -153,6 +159,9 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId, inici
         <p>Localidad: {legajo?.localidad || '—'}</p>
         <p>Provincia: {legajo?.provincia || '—'}</p>
         <p>Código postal: {legajo?.codigoPostal || '—'}</p>
+        <p>Dirección: {legajo?.domicilio || '—'}</p>
+        <p>Teléfono: {legajo?.telefono || '—'}</p>
+        <p>Correo electrónico: {legajo?.email || '—'}</p>
         {legajo?.fechaBaja && <p>Baja: {legajo.fechaBaja} ({legajo.motivoBaja})</p>}
         <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => setEditando(true)}>Editar</button>
       </div>
@@ -265,6 +274,18 @@ export default function EditorDatosLegajo({ legajo, personalId, empresaId, inici
       <div>
         <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Código postal</label>
         <input className="input" value={form.codigoPostal} onChange={(e) => setForm((f) => ({ ...f, codigoPostal: e.target.value }))} />
+      </div>
+      <div>
+        <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Dirección</label>
+        <input className="input" value={form.domicilio} onChange={(e) => setForm((f) => ({ ...f, domicilio: e.target.value }))} placeholder="Calle y número, piso, departamento" />
+      </div>
+      <div>
+        <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Teléfono</label>
+        <input className="input" value={form.telefono} onChange={(e) => setForm((f) => ({ ...f, telefono: e.target.value }))} placeholder="Ej: +54 9 11 5555-5555" />
+      </div>
+      <div>
+        <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: 4 }}>Correo electrónico</label>
+        <input className="input" type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} placeholder="empleado@empresa.com" />
       </div>
 
       {error && <div style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{error}</div>}
